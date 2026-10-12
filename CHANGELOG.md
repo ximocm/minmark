@@ -65,6 +65,9 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 
 ### Corregido
 
+- Referencia al botón de exportación PDF corregida a `gtk4::Button`, que
+  impedía compilar la aplicación de escritorio desde un checkout limpio.
+
 - Comandos con diálogos que no respondían por una referencia débil inválida.
 - Fallo de arranque de WebKit en sistemas donde no funciona `bwrap`: se detecta
   la situación y se desactiva su sandbox. La limitación de aislamiento se

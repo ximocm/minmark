@@ -1512,7 +1512,7 @@ fn build_window(app: &Application, scope: WindowScope, open_paths: &[PathBuf]) {
     // para no crear una toolbar debajo del menú.
     let menubar = PopoverMenuBar::from_model(Some(&menus::build_menubar()));
     menubar.set_hexpand(true);
-    let export_button = gtk::Button::with_label("Export PDF");
+    let export_button = gtk4::Button::with_label("Export PDF");
     export_button.set_tooltip_text(Some("Exportar el documento activo a PDF (Ctrl+E)"));
     export_button.set_action_name(Some("win.export-pdf"));
     let topbar = GtkBox::new(Orientation::Horizontal, 0);
