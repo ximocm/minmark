@@ -20,3 +20,6 @@ target/
 
 # Corpus de benchmarks locales (no necesarios para compilar ni ejecutar tests)
 /docs/benchmarks/corpus-*.md
+
+# Python release tooling
+__pycache__/

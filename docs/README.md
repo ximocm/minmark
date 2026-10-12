@@ -6,6 +6,7 @@
 - [BUILDING](../BUILDING.md): requisitos, compilación, tests e instalación local.
 - [CONTRIBUTING](../CONTRIBUTING.md): errores, propuestas y flujo de contribución.
 - [CHANGELOG](../CHANGELOG.md): cambios pendientes de publicación.
+- [CI y releases](CI.md): matriz de plataformas, paquetes y publicación por tags.
 - [Publicación en GitHub](PUBLISHING.md): comprobaciones y archivos grandes.
 - [Licencia](../LICENSE): Apache License 2.0.
 

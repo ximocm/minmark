@@ -13,6 +13,10 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 
 ### Añadido
 
+- CI del core en Linux, Windows y macOS; pruebas y compilación de la UI en
+  Linux. Paquetes Linux x86_64 con licencias y checksums; los tags de versión
+  generan borradores de release tras superar la matriz de pruebas.
+
 - `CODEOWNERS` con `@ximocm` como revisor de todos los archivos y flujo de
   contribución por pull request para el repositorio público.
 
