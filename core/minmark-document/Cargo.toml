@@ -1,0 +1,8 @@
+[package]
+name = "minmark-document"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Modelo documental de minmark: buffer Markdown único y AST compartida"
+
+[dependencies]

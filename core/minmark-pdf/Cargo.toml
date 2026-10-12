@@ -1,0 +1,18 @@
+[package]
+name = "minmark-pdf"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Exportación PDF de minmark sobre Typst (§5.3, §32; ADR-002/ADR-003)"
+
+[dependencies]
+minmark-document = { workspace = true }
+minmark-config = { workspace = true }
+minmark-math = { workspace = true }
+minmark-renderer = { path = "../minmark-renderer" }
+typst = { workspace = true }
+typst-pdf = { workspace = true }
+typst-assets = { workspace = true }
+
+[dev-dependencies]
+minmark-parser = { path = "../minmark-parser" }

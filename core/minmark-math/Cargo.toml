@@ -1,0 +1,8 @@
+[package]
+name = "minmark-math"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Traductor LaTeX → Typst para matemáticas (ADR-002, subconjunto estándar)"
+
+[dependencies]

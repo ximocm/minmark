@@ -1,0 +1,10 @@
+[package]
+name = "minmark-parser"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Parser Markdown de minmark: pulldown-cmark + extensiones del dialecto §7"
+
+[dependencies]
+minmark-document = { workspace = true }
+pulldown-cmark = { workspace = true }

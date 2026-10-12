@@ -1,0 +1,14 @@
+[package]
+name = "minmark-fs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Filesystem de minmark: file I/O, guardado atómico y snapshots (ISSUE-013/ISSUE-019)"
+
+[dependencies]
+minmark-document = { workspace = true }
+
+[dev-dependencies]
+minmark-config = { path = "../minmark-config" }
+minmark-parser = { path = "../minmark-parser" }
+minmark-renderer = { path = "../minmark-renderer" }

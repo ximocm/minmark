@@ -1,0 +1,8 @@
+[package]
+name = "minmark-config"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Configuración de minmark: modelo único de ajustes y cadena de precedencia de 5 niveles (§58)"
+
+[dependencies]

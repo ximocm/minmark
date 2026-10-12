@@ -1,0 +1,32 @@
+[workspace]
+resolver = "2"
+members = [
+    "minmark-document",
+    "minmark-config",
+    "minmark-math",
+    "minmark-parser",
+    "minmark-renderer",
+    "minmark-pdf",
+    "minmark-fs",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[workspace.dependencies]
+minmark-document = { path = "minmark-document", version = "0.1.0" }
+minmark-config = { path = "minmark-config", version = "0.1.0" }
+minmark-math = { path = "minmark-math", version = "0.1.0" }
+
+# Parser Markdown único (§4.2), versión benchmarkada en ISSUE-010.
+# `default-features = false` (§4.5): sin renderer HTML propio ni SIMD; el
+# rendering es responsabilidad de minmark-renderer.
+pulldown-cmark = { version = "0.12", default-features = false }
+
+# Motor PDF único (§4.3, ADR-003): dependencia estratégica. `typst-assets`
+# aporta las fuentes embebidas (§33: sin dependencia de fuentes del sistema).
+typst = "0.13"
+typst-pdf = "0.13"
+typst-assets = { version = "0.13", features = ["fonts"] }
