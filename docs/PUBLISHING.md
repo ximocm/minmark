@@ -7,23 +7,11 @@ El seguimiento se realiza en [GitHub Issues](https://github.com/ximocm/minmark/i
 ## Historial inicial limpio
 
 El 2026-10-13 se reinició el historial con un único commit inicial que contiene
-el estado actual del proyecto. El historial anterior se conserva en una copia
-local fuera del repositorio.
+el estado actual del proyecto.
 
-Los corpus históricos permanecen en disco, excluidos de Git mediante
-`.gitignore`. No son necesarios para compilar ni ejecutar los tests:
-
-| Archivo local | Bytes | Tamaño aproximado |
-| --- | ---: | ---: |
-| `docs/benchmarks/corpus-20MB.md` | 54 083 489 | 51,6 MiB |
-| `docs/benchmarks/corpus-100MB.md` | 270 417 445 | 257,9 MiB |
-
-GitHub advierte al subir archivos de más de 50 MiB y bloquea los de más de
-100 MiB en Git normal. Véase la [documentación oficial sobre archivos grandes](https://docs.github.com/en/repositories/working-with-files/managing-large-files/about-large-files-on-github).
-
-Para compartir estos corpus, distribúyelos aparte o configura Git LFS antes de
-incorporarlos. No los añadas con `git add -f`. Sus nombres no reflejan el tamaño
-real. Las notas de desarrollo y resultados históricos siguen versionados.
+Los prototipos y benchmarks históricos, incluidos sus corpus, se retiraron del
+disco y del árbol de trabajo. Las decisiones de arquitectura y el historial
+técnico se conservan. `target/` y `dist/` siguen excluidos de Git.
 
 Para revisar los blobs grandes alcanzables por las referencias locales:
 
@@ -35,8 +23,8 @@ git rev-list --objects --all |
 
 ## Antes del primer push
 
-- Comprobar que los corpus siguen excluidos y que el historial que se publicará
-  no contiene blobs grandes.
+- Comprobar que los archivos de compilación no se versionan y que el historial
+  que se publicará no contiene blobs grandes.
 - Revisar `git status` y el diff: incorporar conscientemente los cambios locales
   en curso. La integración PDF debe conservar su estado real.
 - Ejecutar los comandos de [BUILDING.md](../BUILDING.md), incluyendo build

@@ -17,6 +17,3 @@ target/
 
 # Datos locales de la aplicación (índices, cachés, snapshots)
 .minmark/
-
-# Corpus de benchmarks locales (no necesarios para compilar ni ejecutar tests)
-/docs/benchmarks/corpus-*.md

@@ -1507,17 +1507,9 @@ fn build_window(app: &Application, scope: WindowScope, open_paths: &[PathBuf]) {
         WindowScope::Standalone => None,
     };
 
-    // Layout §36: barra de menús superior sin toolbar permanente; el botón
-    // «Export PDF» (ISSUE-035) vive en esa misma fila, alineado a la derecha,
-    // para no crear una toolbar debajo del menú.
+    // Layout §36: barra de menús superior sin toolbar permanente.
     let menubar = PopoverMenuBar::from_model(Some(&menus::build_menubar()));
     menubar.set_hexpand(true);
-    let export_button = gtk::Button::with_label("Export PDF");
-    export_button.set_tooltip_text(Some("Exportar el documento activo a PDF (Ctrl+E)"));
-    export_button.set_action_name(Some("win.export-pdf"));
-    let topbar = GtkBox::new(Orientation::Horizontal, 0);
-    topbar.append(&menubar);
-    topbar.append(&export_button);
     let paned = Paned::new(Orientation::Horizontal);
     // §9.1: separador editor|preview como barra vertical visible (`mm-split`;
     // el `Paned` del explorador no lleva la clase y queda como estaba).
@@ -1560,7 +1552,7 @@ fn build_window(app: &Application, scope: WindowScope, open_paths: &[PathBuf]) {
     };
 
     let vbox = GtkBox::new(Orientation::Vertical, 0);
-    vbox.append(&topbar);
+    vbox.append(&menubar);
     vbox.append(&tab_bar.widget());
     vbox.append(&find_bar.widget());
     vbox.append(&content);

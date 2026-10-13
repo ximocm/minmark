@@ -59,7 +59,10 @@ Para completar benchmark completo (decidido: 6 métricas):
 
 Estas métricas no cambian la decisión (webview ya gana en 3/4 métricas medidas).
 
-## Referencias
+## Referencias históricas
+
+Los siguientes prototipos y archivos de benchmarks se retiraron el 2026-10-13.
+Las métricas de esta decisión se conservan en la tabla anterior.
 
 - ISSUE-008: prototypes/ui-webview/
 - ISSUE-009: prototypes/ui-rust-native/

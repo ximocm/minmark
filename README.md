@@ -8,8 +8,8 @@ cloud. Su objetivo es mantener Markdown como fuente de verdad, con edición
 visual y vista previa en la misma ventana.
 
 **En desarrollo:** las fases de core Linux, proyectos y edición visual están
-completadas. La versión de los manifiestos es `0.1.0`; el historial de trabajo
-sigue en [Unreleased](CHANGELOG.md), sin una release etiquetada en este repositorio.
+completadas. La versión actual es `0.1.1`; consulta las novedades y el trabajo
+pendiente en el [changelog](CHANGELOG.md).
 Windows está planificado; macOS no es una plataforma soportada actualmente.
 
 ## Qué puedes hacer
@@ -44,7 +44,7 @@ En Ubuntu 24.04:
 sudo apt update
 sudo apt install build-essential pkg-config libgtk-4-dev libwebkitgtk-6.0-dev
 cargo build --locked --manifest-path ui/Cargo.toml --release
-./ui/target/release/minmark
+./target/release/minmark
 ```
 
 La compilación de la UI incluye los siete crates del core. La primera vez
@@ -53,9 +53,9 @@ El binario requiere las bibliotecas compartidas del sistema; no es un ejecutable
 estático portable.
 
 ```sh
-./ui/target/release/minmark notas.md
-./ui/target/release/minmark mi-proyecto/
-./ui/target/release/minmark notas.md otra-nota.md
+./target/release/minmark notas.md
+./target/release/minmark mi-proyecto/
+./target/release/minmark notas.md otra-nota.md
 ```
 
 Cada carpeta abre una ventana de proyecto; los archivos se abren en pestañas de
@@ -87,7 +87,7 @@ atajos disponibles en la aplicación.
 - [Compilación, tests e instalación local](BUILDING.md).
 - [Cómo contribuir y comunicar errores](CONTRIBUTING.md).
 - [Changelog](CHANGELOG.md).
-- [Índice de documentación](docs/README.md): especificación, decisiones y benchmarks.
+- [Índice de documentación](docs/README.md): especificación y decisiones.
 - [Arquitectura del core](core/README.md).
 - [Preparación para publicar en GitHub](docs/PUBLISHING.md).
 
@@ -95,12 +95,12 @@ atajos disponibles en la aplicación.
 core/         Siete crates Rust: documento, configuración, parser,
               renderer, matemáticas, PDF y sistema de archivos
 ui/           Aplicación GTK4 + WebKitGTK; binario minmark
-prototypes/   Experimentos históricos de selección tecnológica
-docs/        Especificación, decisiones de arquitectura y benchmarks
+docs/         Especificación y decisiones de arquitectura
 ```
 
 `core/` y `ui/` tienen manifiestos y lockfiles separados. No hay un
-`Cargo.toml` en la raíz. Los prototipos no forman parte de la aplicación.
+`Cargo.toml` en la raíz. Ambos comparten `target/` para reutilizar dependencias
+compiladas; consulta [BUILDING.md](BUILDING.md) para liberar ese espacio.
 
 ## Archivos y datos locales
 
