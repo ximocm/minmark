@@ -28,6 +28,7 @@ mod explorer;
 mod export;
 mod find;
 mod intelligence;
+mod list_scroll;
 mod menus;
 mod preview;
 mod quickopen;
@@ -2493,6 +2494,90 @@ mod gtk_integration_tests {
             .test_eval_number("window.scrollY", scroll.clone());
         pump_until(|| scroll.get().is_some());
         assert!(scroll.get().unwrap() < 50.0);
+        // Flechas más allá de las filas visibles: Quick Open y las listas
+        // de documento deben desplazar la selección en ambos sentidos.
+        for document_list in [false, true] {
+            let palette = QuickOpen::new();
+            palette.set_transient_for(&cmds.window.clone().upcast());
+            if document_list {
+                palette.set_title("Backlinks");
+            }
+            palette.set_entries(
+                (0..1000)
+                    .map(|n| minmark_fs::fuzzy::Entry {
+                        label: format!("Nota {n:04}"),
+                        rel_path: format!("nota-{n:04}.md"),
+                        line: None,
+                        heading: None,
+                        score: 0,
+                    })
+                    .collect(),
+            );
+            palette.present();
+            pump_until(|| palette.test_selected_visible(0));
+            for _ in 0..30 {
+                palette.test_key(gtk4::gdk::Key::Down);
+            }
+            pump_until(|| palette.test_selected_visible(30));
+            for _ in 0..30 {
+                palette.test_key(gtk4::gdk::Key::Up);
+            }
+            pump_until(|| palette.test_selected_visible(0));
+            palette.hide();
+        }
+        // El popup de autocompletado también conserva visible su selección
+        // mientras el teclado permanece en el editor.
+        cmds.editor_pane.show_completions(
+            (0..50)
+                .map(|n| intelligence::Completion {
+                    span: minmark_document::Span { start: 0, end: 0 },
+                    text: format!("nota-{n:04}.md"),
+                    label: format!("Nota {n:04}"),
+                })
+                .collect(),
+        );
+        pump_until(|| cmds.editor_pane.test_completion_selected_visible(0));
+        for _ in 0..30 {
+            assert!(cmds
+                .editor_pane
+                .emit_test_key(gtk4::gdk::Key::Down, gtk4::gdk::ModifierType::empty()));
+        }
+        pump_until(|| cmds.editor_pane.test_completion_selected_visible(30));
+        for _ in 0..30 {
+            assert!(cmds
+                .editor_pane
+                .emit_test_key(gtk4::gdk::Key::Up, gtk4::gdk::ModifierType::empty()));
+        }
+        pump_until(|| cmds.editor_pane.test_completion_selected_visible(0));
+        cmds.editor_pane
+            .emit_test_key(gtk4::gdk::Key::Escape, gtk4::gdk::ModifierType::empty());
+        // Backlinks reales de 1000 documentos: ni la consulta ni la lista
+        // deben heredar el límite de 50 sugerencias del autocompletado.
+        for n in 0..1000 {
+            std::fs::write(root.join(format!("nota-{n:04}.md")), "[Destino](b.md)\n").unwrap();
+        }
+        spawn_index_refresh(root.clone(), cmds.slot.clone());
+        pump_until(|| {
+            cmds.index
+                .borrow()
+                .as_ref()
+                .is_some_and(|index| index.len() >= 1002)
+        });
+        cmds.show_navigation(true);
+        pump_until(|| cmds.navigation_positions.borrow().len() == 1000);
+        assert_eq!(cmds.navigation_list.test_result_count(), 1000);
+        pump_until(|| cmds.navigation_list.test_selected_visible(0));
+        for _ in 0..75 {
+            cmds.navigation_list.test_key(gtk4::gdk::Key::Down);
+        }
+        pump_until(|| cmds.navigation_list.test_selected_visible(75));
+        cmds.navigation_list.test_filter("nota-0999");
+        assert_eq!(cmds.navigation_list.test_result_count(), 1);
+        cmds.navigation_list.test_activate();
+        assert_eq!(
+            cmds.tabs.borrow().active().path.as_ref(),
+            Some(&root.join("nota-0999.md"))
+        );
         cmds.window.destroy();
         let _ = std::fs::remove_dir_all(root);
     }

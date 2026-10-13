@@ -190,6 +190,7 @@ impl QuickOpen {
         list.set_selection_mode(gtk::SelectionMode::Single);
         let scroll = gtk::ScrolledWindow::new();
         scroll.set_child(Some(&list));
+        crate::list_scroll::follow_selection(&list);
         scroll.set_vexpand(true);
         scroll.set_min_content_height(320);
         root.append(&scroll);
@@ -319,6 +320,41 @@ impl QuickOpen {
     #[cfg(test)]
     pub fn hide(&self) {
         self.window.set_visible(false);
+    }
+
+    #[cfg(test)]
+    pub fn test_key(&self, key: gtk::gdk::Key) {
+        let controllers = self.window.observe_controllers();
+        for i in 0..controllers.n_items() {
+            if let Some(controller) = controllers
+                .item(i)
+                .and_then(|c| c.downcast::<gtk::EventControllerKey>().ok())
+            {
+                if controller.emit_by_name::<bool>(
+                    "key-pressed",
+                    &[&key, &0u32, &gtk::gdk::ModifierType::empty()],
+                ) {
+                    break;
+                }
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub fn test_selected_visible(&self, index: i32) -> bool {
+        crate::list_scroll::selected_visible(&self.list, index)
+    }
+    #[cfg(test)]
+    pub fn test_result_count(&self) -> usize {
+        self.state.borrow().results.len()
+    }
+    #[cfg(test)]
+    pub fn test_filter(&self, query: &str) {
+        self.input.set_text(query);
+    }
+    #[cfg(test)]
+    pub fn test_activate(&self) {
+        self.input.emit_activate();
     }
 
     pub fn set_title(&self, title: &str) {

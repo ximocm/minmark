@@ -27,6 +27,7 @@ impl CompletionPopup {
         scroll.set_max_content_height(240);
         scroll.set_propagate_natural_height(true);
         scroll.set_child(Some(&list));
+        crate::list_scroll::follow_selection(&list);
         popover.set_child(Some(&scroll));
         let items: Rc<RefCell<Vec<Completion>>> = Rc::new(RefCell::new(Vec::new()));
         let dismissed = Rc::new(Cell::new(false));
@@ -133,6 +134,10 @@ impl CompletionPopup {
     }
     pub fn hide(&self) {
         self.popover.popdown();
+    }
+    #[cfg(test)]
+    pub fn test_selected_visible(&self, index: i32) -> bool {
+        crate::list_scroll::selected_visible(&self.list, index)
     }
 }
 impl Drop for CompletionPopup {

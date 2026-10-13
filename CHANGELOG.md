@@ -22,6 +22,8 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 - Preview actualiza su contenido sin recargar la página y sigue el bloque
   donde se escribe, sin desplazarlo si ya está visible; los refrescos generales
   conservan el scroll y los saltos explícitos a destinos siguen funcionando.
+- Las flechas desplazan la lista para mantener visible la selección en Quick
+  Open, outline, backlinks y autocompletado, conservando el foco de escritura.
 - Prueba de integración GTK/WebKit y regresiones de Markdown Intelligence;
   comportamiento y comprobaciones pendientes en
   [la guía de fase 4](docs/MARKDOWN_INTELLIGENCE.md).

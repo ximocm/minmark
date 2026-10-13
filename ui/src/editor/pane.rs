@@ -195,6 +195,13 @@ impl EditorPane {
             popup.show(items, &self.text_view);
         }
     }
+    #[cfg(test)]
+    pub fn test_completion_selected_visible(&self, index: i32) -> bool {
+        self.completion
+            .borrow()
+            .as_ref()
+            .is_some_and(|p| p.test_selected_visible(index))
+    }
     pub fn set_wiki_links(&self, enabled: bool) {
         self.wiki_links.set(enabled);
     }

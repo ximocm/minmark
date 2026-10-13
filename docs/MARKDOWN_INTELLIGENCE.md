@@ -112,7 +112,7 @@ cargo test --locked --manifest-path ui/Cargo.toml \
   -- --ignored --test-threads=1 --nocapture
 ```
 
-Resultado: 333 pruebas del core y 89 de la UI pasan; la prueba gráfica
+Resultado: 335 pruebas del core y 89 de la UI pasan; la prueba gráfica
 también pasa (1 prueba adicional). Los archivos Rust modificados pasan
 `rustfmt --check` y el diff pasa `git diff --check`.
 
@@ -174,6 +174,19 @@ válida, exportar correctamente. Estos escenarios del diálogo están validados
 en la versión de desarrollo indicada; no constituyen una prueba de v0.1.1.
 
 Para el cierre definitivo del milestone queda la revisión con
-lector de pantalla, una sesión Wayland y la respuesta percibida en un proyecto
-grande. La prueba gráfica automatizada no sustituye esas comprobaciones. No se
+lector de pantalla y una sesión Wayland. La prueba gráfica automatizada no
+sustituye esas comprobaciones. No se
 ha cerrado ninguna issue automáticamente ni se ha publicado una release.
+
+La prueba manual con 1000 notas y 20 secciones por nota detectó que las flechas
+seleccionaban resultados fuera de vista sin desplazar la lista. Se corrigió
+el seguimiento de la selección en Quick Open, outline/backlinks y completado,
+sin mover el foco desde el campo de entrada/editor. Pasan las 89 pruebas de UI
+y la integración GTK ampliada, que baja 30 filas y vuelve al inicio en listas
+de resultados y sugerencias. El usuario ha confirmado la comprobación manual
+del proyecto grande tras la corrección.
+Ante el informe de solo 50 backlinks, la integración gráfica comprueba además
+la consulta real de 1000 documentos: la lista contiene 1000 resultados, permite
+navegar hasta la fila 76 y filtrar/abrir la nota 0999. La prueba pasa y el usuario
+ha confirmado después que la lista funciona correctamente; el límite de 50
+sigue correspondiendo únicamente a las sugerencias de autocompletado.
