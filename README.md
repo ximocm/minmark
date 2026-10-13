@@ -8,7 +8,7 @@ cloud. Su objetivo es mantener Markdown como fuente de verdad, con edición
 visual y vista previa en la misma ventana.
 
 **En desarrollo:** las fases de core Linux, proyectos y edición visual están
-completadas. La versión actual es `0.1.1`; consulta las novedades y el trabajo
+completadas. La versión actual es `0.2.0`; consulta las novedades y el trabajo
 pendiente en el [changelog](CHANGELOG.md).
 Windows está planificado; macOS no es una plataforma soportada actualmente.
 
