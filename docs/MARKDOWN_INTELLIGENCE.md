@@ -127,7 +127,10 @@ de enlaces a archivos y headings inexistentes, explicación en Preview y
 actualización al corregir el fragmento o crear el archivo de destino.
 El usuario ha confirmado el paso 4 (wiki links) tras revisar el documento de
 prueba y alternar `wiki_links` en la configuración del proyecto.
-Los pasos 5–7 siguen pendientes de su revisión manual.
+El usuario ha confirmado el paso 5 (backlinks), siguiendo la revisión de
+ocurrencias, navegación al origen, actualización con cambios sin guardar,
+cierre con Escape y estado vacío.
+Los pasos 6–7 siguen pendientes de su revisión manual.
 
 Para el cierre definitivo del milestone queda la revisión con
 lector de pantalla, una sesión Wayland y la respuesta percibida en un proyecto
