@@ -159,7 +159,10 @@ La comprobación del diálogo PDF (#2) se realiza sobre el desarrollo de la PR
 #36 (`6abe9ee`), no sobre el binario publicado v0.1.1. El usuario ha confirmado
 el menú File, nombre/filtro, cancelación conservando cambios del documento,
 cancelación de sobrescritura conservando el PDF anterior y sobrescritura
-aceptada con contenido actualizado. Quedan pendientes los escenarios de error.
+aceptada con contenido actualizado. También ha confirmado que exportar a un
+destino sin permiso de escritura muestra el error esperado. La carpeta local
+de prueba `sin-permiso-pdf` tiene permisos 0555 y se comprobó previamente que
+rechaza la escritura. Queda pendiente el error del motor y su recuperación.
 
 Para el cierre definitivo del milestone queda la revisión con
 lector de pantalla, una sesión Wayland y la respuesta percibida en un proyecto
