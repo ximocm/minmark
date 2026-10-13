@@ -28,10 +28,7 @@
 use crate::ignore::IgnorePatterns;
 use crate::index::{IndexHeading, ProjectIndex};
 use crate::paths::resolve_in_project;
-use minmark_document::{
-    document_anchors, find_anchor, find_heading_nodes, find_link_definitions, normalize_label,
-    Anchor,
-};
+use minmark_document::{find_anchor, find_link_definitions, normalize_label, Anchor};
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -119,7 +116,11 @@ impl<'a> Resolver<'a> {
     /// Resolutor sin buffers abiertos: solo el índice y el disco.
     pub fn new(index: &'a ProjectIndex, open: &'a OpenBuffers<'a>) -> Self {
         let ignore = IgnorePatterns::from_root(index.root());
-        Self { index, open, ignore }
+        Self {
+            index,
+            open,
+            ignore,
+        }
     }
 
     /// Resuelve el destino `dest` de una referencia contenida en `from_rel`
@@ -184,9 +185,16 @@ impl<'a> Resolver<'a> {
             .index
             .entries()
             .map(|entry| entry.rel_path.clone())
+            .chain(self.open.sources.keys().cloned())
             .filter(|rel_path| wiki_name_matches(Path::new(rel_path), name))
+            .filter(|rel_path| {
+                !self.ignore.is_ignored(Path::new(rel_path), false)
+                    && resolve_in_project(self.index.root(), &self.index.root().join(rel_path))
+                        .is_ok()
+            })
             .collect();
         candidates.sort();
+        candidates.dedup();
         match candidates.len() {
             0 => LinkTarget::missing(fragment_owned),
             1 => {
@@ -231,9 +239,19 @@ impl<'a> Resolver<'a> {
                 let Some(anchors) = self.doc_anchors(rel_path) else {
                     return LinkTarget::missing(fragment_owned);
                 };
-                match find_anchor(&anchors, fragment)
-                    .or_else(|| percent_decode(fragment).and_then(|decoded| find_anchor(&anchors, &decoded)))
-                {
+                let decoded = percent_decode(fragment).unwrap_or_else(|| fragment.to_owned());
+                if anchors.iter().filter(|a| a.id == decoded).count() > 1 {
+                    return LinkTarget {
+                        kind: TargetKind::Ambiguous,
+                        rel_path: Some(rel_path.to_owned()),
+                        fragment: fragment_owned,
+                        anchor: None,
+                        candidates: vec![format!("{rel_path}#{decoded} (ID duplicado)")],
+                    };
+                }
+                match find_anchor(&anchors, fragment).or_else(|| {
+                    percent_decode(fragment).and_then(|decoded| find_anchor(&anchors, &decoded))
+                }) {
                     Some(anchor) => LinkTarget {
                         kind: TargetKind::Local,
                         rel_path: Some(rel_path.to_owned()),
@@ -273,13 +291,13 @@ impl<'a> Resolver<'a> {
     /// el índice (§45) y, si el archivo cambió sin reindexar, el disco.
     fn doc_anchors(&self, rel_path: &str) -> Option<Vec<Anchor>> {
         if let Some(source) = self.open.get(rel_path) {
-            return Some(document_anchors(&find_heading_nodes(source)));
+            return Some(minmark_parser::destination_anchors(source));
         }
         if let Some(entry) = self.index.get(rel_path) {
             return Some(entry.headings.iter().map(anchor_of_heading).collect());
         }
         let source = std::fs::read_to_string(self.index.root().join(rel_path)).ok()?;
-        Some(document_anchors(&find_heading_nodes(&source)))
+        Some(minmark_parser::destination_anchors(&source))
     }
 
     /// Fuente del documento de origen (para definiciones §16): buffer abierto
@@ -299,7 +317,7 @@ impl<'a> Resolver<'a> {
     /// (§14.6)?
     fn on_disk(&self, rel_path: &str) -> bool {
         match resolve_in_project(self.index.root(), &self.index.root().join(rel_path)) {
-            Ok(path) => path.exists(),
+            Ok(path) => path.is_file(),
             Err(_) => false,
         }
     }
@@ -329,8 +347,13 @@ pub fn has_scheme(dest: &str) -> bool {
         return false;
     };
     !prefix.is_empty()
-        && prefix.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
-        && prefix.chars().all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '-' || c == '.')
+        && prefix
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic())
+        && prefix
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '-' || c == '.')
 }
 
 /// ¿El wiki dest `name` resuelve a `path` (por tallo o por ruta sin `.md`)?
@@ -400,7 +423,9 @@ fn normalize_rel(base: &str, components: &[String]) -> Option<String> {
     let mut parts: Vec<&str> = if base.is_empty() {
         Vec::new()
     } else {
-        base.split('/').filter(|part| !part.is_empty() && *part != ".").collect()
+        base.split('/')
+            .filter(|part| !part.is_empty() && *part != ".")
+            .collect()
     };
     for component in components {
         match component.as_str() {
@@ -450,7 +475,10 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let dir = std::env::temp_dir().join(format!("minmark-resolve-{tag}-{}-{nanos}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "minmark-resolve-{tag}-{}-{nanos}",
+            std::process::id()
+        ));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
@@ -482,15 +510,30 @@ mod tests {
         let r = resolver(&index, &open);
 
         // Desde cap/a.md: el mismo directorio y la raíz.
-        assert_eq!(r.resolve("mi archivo.md", "cap/a.md").rel_path.as_deref(), Some("cap/mi archivo.md"));
-        assert_eq!(r.resolve("../index.md", "cap/a.md").rel_path.as_deref(), Some("index.md"));
+        assert_eq!(
+            r.resolve("mi archivo.md", "cap/a.md").rel_path.as_deref(),
+            Some("cap/mi archivo.md")
+        );
+        assert_eq!(
+            r.resolve("../index.md", "cap/a.md").rel_path.as_deref(),
+            Some("index.md")
+        );
         // Desde la raíz: el subdirectorio.
-        assert_eq!(r.resolve("cap/a.md", "index.md").rel_path.as_deref(), Some("cap/a.md"));
+        assert_eq!(
+            r.resolve("cap/a.md", "index.md").rel_path.as_deref(),
+            Some("cap/a.md")
+        );
         // Percent-encoded (§19.1) resuelve al mismo destino que la forma con
         // espacio; la forma original del Markdown nunca se reescribe aquí.
-        assert_eq!(r.resolve("mi%20archivo.md", "cap/a.md").kind, TargetKind::Local);
+        assert_eq!(
+            r.resolve("mi%20archivo.md", "cap/a.md").kind,
+            TargetKind::Local
+        );
         // Path absoluto del proyecto: desde la raíz.
-        assert_eq!(r.resolve("/cap/a.md", "index.md").rel_path.as_deref(), Some("cap/a.md"));
+        assert_eq!(
+            r.resolve("/cap/a.md", "index.md").rel_path.as_deref(),
+            Some("cap/a.md")
+        );
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -533,26 +576,55 @@ mod tests {
         let open = OpenBuffers::new();
         let r = resolver(&index, &open);
 
-        assert_eq!(r.resolve("#introducción", "d.md").anchor.as_ref().map(|a| a.line), Some(1));
-        assert_eq!(r.resolve("#introducción-1", "d.md").anchor.as_ref().map(|a| a.line), Some(3));
+        assert_eq!(
+            r.resolve("#introducción", "d.md")
+                .anchor
+                .as_ref()
+                .map(|a| a.line),
+            Some(1)
+        );
+        assert_eq!(
+            r.resolve("#introducción-1", "d.md")
+                .anchor
+                .as_ref()
+                .map(|a| a.line),
+            Some(3)
+        );
         // Setext: ATX y setext producen ancla igual que la Preview.
         assert_eq!(r.resolve("#título", "d.md").kind, TargetKind::Local);
-        assert_eq!(r.resolve("#párrafo-continuación", "d.md").anchor.as_ref().map(|a| a.line), Some(8));
+        assert_eq!(
+            r.resolve("#párrafo-continuación", "d.md")
+                .anchor
+                .as_ref()
+                .map(|a| a.line),
+            Some(8)
+        );
         let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
     fn unicode_espacios_y_crlf() {
         let root = temp_tree("unicode");
-        fs::write(root.join("ñ.md"), "# Ñandú 見出し\r\n\r\n## Otra sección\r\n").unwrap();
+        fs::write(
+            root.join("ñ.md"),
+            "# Ñandú 見出し\r\n\r\n## Otra sección\r\n",
+        )
+        .unwrap();
         let index = ProjectIndex::new(root.clone());
         let open = OpenBuffers::new();
         let r = resolver(&index, &open);
 
         assert_eq!(r.resolve("ñ.md", "index.md").kind, TargetKind::Local);
         let target = r.resolve("ñ.md#ñandú-見出し", "index.md");
-        assert_eq!(target.anchor.as_ref().map(|a| a.line), Some(1), "línea con CRLF");
-        assert_eq!(r.resolve("ñ.md#otra-sección", "index.md").kind, TargetKind::Local);
+        assert_eq!(
+            target.anchor.as_ref().map(|a| a.line),
+            Some(1),
+            "línea con CRLF"
+        );
+        assert_eq!(
+            r.resolve("ñ.md#otra-sección", "index.md").kind,
+            TargetKind::Local
+        );
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -571,11 +643,20 @@ mod tests {
         let target = r.resolve_usage("id", "ref.md");
         assert_eq!(target.kind, TargetKind::Local);
         assert_eq!(target.rel_path.as_deref(), Some("cap/a.md"));
-        assert_eq!(target.anchor.as_ref().map(|a| a.id.as_str()), Some("detalle"));
+        assert_eq!(
+            target.anchor.as_ref().map(|a| a.id.as_str()),
+            Some("detalle")
+        );
         // Etiquetas: sin distinguir mayúsculas ni espacios redundantes.
-        assert_eq!(r.resolve_usage("OTRO", "ref.md").rel_path.as_deref(), Some("cap/mi archivo.md"));
+        assert_eq!(
+            r.resolve_usage("OTRO", "ref.md").rel_path.as_deref(),
+            Some("cap/mi archivo.md")
+        );
         // Sin definición: no resoluble.
-        assert_eq!(r.resolve_usage("no-existe", "ref.md").kind, TargetKind::Missing);
+        assert_eq!(
+            r.resolve_usage("no-existe", "ref.md").kind,
+            TargetKind::Missing
+        );
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -591,7 +672,10 @@ mod tests {
         let r = resolver(&index, &open);
         let target = r.resolve_usage("id", "ref.md");
         assert_eq!(target.kind, TargetKind::Local);
-        assert_eq!(target.anchor.as_ref().map(|a| a.id.as_str()), Some("detalle"));
+        assert_eq!(
+            target.anchor.as_ref().map(|a| a.id.as_str()),
+            Some("detalle")
+        );
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -602,7 +686,11 @@ mod tests {
         let open = OpenBuffers::new();
         let r = resolver(&index, &open);
         for dest in ["https://example.com/x", "mailto:a@b.com", "//cdn.example/x"] {
-            assert_eq!(r.resolve(dest, "index.md").kind, TargetKind::External, "{dest}");
+            assert_eq!(
+                r.resolve(dest, "index.md").kind,
+                TargetKind::External,
+                "{dest}"
+            );
         }
         let _ = fs::remove_dir_all(&root);
     }
@@ -614,14 +702,32 @@ mod tests {
         fs::write(root.join("generado.md"), "# G\n").unwrap();
         let mut index = ProjectIndex::new(root.clone());
         index.refresh().unwrap();
-        assert!(index.get("generado.md").is_none(), "§14.6: fuera del índice");
+        assert!(
+            index.get("generado.md").is_none(),
+            "§14.6: fuera del índice"
+        );
         let open = OpenBuffers::new();
         let r = resolver(&index, &open);
 
-        assert_eq!(r.resolve("borrado.md", "index.md").kind, TargetKind::Missing);
-        assert_eq!(r.resolve("generado.md", "index.md").kind, TargetKind::Missing, "§14.6");
-        assert_eq!(r.resolve("../../etc/passwd", "cap/a.md").kind, TargetKind::Missing, "§48");
-        assert_eq!(r.resolve("/../fuera.md", "index.md").kind, TargetKind::Missing, "§48");
+        assert_eq!(
+            r.resolve("borrado.md", "index.md").kind,
+            TargetKind::Missing
+        );
+        assert_eq!(
+            r.resolve("generado.md", "index.md").kind,
+            TargetKind::Missing,
+            "§14.6"
+        );
+        assert_eq!(
+            r.resolve("../../etc/passwd", "cap/a.md").kind,
+            TargetKind::Missing,
+            "§48"
+        );
+        assert_eq!(
+            r.resolve("/../fuera.md", "index.md").kind,
+            TargetKind::Missing,
+            "§48"
+        );
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -634,7 +740,10 @@ mod tests {
         let r = resolver(&index, &open);
 
         assert_eq!(r.resolve("imagen.png", "index.md").kind, TargetKind::Local);
-        assert_eq!(r.resolve("imagen.png#titulo", "index.md").kind, TargetKind::Missing);
+        assert_eq!(
+            r.resolve("imagen.png#titulo", "index.md").kind,
+            TargetKind::Missing
+        );
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -647,7 +756,10 @@ mod tests {
         let r = resolver(&index, &open);
 
         assert_eq!(r.resolve("100%año.md", "index.md").kind, TargetKind::Local);
-        assert_eq!(r.resolve("index.md#%año", "index.md").kind, TargetKind::Missing);
+        assert_eq!(
+            r.resolve("index.md#%año", "index.md").kind,
+            TargetKind::Missing
+        );
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -663,8 +775,16 @@ mod tests {
         let r = resolver(&index, &open);
 
         for from in ["../fuera.md", "generado.md"] {
-            assert_eq!(r.resolve("#secreto", from).kind, TargetKind::Missing, "{from}");
-            assert_eq!(r.resolve_usage("id", from).kind, TargetKind::Missing, "{from}");
+            assert_eq!(
+                r.resolve("#secreto", from).kind,
+                TargetKind::Missing,
+                "{from}"
+            );
+            assert_eq!(
+                r.resolve_usage("id", from).kind,
+                TargetKind::Missing,
+                "{from}"
+            );
         }
         let _ = fs::remove_dir_all(&root);
     }
@@ -682,7 +802,10 @@ mod tests {
         let r = resolver(&index, &open);
 
         assert_eq!(r.resolve("cap/a.md", "index.md").kind, TargetKind::Missing);
-        assert_eq!(r.resolve("cap/a.md#detalle", "index.md").kind, TargetKind::Missing);
+        assert_eq!(
+            r.resolve("cap/a.md#detalle", "index.md").kind,
+            TargetKind::Missing
+        );
         assert_eq!(r.resolve("#detalle", "cap/a.md").kind, TargetKind::Missing);
         let _ = fs::remove_dir_all(&root);
         let _ = fs::remove_dir_all(&outside);
@@ -729,13 +852,24 @@ mod tests {
         let r = resolver(&index, &open);
 
         let target = r.resolve("cap/a.md#nuevo-sin-guardar", "index.md");
-        assert_eq!(target.kind, TargetKind::Local, "el buffer manda sobre el índice");
+        assert_eq!(
+            target.kind,
+            TargetKind::Local,
+            "el buffer manda sobre el índice"
+        );
         assert_eq!(target.anchor.as_ref().map(|a| a.line), Some(3));
-        assert_eq!(r.resolve("cap/a.md#detalle", "index.md").kind, TargetKind::Missing, "ya no está");
+        assert_eq!(
+            r.resolve("cap/a.md#detalle", "index.md").kind,
+            TargetKind::Missing,
+            "ya no está"
+        );
         // La copia indexada sigue resolviendo su propio contenido.
         let open = OpenBuffers::new();
         let r = resolver(&index, &open);
-        assert_eq!(r.resolve("cap/a.md#detalle", "index.md").kind, TargetKind::Local);
+        assert_eq!(
+            r.resolve("cap/a.md#detalle", "index.md").kind,
+            TargetKind::Local
+        );
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -746,7 +880,10 @@ mod tests {
         index.refresh().unwrap();
         let open = OpenBuffers::new();
         let r = resolver(&index, &open);
-        assert_eq!(r.resolve("cap/a.md#detalle", "index.md").kind, TargetKind::Local);
+        assert_eq!(
+            r.resolve("cap/a.md#detalle", "index.md").kind,
+            TargetKind::Local
+        );
 
         // Renombrado: el índice lo refleja al refrescar (§45).
         fs::rename(root.join("cap/a.md"), root.join("cap/renombrada.md")).unwrap();
@@ -754,14 +891,23 @@ mod tests {
         assert_eq!(stats.removed, 1);
         assert_eq!(stats.reindexed, 1);
         let r = resolver(&index, &open);
-        assert_eq!(r.resolve("cap/a.md#detalle", "index.md").kind, TargetKind::Missing);
-        assert_eq!(r.resolve("renombrada.md#detalle", "cap/x.md").kind, TargetKind::Local);
+        assert_eq!(
+            r.resolve("cap/a.md#detalle", "index.md").kind,
+            TargetKind::Missing
+        );
+        assert_eq!(
+            r.resolve("renombrada.md#detalle", "cap/x.md").kind,
+            TargetKind::Local
+        );
 
         // Borrado.
         fs::remove_file(root.join("cap/renombrada.md")).unwrap();
         index.refresh().unwrap();
         let r = resolver(&index, &open);
-        assert_eq!(r.resolve("renombrada.md#detalle", "cap/x.md").kind, TargetKind::Missing);
+        assert_eq!(
+            r.resolve("renombrada.md#detalle", "cap/x.md").kind,
+            TargetKind::Missing
+        );
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -789,5 +935,49 @@ mod tests {
             assert_eq!(fs::read(&path).unwrap(), antes, "{rel} intacto en disco");
         }
         let _ = fs::remove_dir_all(&root);
+    }
+}
+
+#[cfg(test)]
+mod object_target_tests {
+    use super::*;
+    #[test]
+    fn objetos_indexados_y_duplicados_comparten_resolucion() {
+        let root =
+            std::env::temp_dir().join(format!("minmark-object-targets-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let source = "![x](x.svg){#fig:a}\n\n| A |\n| - |\n| B |\n{#tbl:a}\n\n$$\nx\n$$\n{#eq:a}";
+        std::fs::write(root.join("doc.md"), source).unwrap();
+        let mut index = ProjectIndex::new(root.clone());
+        index.refresh().unwrap();
+        let open = OpenBuffers::new();
+        let resolver = Resolver::new(&index, &open);
+        for id in ["fig:a", "tbl:a", "eq:a"] {
+            assert_eq!(
+                resolver.resolve(&format!("#{id}"), "doc.md").kind,
+                TargetKind::Local
+            );
+        }
+        assert!(minmark_fs_headings(&index).is_empty());
+        let duplicate = format!("{source}\n\n![otra](x.svg){{#fig:a}}");
+        let mut open = OpenBuffers::new();
+        open.insert("doc.md", &duplicate);
+        assert_eq!(
+            Resolver::new(&index, &open)
+                .resolve("#fig:a", "doc.md")
+                .kind,
+            TargetKind::Ambiguous
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+    fn minmark_fs_headings(index: &ProjectIndex) -> Vec<crate::fuzzy::Entry> {
+        crate::fuzzy::quickopen_query(
+            crate::fuzzy::QuickOpenMode::DocHeadings,
+            "@",
+            index,
+            Some("doc.md"),
+            &[],
+            false,
+        )
     }
 }

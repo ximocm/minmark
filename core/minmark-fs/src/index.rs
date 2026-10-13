@@ -15,9 +15,9 @@
 //! ISSUE-025: sin dependencias nuevas), texto línea a línea:
 //!
 //! ```text
-//! minmark-index 2
+//! minmark-index 3
 //! root <raíz canónica, percent-encoded>
-//! <path-rel>\t<mtime-secs>\t<size>\t<payload>
+//! <path-rel>\t<mtime-nanos>\t<size>\t<payload>
 //! ```
 //!
 //! `payload` = registros separados por `\x1e`: `h=<nivel>:<línea>:<ancla>:<texto>`
@@ -31,13 +31,13 @@
 use crate::ignore::IgnorePatterns;
 use crate::paths::walk_tree;
 use crate::{relative_path, write_atomic, FsError};
-use minmark_document::{document_anchors, find_heading_nodes, find_markdown_references};
+use minmark_document::find_markdown_references;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 /// Firma del formato de índice.
-const SIGNATURE: &str = "minmark-index 2";
+const SIGNATURE: &str = "minmark-index 3";
 
 /// Heading del índice con su ancla final y posición (§26, §45).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,11 +56,12 @@ pub struct IndexHeading {
 pub struct IndexEntry {
     /// Path relativo a la raíz (§17), en forma posix.
     pub rel_path: String,
-    /// Stamp: segundos de mtime + tamaño (mismo espíritu que
+    /// Stamp: nanosegundos de mtime + tamaño (mismo espíritu que
     /// [`crate::FileStamp`], ISSUE-013).
-    pub mtime_secs: u64,
+    pub mtime_nanos: u64,
     pub size: u64,
-    /// Headings del documento (§27.1), en orden, con ancla y línea.
+    /// Destinos en orden, con ancla y línea: headings H1–H6 y objetos
+    /// con ID explícito (nivel 0, excluidos de las consultas de headings).
     pub headings: Vec<IndexHeading>,
     /// Destinos referenciados (§16), en orden.
     pub links: Vec<String>,
@@ -88,7 +89,10 @@ pub struct ProjectIndex {
 impl ProjectIndex {
     /// Índice vacío de `root` (§45: siempre reconstruible).
     pub fn new(root: PathBuf) -> Self {
-        Self { root, entries: BTreeMap::new() }
+        Self {
+            root,
+            entries: BTreeMap::new(),
+        }
     }
 
     pub fn root(&self) -> &Path {
@@ -161,12 +165,15 @@ impl ProjectIndex {
         })
     }
 
-    /// Serializa en el formato `minmark-index 2` (ver módulo).
+    /// Serializa en el formato `minmark-index 3` (ver módulo).
     pub fn serialize(&self) -> String {
         let mut out = String::new();
         out.push_str(SIGNATURE);
         out.push('\n');
-        out.push_str(&format!("root {}\n", pct_encode(&self.root.to_string_lossy())));
+        out.push_str(&format!(
+            "root {}\n",
+            pct_encode(&self.root.to_string_lossy())
+        ));
         for entry in self.entries.values() {
             let mut payload: Vec<String> = Vec::new();
             for heading in &entry.headings {
@@ -184,7 +191,7 @@ impl ProjectIndex {
             out.push_str(&format!(
                 "{}\t{}\t{}\t{}\n",
                 pct_encode(&entry.rel_path),
-                entry.mtime_secs,
+                entry.mtime_nanos,
                 entry.size,
                 payload.join("\u{1e}")
             ));
@@ -192,15 +199,14 @@ impl ProjectIndex {
         out
     }
 
-    /// Parsea el formato `minmark-index 2`; `None` si no es un índice de
+    /// Parsea el formato `minmark-index 3`; `None` si no es un índice de
     /// `root` (tolerante con líneas individuales corruptas).
     pub fn parse(text: &str, root: &Path) -> Option<Self> {
         let mut lines = text.lines();
         if lines.next() != Some(SIGNATURE) {
             return None;
         }
-        let root_canon = std::fs::canonicalize(root)
-            .unwrap_or_else(|_| root.to_path_buf());
+        let root_canon = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
         for line in lines.by_ref() {
             if let Some(encoded) = line.strip_prefix("root ") {
                 if pct_decode(encoded) != root_canon.to_string_lossy() {
@@ -222,7 +228,7 @@ impl ProjectIndex {
     fn parse_entry(line: &str) -> Option<(String, IndexEntry)> {
         let mut fields = line.splitn(4, '\t');
         let rel_path = pct_decode(fields.next()?);
-        let mtime_secs = fields.next()?.parse().ok()?;
+        let mtime_nanos = fields.next()?.parse().ok()?;
         let size = fields.next()?.parse().ok()?;
         let payload = fields.next().unwrap_or("");
         let mut headings = Vec::new();
@@ -236,13 +242,24 @@ impl ProjectIndex {
                     let line = parts.next()?.parse().ok()?;
                     let anchor = pct_decode(parts.next()?);
                     let text = pct_decode(parts.next()?);
-                    headings.push(IndexHeading { level, text, anchor, line });
+                    headings.push(IndexHeading {
+                        level,
+                        text,
+                        anchor,
+                        line,
+                    });
                 }
                 "l" => links.push(pct_decode(value)),
                 _ => return None,
             }
         }
-        let entry = IndexEntry { rel_path: rel_path.clone(), mtime_secs, size, headings, links };
+        let entry = IndexEntry {
+            rel_path: rel_path.clone(),
+            mtime_nanos,
+            size,
+            headings,
+            links,
+        };
         Some((rel_path, entry))
     }
 
@@ -282,16 +299,17 @@ impl ProjectIndex {
                 Ok(meta) => meta,
                 Err(_) => continue,
             };
-            let mtime_secs = meta
+            let mtime_nanos = meta
                 .modified()
                 .ok()
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_secs())
+                .map(|d| d.as_nanos() as u64)
                 .unwrap_or(0);
             let size = meta.len();
-            let unchanged = self.entries.get(&rel_path).is_some_and(|indexed| {
-                indexed.mtime_secs == mtime_secs && indexed.size == size
-            });
+            let unchanged = self
+                .entries
+                .get(&rel_path)
+                .is_some_and(|indexed| indexed.mtime_nanos == mtime_nanos && indexed.size == size);
             if unchanged {
                 stats.unchanged += 1;
                 continue;
@@ -299,15 +317,13 @@ impl ProjectIndex {
             let Ok(source) = std::fs::read_to_string(&entry.path) else {
                 continue;
             };
-            let nodes = find_heading_nodes(&source);
-            let headings = nodes
-                .iter()
-                .zip(document_anchors(&nodes))
-                .map(|(node, anchor)| IndexHeading {
-                    level: node.level,
-                    text: node.text.clone(),
+            let headings = minmark_parser::destination_anchors(&source)
+                .into_iter()
+                .map(|anchor| IndexHeading {
+                    level: anchor.level,
+                    text: anchor.text,
                     anchor: anchor.id,
-                    line: node.line,
+                    line: anchor.line,
                 })
                 .collect();
             let links = find_markdown_references(&source)
@@ -316,7 +332,13 @@ impl ProjectIndex {
                 .collect();
             self.entries.insert(
                 rel_path.clone(),
-                IndexEntry { rel_path, mtime_secs, size, headings, links },
+                IndexEntry {
+                    rel_path,
+                    mtime_nanos,
+                    size,
+                    headings,
+                    links,
+                },
             );
             stats.reindexed += 1;
         }
@@ -338,7 +360,10 @@ impl ProjectIndex {
 /// Directorio de datos de la aplicación con subcarpeta `tail` (§45.1): mismo
 /// patrón que [`crate::SnapshotStore::default_dir`] (§3.6), fuera del
 /// proyecto. Un valor no absoluto no es utilizable (§45.1).
-fn data_dir_from_env(xdg_data_home: Option<OsString>, home: Option<OsString>) -> Result<PathBuf, FsError> {
+fn data_dir_from_env(
+    xdg_data_home: Option<OsString>,
+    home: Option<OsString>,
+) -> Result<PathBuf, FsError> {
     if let Some(dir) = xdg_data_home.map(PathBuf::from) {
         if dir.is_absolute() {
             return Ok(dir.join("minmark").join("index"));
@@ -346,7 +371,11 @@ fn data_dir_from_env(xdg_data_home: Option<OsString>, home: Option<OsString>) ->
     }
     if let Some(dir) = home.map(PathBuf::from) {
         if dir.is_absolute() {
-            return Ok(dir.join(".local").join("share").join("minmark").join("index"));
+            return Ok(dir
+                .join(".local")
+                .join("share")
+                .join("minmark")
+                .join("index"));
         }
     }
     Err(FsError::Io {
@@ -404,7 +433,10 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let dir = std::env::temp_dir().join(format!("minmark-index-{tag}-{}-{nanos}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "minmark-index-{tag}-{}-{nanos}",
+            std::process::id()
+        ));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
@@ -414,7 +446,11 @@ mod tests {
         let root = temp_tree(tag);
         fs::create_dir(root.join("cap")).unwrap();
         fs::write(root.join("index.md"), "# Inicio\n\n[a](cap/a.md)\n").unwrap();
-        fs::write(root.join("cap/a.md"), "# Cap A\n\n## Detalle\n\n![i](i.png)\n").unwrap();
+        fs::write(
+            root.join("cap/a.md"),
+            "# Cap A\n\n## Detalle\n\n![i](i.png)\n",
+        )
+        .unwrap();
         root
     }
 
@@ -430,7 +466,14 @@ mod tests {
         let root = project("build");
         let mut index = ProjectIndex::new(root.clone());
         let stats = index.refresh().unwrap();
-        assert_eq!(stats, RefreshStats { reindexed: 2, removed: 0, unchanged: 0 });
+        assert_eq!(
+            stats,
+            RefreshStats {
+                reindexed: 2,
+                removed: 0,
+                unchanged: 0
+            }
+        );
         assert_eq!(index.len(), 2);
 
         let a = index.get("cap/a.md").unwrap();
@@ -464,17 +507,38 @@ mod tests {
 
         touch(&root.join("cap/a.md"));
         let stats = index.refresh().unwrap();
-        assert_eq!(stats, RefreshStats { reindexed: 1, removed: 0, unchanged: 1 });
+        assert_eq!(
+            stats,
+            RefreshStats {
+                reindexed: 1,
+                removed: 0,
+                unchanged: 1
+            }
+        );
 
         // Nada cambiado: cero lecturas de más.
         let stats = index.refresh().unwrap();
-        assert_eq!(stats, RefreshStats { reindexed: 0, removed: 0, unchanged: 2 });
+        assert_eq!(
+            stats,
+            RefreshStats {
+                reindexed: 0,
+                removed: 0,
+                unchanged: 2
+            }
+        );
 
         // Alta y baja: solo lo nuevo se indexa y lo borrado se purga (§45).
         fs::write(root.join("nuevo.md"), "# Nuevo\n").unwrap();
         fs::remove_file(root.join("cap/a.md")).unwrap();
         let stats = index.refresh().unwrap();
-        assert_eq!(stats, RefreshStats { reindexed: 1, removed: 1, unchanged: 1 });
+        assert_eq!(
+            stats,
+            RefreshStats {
+                reindexed: 1,
+                removed: 1,
+                unchanged: 1
+            }
+        );
         assert!(index.get("cap/a.md").is_none());
         assert!(index.get("nuevo.md").is_some());
         let _ = fs::remove_dir_all(&root);
@@ -514,7 +578,7 @@ mod tests {
         let mut index = ProjectIndex::new(root.clone());
         let entry = IndexEntry {
             rel_path: "con espacio/tab\t#raro.md".to_owned(),
-            mtime_secs: 42,
+            mtime_nanos: 42,
             size: 7,
             headings: vec![IndexHeading {
                 level: 3,
@@ -565,14 +629,29 @@ mod tests {
         // §47.5: el índice de un proyecto de miles de archivos se construye en
         // un tiempo modesto (y en la app, fuera del hilo de UI, §47.1).
         assert_eq!(stats.reindexed, 1000);
-        assert!(inicio.elapsed() < std::time::Duration::from_secs(10), "1000 archivos tardaron {:?}", inicio.elapsed());
+        assert!(
+            inicio.elapsed() < std::time::Duration::from_secs(10),
+            "1000 archivos tardaron {:?}",
+            inicio.elapsed()
+        );
 
         // Refresco incremental sobre miles de archivos: solo lo tocado.
         touch(&root.join("doc-0500.md"));
         let inicio = std::time::Instant::now();
         let stats = index.refresh().unwrap();
-        assert_eq!(stats, RefreshStats { reindexed: 1, removed: 0, unchanged: 999 });
-        assert!(inicio.elapsed() < std::time::Duration::from_secs(5), "refresco incremental tardó {:?}", inicio.elapsed());
+        assert_eq!(
+            stats,
+            RefreshStats {
+                reindexed: 1,
+                removed: 0,
+                unchanged: 999
+            }
+        );
+        assert!(
+            inicio.elapsed() < std::time::Duration::from_secs(5),
+            "refresco incremental tardó {:?}",
+            inicio.elapsed()
+        );
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -580,7 +659,10 @@ mod tests {
     fn default_path_fuera_del_proyecto_45_1() {
         let root = temp_tree("path");
         let path = ProjectIndex::default_path(&root).unwrap();
-        assert!(!path.starts_with(&root), "el índice vive fuera del proyecto (§45.1)");
+        assert!(
+            !path.starts_with(&root),
+            "el índice vive fuera del proyecto (§45.1)"
+        );
         assert!(path.to_string_lossy().ends_with(".index"));
         let _ = fs::remove_dir_all(&root);
     }

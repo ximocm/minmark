@@ -24,6 +24,10 @@ Windows está planificado; macOS no es una plataforma soportada actualmente.
   actualización de referencias compatibles.
 - Buscar y reemplazar en un archivo o proyecto; abrir archivos y localizar
   encabezados con Quick Open.
+- Navegar enlaces internos, completar destinos y detectar enlaces rotos.
+- Consultar outline y backlinks temporales; habilitar wiki links por proyecto.
+- Resolver referencias cruzadas en Preview y PDF, con etiquetas y numeración
+  derivadas del documento. Consulta [Markdown Intelligence](docs/MARKDOWN_INTELLIGENCE.md).
 
 El motor PDF básico está implementado en el core. Su integración en la interfaz
 sigue en curso.
@@ -75,6 +79,8 @@ instalación local y solución de problemas.
 | `Ctrl+F` / `Ctrl+H` | Buscar / Reemplazar en el archivo |
 | `Ctrl+Shift+F` | Buscar en el proyecto |
 | `Ctrl+P` | Quick Open |
+| `Ctrl+Enter` / `Ctrl+Click` | Abrir enlace bajo el cursor |
+| `Ctrl+Alt+O` / `Ctrl+Alt+B` | Outline / Backlinks |
 | `Ctrl+Z` / `Ctrl+Shift+Z` | Deshacer / Rehacer |
 | `Ctrl+Alt+M` | Alternar Markdown y Visual |
 

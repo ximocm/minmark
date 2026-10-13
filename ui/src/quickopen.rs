@@ -37,6 +37,7 @@ enum Source {
 /// Estado mutable compartido entre la paleta y sus callbacks GTK.
 #[derive(Default)]
 struct State {
+    document_list: bool,
     source: Option<Source>,
     /// `rel_path` (§17) del documento activo: destino de `@heading` y `:N`.
     current: Option<String>,
@@ -99,6 +100,11 @@ fn recompute(state: &State, query: &str) -> Vec<Entry> {
             &state.recent,
             state.show_all_files,
         ),
+        Some(Source::Entries(entries)) if state.document_list => entries
+            .iter()
+            .filter(|e| fuzzy::fuzzy_match(&e.label, query).is_some())
+            .cloned()
+            .collect(),
         Some(Source::Entries(entries)) => filter_static(entries, parsed.filter),
         None => Vec::new(),
     }
@@ -119,6 +125,8 @@ fn repaint(list: &gtk::ListBox, state: &State) {
     }
     if !state.results.is_empty() {
         select_row(list, state.selected);
+    } else if state.document_list {
+        list.append(&gtk::Label::new(Some("Sin resultados")));
     }
 }
 
@@ -133,7 +141,9 @@ fn select_row(list: &gtk::ListBox, index: usize) {
 fn open_selected(state: &RefCell<State>, window: &gtk::Window) {
     let (entry, line, on_open) = {
         let state = state.borrow();
-        let Some(entry) = state.results.get(state.selected).cloned() else { return };
+        let Some(entry) = state.results.get(state.selected).cloned() else {
+            return;
+        };
         let line = match (&entry.line, &entry.heading) {
             (Some(line), _) => Some(*line),
             (None, Some(heading)) => match &state.source {
@@ -204,7 +214,11 @@ impl QuickOpen {
                 let mut state = state.borrow_mut();
                 state.selected = 0;
                 state.results = recompute(&state, &entry.text());
-                mode_label.set_text(mode_name(&entry.text()));
+                mode_label.set_text(&if state.document_list {
+                    format!("{} resultados", state.results.len())
+                } else {
+                    mode_name(&entry.text()).into()
+                });
                 repaint(&list, &state);
             });
         }
@@ -237,7 +251,7 @@ impl QuickOpen {
                     glib::Propagation::Proceed
                 }
             });
-            input.add_controller(controller);
+            palette.window.add_controller(controller);
         }
 
         // Enter abre la fila seleccionada (§41).
@@ -299,6 +313,21 @@ impl QuickOpen {
         self.refresh();
     }
 
+    pub fn is_visible(&self) -> bool {
+        self.window.is_visible()
+    }
+    #[cfg(test)]
+    pub fn hide(&self) {
+        self.window.set_visible(false);
+    }
+
+    pub fn set_title(&self, title: &str) {
+        self.state.borrow_mut().document_list = true;
+        self.window.set_title(Some(title));
+        self.window.set_modal(false);
+        self.input.set_placeholder_text(Some("Filtrar resultados"));
+    }
+
     /// Fija el índice del proyecto (§45) como fuente de resultados (§41:
     /// archivos, `:N`, `@heading` y `#heading`).
     pub fn set_index(&self, index: &ProjectIndex) {
@@ -341,7 +370,11 @@ impl QuickOpen {
         let mut state = self.state.borrow_mut();
         state.results = recompute(&state, &self.input.text());
         state.selected = state.selected.min(state.results.len().saturating_sub(1));
-        self.mode_label.set_text(mode_name(&self.input.text()));
+        self.mode_label.set_text(&if state.document_list {
+            format!("{} resultados", state.results.len())
+        } else {
+            mode_name(&self.input.text()).into()
+        });
         repaint(&self.list, &state);
     }
 }
@@ -384,7 +417,12 @@ mod tests {
 
         // Filtro único y sin resultados para una consulta no subsecuente.
         let uno = filter_static(&entries, "doc_001");
-        assert_eq!(uno.iter().map(|entry| entry.label.as_str()).collect::<Vec<_>>(), ["doc_001.md"]);
+        assert_eq!(
+            uno.iter()
+                .map(|entry| entry.label.as_str())
+                .collect::<Vec<_>>(),
+            ["doc_001.md"]
+        );
         assert!(filter_static(&entries, "zzz").is_empty());
     }
 }

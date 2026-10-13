@@ -14,7 +14,9 @@
 //!
 //! La WebView (WebKitGTK 6.0, ADR-001) carga esta página en ISSUE-020.
 
+mod references;
 mod scroll;
+pub use references::{reference_ids, resolve_cross_references};
 
 pub use palette::{theme_css, Palette};
 pub use scroll::{Anchor, ScrollMap};
@@ -36,6 +38,7 @@ use std::collections::BTreeMap;
 /// destinos, de modo que un `#fragmento` resuelto por el índice apunta al
 /// `id` emitido aquí.
 pub fn render_preview(ast: &Ast, source: &str, settings: &Settings) -> String {
+    let (ast, diagnostics) = resolve_cross_references(ast, settings);
     let ids = HeadingIds::for_source(source);
     let mut out = String::new();
     out.push_str("<!DOCTYPE html>\n<html data-theme=\"");
@@ -52,6 +55,11 @@ pub fn render_preview(ast: &Ast, source: &str, settings: &Settings) -> String {
     out.push_str("px\">\n<div class=\"minmark-preview\">");
     for block in &ast.blocks {
         render_block(block, &ids, settings, &mut out);
+    }
+    for diagnostic in diagnostics {
+        out.push_str("<p role=\"status\" class=\"mm-diagnostic\">");
+        push_escaped(&mut out, &diagnostic);
+        out.push_str("</p>");
     }
     out.push_str("</div>\n</div>\n</body>\n</html>\n");
     out
@@ -426,7 +434,9 @@ fn render_inlines(inlines: &[Inline], settings: &Settings, out: &mut String) {
                 out.push_str("</span>");
             }
             Inline::WikiLink { target } => {
-                out.push_str("<a class=\"mm-wiki-link\" data-target=\"");
+                out.push_str("<a class=\"mm-wiki-link\" href=\"minmark-wiki:");
+                push_escaped(out, target);
+                out.push_str("\" data-target=\"");
                 push_escaped(out, target);
                 out.push_str("\">");
                 push_escaped(out, target);
@@ -613,7 +623,11 @@ mod tests {
                 .into_iter()
                 .map(|anchor| anchor.id)
                 .collect();
-            assert_eq!(heading_ids_in_html(&out), ids, "paridad Preview == índice en {source:?}");
+            assert_eq!(
+                heading_ids_in_html(&out),
+                ids,
+                "paridad Preview == índice en {source:?}"
+            );
         }
     }
 
@@ -661,7 +675,7 @@ mod tests {
         assert!(out.contains("<div class=\"mm-math-block\" data-mm-span="));
 
         let out = html("Ver {{ref:fig:arq}} y {{toc}}.\n");
-        assert!(out.contains("data-ref=\"fig:arq\""));
+        assert!(out.contains("Referencia inexistente: fig:arq"));
         assert!(out.contains("<nav class=\"mm-toc\"></nav>"));
     }
 
@@ -717,13 +731,15 @@ mod tests {
 
         let offset = source.find("segundo").unwrap() as u32;
         let anchor = map.anchor_for_offset(offset).unwrap();
-        assert_eq!(map.offset_for_anchor(anchor), Some(ast.blocks[2].span.start));
+        assert_eq!(
+            map.offset_for_anchor(anchor),
+            Some(ast.blocks[2].span.start)
+        );
         // Doble clic (§9.1): rango del elemento → posición del editor.
-        let mut editor =
-            minmark_document::Editor::new(minmark_document::Document::from_text(
-                None,
-                source.to_string(),
-            ));
+        let mut editor = minmark_document::Editor::new(minmark_document::Document::from_text(
+            None,
+            source.to_string(),
+        ));
         let position = editor.position_of(map.offset_for_anchor(anchor).unwrap() as usize);
         editor
             .set_selection(minmark_document::Selection::collapsed(position))

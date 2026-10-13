@@ -28,7 +28,7 @@ minmark-parser   ──> minmark-document
 minmark-renderer ──> minmark-document, minmark-config, minmark-math
 minmark-pdf      ──> minmark-document, minmark-config, minmark-math,
                     minmark-renderer
-minmark-fs       ──> minmark-document
+minmark-fs       ──> minmark-document, minmark-parser
 ```
 
 Las dependencias de desarrollo se declaran en los manifiestos de cada crate.

@@ -24,13 +24,15 @@
 //! mismo documento en los dos modos §8 (Markdown y Visual, ISSUE-030).
 
 mod editor;
-mod export;
 mod explorer;
+mod export;
 mod find;
+mod intelligence;
 mod menus;
 mod preview;
 mod quickopen;
 mod search;
+mod settings;
 mod tabs;
 
 use editor::{EditSink, EditorPane};
@@ -45,12 +47,10 @@ use tabs::{OpenTarget, TabBar, TabManager, WindowScope};
 use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::{
-    Application, ApplicationWindow, Box as GtkBox, CssProvider, Orientation, Paned,
-    PopoverMenuBar, Widget,
+    Application, ApplicationWindow, Box as GtkBox, CssProvider, Orientation, Paned, PopoverMenuBar,
+    Widget,
 };
-use minmark_config::{
-    detect_system_theme, resolve_theme, ResolvedTheme, Settings, VisualSyntax,
-};
+use minmark_config::{detect_system_theme, resolve_theme, ResolvedTheme, Settings, VisualSyntax};
 use minmark_document::{Position, Range, SearchOptions, Selection};
 use minmark_fs::Watcher as _;
 use minmark_renderer::Palette;
@@ -113,16 +113,40 @@ impl SelfOps {
 /// ya refrescado se reenvía a Quick Open (ISSUE-029, §41) para consultas
 /// frescas.
 fn spawn_index_refresh(root: PathBuf, slot: Rc<CmdSlot>) {
-    let (tx, rx) = channel::<minmark_fs::ProjectIndex>();
+    let generation = slot
+        .borrow()
+        .as_ref()
+        .and_then(Weak::upgrade)
+        .map(|me| {
+            let generation = me.index_generation.get().wrapping_add(1);
+            me.index_generation.set(generation);
+            generation
+        })
+        .unwrap_or(0);
+    let (tx, rx) = channel();
     std::thread::spawn(move || {
         let mut index = minmark_fs::ProjectIndex::load_or_new(&root);
-        if let Err(err) = index.refresh().and_then(|_| index.save()) {
+        if let Err(err) = index.refresh() {
             eprintln!("minmark: índice de proyecto no refrescado: {err}");
             return;
         }
-        let _ = tx.send(index);
+        if let Err(err) = index.save() {
+            eprintln!("minmark: no se pudo guardar la caché del índice: {err}");
+        }
+        let _ = tx.send((generation, index));
     });
-    deliver_to_quickopen(rx, slot, |quickopen, index| quickopen.set_index(&index));
+    deliver_to_quickopen(rx, slot, |me, (generation, index)| {
+        if generation != me.index_generation.get()
+            || me.quickopen_base().as_deref() != Some(index.root())
+        {
+            return;
+        }
+        if me.scope.project_root().is_some() {
+            me.quickopen.set_index(&index);
+        }
+        *me.index.borrow_mut() = Some(index);
+        me.refresh_intelligence(false);
+    });
 }
 
 /// Integra el resultado de un hilo worker en el bucle principal y lo entrega
@@ -131,13 +155,13 @@ fn spawn_index_refresh(root: PathBuf, slot: Rc<CmdSlot>) {
 fn deliver_to_quickopen<T: 'static>(
     rx: Receiver<T>,
     slot: Rc<CmdSlot>,
-    apply: impl Fn(&QuickOpen, T) + 'static,
+    apply: impl Fn(&AppCmds, T) + 'static,
 ) {
     glib::timeout_add_local(Duration::from_millis(DELIVERY_POLL_MS), move || {
         match rx.try_recv() {
             Ok(value) => {
                 if let Some(me) = slot.borrow().as_ref().and_then(Weak::upgrade) {
-                    apply(&me.quickopen, value);
+                    apply(&me, value);
                 }
                 glib::ControlFlow::Break
             }
@@ -157,7 +181,7 @@ fn spawn_quickopen_entries(base: PathBuf, slot: Rc<CmdSlot>) {
     std::thread::spawn(move || {
         let _ = tx.send(quickopen_entries(&base));
     });
-    deliver_to_quickopen(rx, slot, |quickopen, entries| quickopen.set_entries(entries));
+    deliver_to_quickopen(rx, slot, |me, entries| me.quickopen.set_entries(entries));
 }
 
 /// Contenido de [`spawn_quickopen_entries`]: los archivos del subárbol
@@ -170,7 +194,9 @@ fn quickopen_entries(base: &Path) -> Vec<minmark_fs::fuzzy::Entry> {
     let base = ruta_comparable(base);
     let ignore = minmark_fs::IgnorePatterns::from_root(&base);
     let mut entries: Vec<Entry> = Vec::new();
-    let Ok(tree) = minmark_fs::walk_tree(&base) else { return entries };
+    let Ok(tree) = minmark_fs::walk_tree(&base) else {
+        return entries;
+    };
     for node in tree {
         if node.is_dir {
             continue;
@@ -245,6 +271,16 @@ struct AppCmds {
     find_bar: Rc<FindBar>,
     /// Paleta Quick Open (§41, ISSUE-029, §39: `Ctrl+P`).
     quickopen: Rc<QuickOpen>,
+    index: RefCell<Option<minmark_fs::ProjectIndex>>,
+    index_generation: Cell<u64>,
+    intelligence_generation: Cell<u64>,
+    intelligence_busy: Cell<bool>,
+    intelligence_pending: Cell<bool>,
+    intelligence_suggest: Cell<bool>,
+    completion_source: RefCell<Option<(Option<PathBuf>, String, Position)>>,
+    navigation_list: Rc<QuickOpen>,
+    navigation_kind: Cell<bool>,
+    navigation_positions: RefCell<std::collections::BTreeMap<String, (String, Position)>>,
     /// MRU de `rel_path` §17 abiertos (§41): el más reciente primero.
     recent: RefCell<Vec<String>>,
     /// Directorio base de la lista standalone de Quick Open (ISSUE-029) y de
@@ -295,6 +331,265 @@ struct Sidebar {
 }
 
 impl AppCmds {
+    fn refresh_intelligence(&self, suggest: bool) {
+        self.intelligence_suggest
+            .set(self.intelligence_suggest.get() || suggest);
+        if self.intelligence_busy.get() {
+            self.intelligence_pending.set(true);
+            return;
+        }
+        let Some(snapshot) = self.intelligence_snapshot() else {
+            return;
+        };
+        self.intelligence_busy.set(true);
+        self.intelligence_pending.set(false);
+        let suggest = self.intelligence_suggest.replace(false)
+            && self.tabs.borrow().active().editor.selection().is_empty();
+        let generation = self.intelligence_generation.get().wrapping_add(1);
+        self.intelligence_generation.set(generation);
+        let cursor = self.tabs.borrow().active().editor.selection().head;
+        let offset = self.tabs.borrow().active().editor.offset_of(cursor).ok();
+        let path = self.tabs.borrow().active().path.clone();
+        let source = snapshot.source.clone();
+        let backlinks = self.navigation_list.is_visible() && self.navigation_kind.get();
+        let (tx, rx) = channel();
+        std::thread::spawn(move || {
+            let links = snapshot.links();
+            let completions = if suggest {
+                offset.map(|o| snapshot.completions(o)).unwrap_or_default()
+            } else {
+                Vec::new()
+            };
+            let back = backlinks.then(|| snapshot.backlinks());
+            let _ = tx.send((generation, path, source, cursor, links, completions, back));
+        });
+        deliver_to_quickopen(
+            rx,
+            self.slot.clone(),
+            |me, (generation, path, source, cursor, links, completions, back)| {
+                me.intelligence_busy.set(false);
+                if me.intelligence_pending.replace(false) {
+                    me.refresh_intelligence(false);
+                    return;
+                }
+                if generation != me.intelligence_generation.get() {
+                    return;
+                }
+                let tabs = me.tabs.borrow();
+                if tabs.active().path != path || tabs.active().editor.document().content() != source
+                {
+                    return;
+                }
+                let same_cursor = tabs.active().editor.selection() == Selection::collapsed(cursor);
+                drop(tabs);
+                me.editor_pane.set_link_diagnostics(&source, &links);
+                me.preview.set_link_diagnostics(&links);
+                if same_cursor && !completions.is_empty() {
+                    *me.completion_source.borrow_mut() = Some((path, source.clone(), cursor));
+                    me.editor_pane.show_completions(completions);
+                }
+                if let Some(entries) = back {
+                    let mut positions = me.navigation_positions.borrow_mut();
+                    positions.clear();
+                    let entries = entries
+                        .into_iter()
+                        .enumerate()
+                        .map(|(i, mut item)| {
+                            let key = format!("backlink-{i}");
+                            positions.insert(key.clone(), (item.entry.rel_path, item.position));
+                            item.entry.rel_path = key;
+                            item.entry
+                        })
+                        .collect();
+                    me.navigation_list.set_entries(entries);
+                }
+            },
+        );
+    }
+
+    fn accept_completion(&self, completion: intelligence::Completion) {
+        let Some((path, source, cursor)) = self.completion_source.borrow_mut().take() else {
+            return;
+        };
+        let mut tabs = self.tabs.borrow_mut();
+        let active = tabs.active();
+        if active.path != path
+            || active.editor.document().content() != source
+            || active.editor.selection() != Selection::collapsed(cursor)
+        {
+            return;
+        }
+        let range = Range::new(
+            active.editor.position_of(completion.span.start as usize),
+            active.editor.position_of(completion.span.end as usize),
+        );
+        tabs.replace_active(range, &completion.text);
+        drop(tabs);
+        self.reload_active();
+    }
+
+    fn show_navigation(&self, backlinks: bool) {
+        self.navigation_kind.set(backlinks);
+        self.navigation_positions.borrow_mut().clear();
+        self.navigation_list
+            .set_title(if backlinks { "Backlinks" } else { "Outline" });
+        self.navigation_list.set_entries(Vec::new());
+        self.navigation_list.present();
+        self.refresh_navigation();
+    }
+
+    fn refresh_navigation(&self) {
+        if !self.navigation_list.is_visible() {
+            return;
+        }
+        if self.navigation_kind.get() {
+            if self.tabs.borrow().active().path.is_none() {
+                self.navigation_list.set_entries(Vec::new());
+            } else {
+                self.refresh_intelligence(false);
+            }
+            return;
+        }
+        let tabs = self.tabs.borrow();
+        let headings = minmark_document::document_anchors(&minmark_document::find_heading_nodes(
+            tabs.active().editor.document().content(),
+        ));
+        self.navigation_list.set_entries(
+            headings
+                .into_iter()
+                .map(|h| minmark_fs::fuzzy::Entry {
+                    label: format!(
+                        "{}H{} {}",
+                        "  ".repeat(h.level.saturating_sub(1) as usize),
+                        h.level,
+                        h.text
+                    ),
+                    rel_path: String::new(),
+                    line: Some(h.line),
+                    heading: None,
+                    score: 0,
+                })
+                .collect(),
+        );
+    }
+    fn intelligence_snapshot(&self) -> Option<intelligence::Snapshot> {
+        let root = self
+            .quickopen_base()
+            .or_else(|| std::env::current_dir().ok())?;
+        let tabs = self.tabs.borrow();
+        let tab = tabs.active();
+        let from = tab
+            .path
+            .as_ref()
+            .map(|p| minmark_fs::relative_path(&root, &ruta_comparable(p)))
+            .unwrap_or_else(|| "__untitled__.md".into());
+        let buffers = tabs
+            .tabs()
+            .iter()
+            .filter_map(|tab| {
+                tab.path.as_ref().map(|p| {
+                    (
+                        minmark_fs::relative_path(&root, &ruta_comparable(p)),
+                        tab.editor.document().content().to_owned(),
+                    )
+                })
+            })
+            .collect();
+        Some(intelligence::Snapshot {
+            index: self
+                .index
+                .borrow()
+                .as_ref()
+                .filter(|i| i.root() == root)
+                .cloned()
+                .unwrap_or_else(|| minmark_fs::ProjectIndex::new(root)),
+            buffers,
+            from,
+            source: tab.editor.document().content().to_owned(),
+            wiki: self.settings.borrow().wiki_links,
+        })
+    }
+
+    fn activate_link(&self, position: Option<Position>, destination: Option<String>) {
+        let Some(snapshot) = self.intelligence_snapshot() else {
+            return;
+        };
+        let offset = position.and_then(|p| self.tabs.borrow().active().editor.offset_of(p).ok());
+        let path = self.tabs.borrow().active().path.clone();
+        let source = snapshot.source.clone();
+        let root = snapshot.index.root().to_path_buf();
+        let (tx, rx) = channel();
+        std::thread::spawn(move || {
+            let target = if let Some(dest) = destination {
+                snapshot.query(|r| {
+                    if let Some(wiki) = dest.strip_prefix("minmark-wiki:") {
+                        snapshot.wiki.then(|| r.resolve_wiki(wiki))
+                    } else {
+                        Some(r.resolve(&dest, &snapshot.from))
+                    }
+                })
+            } else {
+                snapshot
+                    .links()
+                    .into_iter()
+                    .find(|l| {
+                        offset
+                            .is_some_and(|o| l.span.start as usize <= o && o < l.span.end as usize)
+                    })
+                    .map(|l| l.target)
+            };
+            let _ = tx.send((path, source, root, target));
+        });
+        deliver_to_quickopen(rx, self.slot.clone(), |me, (path, source, root, target)| {
+            let current = me.tabs.borrow();
+            if current.active().path != path
+                || current.active().editor.document().content() != source
+            {
+                return;
+            }
+            drop(current);
+            let Some(target) = target else { return };
+            if let Some(message) = intelligence::problem(&target) {
+                show_error(&me.window, &message);
+                return;
+            }
+            if target.kind != minmark_fs::TargetKind::Local {
+                return;
+            }
+            let Some(rel) = target.rel_path else { return };
+            let target_path = root.join(&rel);
+            if path.is_none() && rel == "__untitled__.md" {
+                if let Some(anchor) = target.anchor {
+                    me.focus_line(anchor.line);
+                }
+                return;
+            }
+            me.activate_or_open(&target_path);
+            if me
+                .tabs
+                .borrow()
+                .active()
+                .path
+                .as_ref()
+                .is_some_and(|p| ruta_comparable(p) == ruta_comparable(&target_path))
+            {
+                if let Some(anchor) = target.anchor {
+                    me.focus_line(anchor.line);
+                }
+            }
+        });
+    }
+
+    fn focus_line(&self, line: u32) {
+        let at = Position::new(line.saturating_sub(1), 0);
+        self.editor_pane.focus_find_match(Range::new(at, at));
+        if let Ok(byte) = self.tabs.borrow().active().editor.offset_of(at) {
+            self.preview.scroll_to_byte(byte as u32);
+        }
+        let pane = self.editor_pane.clone();
+        glib::idle_add_local_once(move || pane.scroll_to_cursor());
+    }
+
     fn slot(&self) -> Option<Rc<AppCmds>> {
         self.slot.borrow().as_ref().and_then(Weak::upgrade)
     }
@@ -309,6 +604,7 @@ impl AppCmds {
         }
         self.refresh_now();
         self.sync_quickopen_context();
+        self.refresh_navigation();
     }
 
     /// Contexto de Quick Open (§41, ISSUE-029) con el tab activo: `rel_path`
@@ -337,7 +633,9 @@ impl AppCmds {
         }
         let base = self.quickopen_base();
         let rel_path = match (&base, &path) {
-            (Some(base), Some(path)) => Some(minmark_fs::relative_path(base, path)),
+            (Some(base), Some(path)) => {
+                Some(minmark_fs::relative_path(base, &ruta_comparable(path)))
+            }
             _ => None,
         };
         self.quickopen.set_current_path(rel_path.clone());
@@ -350,7 +648,10 @@ impl AppCmds {
         // cada refresco; en standalone se reconstruye al cambiar de directorio.
         if recargar {
             match base {
-                Some(base) => spawn_quickopen_entries(base, self.slot.clone()),
+                Some(base) => {
+                    spawn_quickopen_entries(base.clone(), self.slot.clone());
+                    spawn_index_refresh(base, self.slot.clone());
+                }
                 None => self.quickopen.set_entries(Vec::new()),
             }
         }
@@ -370,7 +671,9 @@ impl AppCmds {
     /// (ISSUE-021) y, si la entrada trae línea (`:N` o heading ya resuelto
     /// por la paleta), coloca cursor + scroll §8.6 (1-based → 0-based).
     fn open_quickopen_entry(&self, rel_path: &str, line: Option<u32>) {
-        let Some(base) = self.quickopen_base() else { return };
+        let Some(base) = self.quickopen_base() else {
+            return;
+        };
         let path = base.join(rel_path);
         // §41: `:N`/`@heading` saltan en el documento actual; se activa la
         // pestaña ya abierta en vez de duplicarla (mismo criterio que un
@@ -379,33 +682,57 @@ impl AppCmds {
         let Some(line) = line else { return };
         // El cursor solo se coloca si la pestaña activa es ese fichero
         // (`activate_or_open` pudo abrirlo en una ventana nueva o fallar).
-        let activo = self.tabs.borrow().active().path.as_deref().is_some_and(
-            |opened| ruta_comparable(opened) == ruta_comparable(&path),
-        );
+        let activo = self
+            .tabs
+            .borrow()
+            .active()
+            .path
+            .as_deref()
+            .is_some_and(|opened| ruta_comparable(opened) == ruta_comparable(&path));
         if !activo {
             return;
         }
-        let at = Position::new(line.saturating_sub(1), 0); // §8.6: 1-based → 0-based
-        // §8.6: cursor + scroll. El `TextBuffer` acaba de recargar el tab
-        // (§6.1) y el scroll diferido de GTK se consume contra el layout ya
-        // revalidado: se pide en el siguiente turno del bucle, cuando
-        // `set_text` ya está consolidado (con scroll inmediato el TextView
-        // termina abajo del buffer).
-        let editor_pane = self.editor_pane.clone();
-        glib::idle_add_local_once(move || {
-            // `focus_find_match` ya hace cursor + scroll y con un rango
-            // colapsado el cursor queda al inicio de la línea.
-            editor_pane.focus_find_match(Range::new(at, at));
-        });
+        self.focus_line(line);
     }
 
     /// Refresco completo del tab activo: highlighting, Preview y vista
     /// Visual comparten el mismo render del buffer (§6.1).
     fn refresh_now(&self) {
-        let text = self.tabs.borrow().active().editor.document().content().to_owned();
+        let text = self
+            .tabs
+            .borrow()
+            .active()
+            .editor
+            .document()
+            .content()
+            .to_owned();
+        let root = self.scope.project_root();
+        let effective = settings::load(root.as_deref(), &text);
+        self.editor_pane.set_wiki_links(effective.wiki_links);
+        {
+            let mut settings = self.settings.borrow_mut();
+            settings.wiki_links = effective.wiki_links;
+            settings.language = effective.language;
+            settings.heading_numbering = effective.heading_numbering;
+            settings.counter_numbering = effective.counter_numbering;
+        }
         let html = render_document(&text, &self.settings.borrow());
         self.editor_pane.refresh(&text);
-        self.preview.update_html(&html);
+        let directory = self
+            .tabs
+            .borrow()
+            .active()
+            .path
+            .as_deref()
+            .and_then(Path::parent)
+            .map(ruta_comparable);
+        let base_uri = directory.map(|dir| {
+            format!(
+                "{}/",
+                gtk4::gio::File::for_path(dir).uri().trim_end_matches('/')
+            )
+        });
+        self.preview.update_html(&html, base_uri.as_deref());
         {
             let tabs = self.tabs.borrow();
             self.tab_bar.sync(&tabs);
@@ -415,6 +742,7 @@ impl AppCmds {
         // ancla pasa a ser el cursor (edición, undo/redo o cambio de tab).
         let cursor = self.tabs.borrow().active().editor.selection().head;
         self.find_refresh(Some(cursor), false);
+        self.refresh_intelligence(false);
     }
 
     /// Pinta el marcado de búsqueda y la barra desde [`find::FindState`]
@@ -599,7 +927,9 @@ impl AppCmds {
     /// (`None` = raíz del proyecto).
     fn explorer_op(&self, action: ExplorerAction, target: Option<PathBuf>) {
         let Some(me) = self.slot() else { return };
-        let Some(root) = self.scope.project_root() else { return };
+        let Some(root) = self.scope.project_root() else {
+            return;
+        };
         match action {
             ExplorerAction::CopyRelativePath => {
                 let Some(target) = target else { return };
@@ -647,22 +977,29 @@ impl AppCmds {
                 };
                 let window = self.window.clone();
                 let prompt_window = self.window.clone();
-                dialogs::prompt_text(&window, title, initial, Rc::new(move |answer| {
-                    let Some(name) = answer.filter(|n| !n.trim().is_empty()) else { return };
-                    let created = if action == ExplorerAction::NewMarkdown {
-                        minmark_fs::create_markdown(&root, &parent, &name)
-                    } else {
-                        minmark_fs::create_folder(&root, &parent, &name)
-                    };
-                    match created {
-                        Ok(path) => {
-                            // Criterio 3 (ISSUE-026): alta propia, no externa.
-                            me.self_ops.register(&path);
-                            me.refresh_explorer();
+                dialogs::prompt_text(
+                    &window,
+                    title,
+                    initial,
+                    Rc::new(move |answer| {
+                        let Some(name) = answer.filter(|n| !n.trim().is_empty()) else {
+                            return;
+                        };
+                        let created = if action == ExplorerAction::NewMarkdown {
+                            minmark_fs::create_markdown(&root, &parent, &name)
+                        } else {
+                            minmark_fs::create_folder(&root, &parent, &name)
+                        };
+                        match created {
+                            Ok(path) => {
+                                // Criterio 3 (ISSUE-026): alta propia, no externa.
+                                me.self_ops.register(&path);
+                                me.refresh_explorer();
+                            }
+                            Err(err) => show_error(&prompt_window, &err.to_string()),
                         }
-                        Err(err) => show_error(&prompt_window, &err.to_string()),
-                    }
-                }));
+                    }),
+                );
             }
             ExplorerAction::Rename => {
                 let Some(target) = target else { return };
@@ -672,19 +1009,33 @@ impl AppCmds {
                     .unwrap_or_default();
                 let parent = target.parent().unwrap_or(&root).to_path_buf();
                 let window = self.window.clone();
-                dialogs::prompt_text(&window, "Rename", &initial, Rc::new(move |answer| {
-                    let Some(name) = answer.filter(|n| !n.trim().is_empty()) else { return };
-                    me.rename_with_links(&target, &parent.join(name));
-                }));
+                dialogs::prompt_text(
+                    &window,
+                    "Rename",
+                    &initial,
+                    Rc::new(move |answer| {
+                        let Some(name) = answer.filter(|n| !n.trim().is_empty()) else {
+                            return;
+                        };
+                        me.rename_with_links(&target, &parent.join(name));
+                    }),
+                );
             }
             ExplorerAction::Move => {
                 let Some(target) = target else { return };
                 let initial = minmark_fs::relative_path(&root, &target);
                 let window = self.window.clone();
-                dialogs::prompt_text(&window, "Move", &initial, Rc::new(move |answer| {
-                    let Some(dest) = answer.filter(|n| !n.trim().is_empty()) else { return };
-                    me.rename_with_links(&target, &root.join(dest));
-                }));
+                dialogs::prompt_text(
+                    &window,
+                    "Move",
+                    &initial,
+                    Rc::new(move |answer| {
+                        let Some(dest) = answer.filter(|n| !n.trim().is_empty()) else {
+                            return;
+                        };
+                        me.rename_with_links(&target, &root.join(dest));
+                    }),
+                );
             }
             ExplorerAction::ImportMarkdown => {
                 // §15: el nodo del click derecho es la carpeta destino.
@@ -748,12 +1099,17 @@ impl AppCmds {
         let window = self.window.clone();
         match self.scope.project_root() {
             Some(root) => {
-                dialogs::prompt_text(&window, "Import Markdown — destino", ".", Rc::new(
-                    move |answer| {
-                        let Some(dest) = answer.filter(|n| !n.trim().is_empty()) else { return };
+                dialogs::prompt_text(
+                    &window,
+                    "Import Markdown — destino",
+                    ".",
+                    Rc::new(move |answer| {
+                        let Some(dest) = answer.filter(|n| !n.trim().is_empty()) else {
+                            return;
+                        };
                         me.import_copy(&source, &root.join(dest), &root);
-                    },
-                ));
+                    }),
+                );
             }
             None => {
                 glib::spawn_future_local(async move {
@@ -783,12 +1139,14 @@ impl AppCmds {
     /// Rename/movimiento §16 (ISSUE-023): plan all-or-nothing, aplicación con
     /// rollback y retarget de las pestañas afectadas.
     fn rename_with_links(&self, from: &Path, to: &Path) {
-        let Some(root) = self.scope.project_root() else { return };
+        let Some(root) = self.scope.project_root() else {
+            return;
+        };
         // Criterio 3 (ISSUE-026): el movimiento propio no avisa como externo.
         self.self_ops.register(from);
         self.self_ops.register(to);
         let options = minmark_fs::ChangeOptions {
-            wiki_links: minmark_fs::wiki_links_active(&root),
+            wiki_links: self.settings.borrow().wiki_links,
         };
         let result = minmark_fs::plan_path_change(&root, from, to, options)
             .and_then(|plan| minmark_fs::apply_path_change(&plan));
@@ -844,8 +1202,12 @@ impl AppCmds {
     /// compartido se restaura del estado guardado).
     fn show_sidebar_view(&self, view: SidebarView) {
         let Some(side) = &self.sidebar else { return };
-        side.explorer.widget().set_visible(view == SidebarView::Explorer);
-        side.search.widget().set_visible(view == SidebarView::Search);
+        side.explorer
+            .widget()
+            .set_visible(view == SidebarView::Explorer);
+        side.search
+            .widget()
+            .set_visible(view == SidebarView::Search);
         side.view.set(view);
         if !side.visible.get() {
             let width = side.state.borrow().width;
@@ -882,6 +1244,12 @@ impl AppCmds {
             touched_tabs = true;
         }
         self.refresh_explorer();
+        if events
+            .iter()
+            .any(|e| e.path.file_name().is_some_and(|n| n == ".mdproject.toml"))
+        {
+            self.refresh_now();
+        }
         if let Some(root) = self.scope.project_root() {
             spawn_index_refresh(root, self.slot.clone());
         }
@@ -901,6 +1269,8 @@ impl AppCmds {
         glib::timeout_add_local_once(Duration::from_millis(REFRESH_DEBOUNCE_MS), move || {
             me.refresh_scheduled.set(false);
             me.refresh_now();
+            me.refresh_intelligence(true);
+            me.refresh_navigation();
         });
     }
 
@@ -921,6 +1291,16 @@ impl AppCmds {
 }
 
 impl Commands for AppCmds {
+    fn outline(&self) {
+        self.show_navigation(false);
+    }
+    fn follow_link(&self) {
+        let cursor = self.tabs.borrow().active().editor.selection().head;
+        self.activate_link(Some(cursor), None);
+    }
+    fn backlinks(&self) {
+        self.show_navigation(true);
+    }
     fn new(&self) {
         self.tabs.borrow_mut().new_tab();
         self.reload_active();
@@ -1027,7 +1407,8 @@ impl Commands for AppCmds {
         // probado en `minmark-pdf` (ISSUE-018).
         let Some(_me) = self.slot() else { return };
         let window = self.window.clone();
-        let (text, settings, suggested) = {
+        let root = self.scope.project_root();
+        let (text, settings, suggested, document_path) = {
             let tabs = self.tabs.borrow();
             let tab = tabs.active();
             let suggested = match &tab.path {
@@ -1041,13 +1422,19 @@ impl Commands for AppCmds {
                 tab.editor.document().content().to_owned(),
                 self.settings.borrow().clone(),
                 suggested,
+                tab.path.clone(),
             )
         };
         glib::spawn_future_local(async move {
             let Some(path) = dialogs::save_pdf(&window, &suggested).await else {
                 return;
             };
-            match export::export_document(&text, &settings) {
+            match export::export_document_at(
+                &text,
+                &settings,
+                document_path.as_deref(),
+                root.as_deref(),
+            ) {
                 Ok(bytes) => {
                     if let Err(err) = std::fs::write(&path, &bytes) {
                         show_error(&window, &err.to_string());
@@ -1268,7 +1655,7 @@ fn install_theme_css(palette: &Palette, theme: ResolvedTheme) {
     }
 }
 
-fn build_window(app: &Application, scope: WindowScope, open_paths: &[PathBuf]) {
+fn build_window(app: &Application, scope: WindowScope, open_paths: &[PathBuf]) -> Rc<AppCmds> {
     let settings = Settings::default();
     let theme = resolve_theme(settings.theme, detect_system_theme());
     let palette = match theme {
@@ -1296,9 +1683,7 @@ fn build_window(app: &Application, scope: WindowScope, open_paths: &[PathBuf]) {
         }
     }
 
-    let sink = Rc::new(Sink {
-        tabs: tabs.clone(),
-    });
+    let sink = Rc::new(Sink { tabs: tabs.clone() });
     let on_edited = {
         let slot = slot.clone();
         Rc::new(move || {
@@ -1311,6 +1696,30 @@ fn build_window(app: &Application, scope: WindowScope, open_paths: &[PathBuf]) {
     // §8.3 (ISSUE-030): visibilidad de la sintaxis en Visual según ajuste.
     editor_pane.set_visual_syntax(settings.visual_syntax);
     let preview = Rc::new(PreviewPane::new());
+    editor_pane.connect_link_activation({
+        let slot = slot.clone();
+        Rc::new(move |at| {
+            if let Some(me) = slot.borrow().as_ref().and_then(Weak::upgrade) {
+                me.activate_link(Some(at), None);
+            }
+        })
+    });
+    preview.connect_link_activation({
+        let slot = slot.clone();
+        Rc::new(move |dest| {
+            if let Some(me) = slot.borrow().as_ref().and_then(Weak::upgrade) {
+                me.activate_link(None, Some(dest));
+            }
+        })
+    });
+    editor_pane.connect_completion({
+        let slot = slot.clone();
+        Rc::new(move |item| {
+            if let Some(me) = slot.borrow().as_ref().and_then(Weak::upgrade) {
+                me.accept_completion(item);
+            }
+        })
+    });
     let tab_bar = Rc::new(TabBar::new({
         let slot = slot.clone();
         Rc::new(move |index| {
@@ -1334,6 +1743,38 @@ fn build_window(app: &Application, scope: WindowScope, open_paths: &[PathBuf]) {
     // Paleta Quick Open (§41, ISSUE-029): modal sobre esta ventana (§36) y
     // con la apertura en tardío por [`CmdSlot`], como el resto de widgets.
     let quickopen = Rc::new(QuickOpen::new());
+    let navigation_list = Rc::new(QuickOpen::new());
+    navigation_list.set_transient_for(window.upcast_ref::<gtk4::Window>());
+    navigation_list.set_on_open({
+        let slot = slot.clone();
+        Rc::new(move |path, line| {
+            if let Some(me) = slot.borrow().as_ref().and_then(Weak::upgrade) {
+                if path.is_empty() {
+                    if let Some(line) = line {
+                        me.focus_line(line);
+                    }
+                } else {
+                    let target = me.navigation_positions.borrow().get(&path).cloned();
+                    if let Some((path, at)) = target {
+                        me.open_quickopen_entry(&path, Some(at.line + 1));
+                        if me
+                            .tabs
+                            .borrow()
+                            .active()
+                            .path
+                            .as_ref()
+                            .zip(me.quickopen_base())
+                            .is_some_and(|(p, base)| {
+                                minmark_fs::relative_path(&base, &ruta_comparable(p)) == path
+                            })
+                        {
+                            me.editor_pane.focus_find_match(Range::new(at, at));
+                        }
+                    }
+                }
+            }
+        })
+    });
     quickopen.set_transient_for(window.upcast_ref::<gtk4::Window>());
     quickopen.set_on_open({
         let slot = slot.clone();
@@ -1390,21 +1831,25 @@ fn build_window(app: &Application, scope: WindowScope, open_paths: &[PathBuf]) {
                     let Some(me) = slot.borrow().as_ref().and_then(Weak::upgrade) else {
                         return;
                     };
-                    let Some(root) = me.scope.project_root() else { return };
+                    let Some(root) = me.scope.project_root() else {
+                        return;
+                    };
                     let path = root.join(&rel_path);
                     me.activate_or_open(&path);
                     // El cursor solo se coloca si la pestaña activa es ese
                     // fichero (`open_path` pudo abrir una ventana nueva).
-                    let activo = me.tabs.borrow().active().path.as_deref().is_some_and(
-                        |p| ruta_comparable(p) == ruta_comparable(&path),
-                    );
+                    let activo = me
+                        .tabs
+                        .borrow()
+                        .active()
+                        .path
+                        .as_deref()
+                        .is_some_and(|p| ruta_comparable(p) == ruta_comparable(&path));
                     if !activo {
                         return;
                     }
-                    let position = Position::new(
-                        line.saturating_sub(1) as u32,
-                        col.saturating_sub(1) as u32,
-                    );
+                    let position =
+                        Position::new(line.saturating_sub(1) as u32, col.saturating_sub(1) as u32);
                     me.tabs
                         .borrow_mut()
                         .set_selection_active(Selection::collapsed(position));
@@ -1421,7 +1866,9 @@ fn build_window(app: &Application, scope: WindowScope, open_paths: &[PathBuf]) {
                     let Some(me) = slot.borrow().as_ref().and_then(Weak::upgrade) else {
                         return;
                     };
-                    let Some(root) = me.scope.project_root() else { return };
+                    let Some(root) = me.scope.project_root() else {
+                        return;
+                    };
                     // 1. Escrituras PROPIAS §14.8 (ISSUE-026 criterio 3):
                     //    registradas antes de que el watcher (§46) las vea.
                     for rel in &summary.files {
@@ -1570,6 +2017,16 @@ fn build_window(app: &Application, scope: WindowScope, open_paths: &[PathBuf]) {
         tab_bar,
         find_bar,
         quickopen,
+        index: RefCell::new(None),
+        index_generation: Cell::new(0),
+        intelligence_generation: Cell::new(0),
+        intelligence_busy: Cell::new(false),
+        intelligence_pending: Cell::new(false),
+        intelligence_suggest: Cell::new(false),
+        completion_source: RefCell::new(None),
+        navigation_list,
+        navigation_kind: Cell::new(false),
+        navigation_positions: RefCell::new(std::collections::BTreeMap::new()),
         recent: RefCell::new(Vec::new()),
         quickopen_dir: RefCell::new(None),
         sidebar,
@@ -1628,7 +2085,32 @@ fn build_window(app: &Application, scope: WindowScope, open_paths: &[PathBuf]) {
 
     cmds.reload_active();
     cmds.apply_view();
+    // Cambios de configuración global, también con pestañas sin editar.
+    // Solo se consulta el stamp del archivo, nunca se recorre el proyecto.
+    let mut config_stamp = settings::global_path()
+        .and_then(|p| std::fs::metadata(p).ok())
+        .and_then(|m| m.modified().ok());
+    glib::timeout_add_local(Duration::from_secs(1), {
+        let slot = slot.clone();
+        let window = window.downgrade();
+        move || {
+            if window.upgrade().is_none() {
+                return glib::ControlFlow::Break;
+            }
+            let stamp = settings::global_path()
+                .and_then(|p| std::fs::metadata(p).ok())
+                .and_then(|m| m.modified().ok());
+            if stamp != config_stamp {
+                config_stamp = stamp;
+                if let Some(me) = slot.borrow().as_ref().and_then(Weak::upgrade) {
+                    me.refresh_now();
+                }
+            }
+            glib::ControlFlow::Continue
+        }
+    });
     window.present();
+    cmds
 }
 
 /// Garantiza que el sandbox de WebKit puede funcionar antes de crear la
@@ -1702,12 +2184,18 @@ mod tests {
         ops.register(Path::new("/p/doc.md"));
 
         assert!(ops.consume(Path::new("/p/doc.md")), "el propio archivo");
-        assert!(!ops.consume(Path::new("/p/doc.md")), "una sola entrada por registro");
+        assert!(
+            !ops.consume(Path::new("/p/doc.md")),
+            "una sola entrada por registro"
+        );
         assert!(
             ops.consume(Path::new("/p/cap/a.md")),
             "los eventos dentro de una carpeta propia también"
         );
-        assert!(!ops.consume(Path::new("/p/ajeno.md")), "lo externo sigue avisando");
+        assert!(
+            !ops.consume(Path::new("/p/ajeno.md")),
+            "lo externo sigue avisando"
+        );
     }
 
     /// §9.1 (petición de usuario): la barra vertical del split editor|preview
@@ -1772,9 +2260,142 @@ mod tests {
         std::fs::write(base.join(".gitignore"), "ignorado.md\n").unwrap();
 
         let entries = quickopen_entries(&base);
-        let rel_paths: Vec<&str> =
-            entries.iter().map(|entry| entry.rel_path.as_str()).collect();
+        let rel_paths: Vec<&str> = entries
+            .iter()
+            .map(|entry| entry.rel_path.as_str())
+            .collect();
         assert_eq!(rel_paths, ["a.md", "carpeta/b.md", "imagen.png"]);
         let _ = std::fs::remove_dir_all(&base);
+    }
+}
+
+#[cfg(test)]
+mod gtk_integration_tests {
+    use super::*;
+    fn pump_until(condition: impl Fn() -> bool) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(8);
+        while !condition() {
+            assert!(std::time::Instant::now() < deadline, "timeout GTK");
+            while glib::MainContext::default().pending() {
+                glib::MainContext::default().iteration(false);
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+    #[test]
+    #[ignore = "requiere sesión gráfica GTK/WebKit"]
+    fn gtk_navigation_outline_completion_and_dirty_buffers() {
+        gtk4::init().expect("GTK display");
+        ensure_webkit_sandbox_usable();
+        let root = std::env::temp_dir().join(format!("minmark-gtk-phase4-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let a = root.join("a.md");
+        let b = root.join("b.md");
+        std::fs::write(&a, "# Origen\n\n[ir](b.md#nuevo)\n").unwrap();
+        std::fs::write(&b, "# Anterior\n").unwrap();
+        let app = Application::builder()
+            .application_id("app.minmark.test.phase4")
+            .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk4::gio::Cancellable>).unwrap();
+        let cmds = build_window(
+            &app,
+            WindowScope::Project(root.clone()),
+            &[a.clone(), b.clone()],
+        );
+        pump_until(|| cmds.index.borrow().is_some());
+        cmds.tabs.borrow_mut().replace_active(
+            Range::new(Position::new(0, 0), Position::new(0, 10)),
+            "# Nuevo",
+        );
+        cmds.select_tab(1);
+        let before = cmds.tabs.borrow().len();
+        cmds.editor_pane
+            .focus_find_match(Range::new(Position::new(2, 2), Position::new(2, 2)));
+        assert!(cmds.editor_pane.emit_test_key(
+            gtk4::gdk::Key::Return,
+            gtk4::gdk::ModifierType::CONTROL_MASK
+        ));
+        pump_until(|| cmds.tabs.borrow().active().path.as_ref() == Some(&b));
+        assert_eq!(cmds.tabs.borrow().len(), before);
+        assert!(cmds
+            .tabs
+            .borrow()
+            .active()
+            .editor
+            .document()
+            .content()
+            .starts_with("# Nuevo"));
+        assert!(cmds.tabs.borrow().active().editor.document().is_modified());
+        cmds.select_tab(1);
+        cmds.toggle_mode();
+        cmds.editor_pane
+            .focus_find_match(Range::new(Position::new(2, 2), Position::new(2, 2)));
+        assert!(cmds.editor_pane.emit_test_key(
+            gtk4::gdk::Key::Return,
+            gtk4::gdk::ModifierType::CONTROL_MASK
+        ));
+        pump_until(|| cmds.tabs.borrow().active().path.as_ref() == Some(&b));
+        cmds.select_tab(1);
+        pump_until(|| !cmds.preview.test_is_loading());
+        let clicked = Rc::new(Cell::new(false));
+        cmds.preview.test_click_first_link(clicked.clone());
+        pump_until(|| clicked.get() && cmds.tabs.borrow().active().path.as_ref() == Some(&b));
+        cmds.show_navigation(false);
+        assert!(cmds.navigation_list.is_visible());
+        cmds.navigation_list.hide();
+        cmds.select_tab(1);
+        cmds.tabs.borrow_mut().replace_active(
+            Range::new(Position::new(2, 0), Position::new(2, 16)),
+            "[ir](b",
+        );
+        cmds.reload_active();
+        cmds.refresh_intelligence(true);
+        pump_until(|| cmds.completion_source.borrow().is_some());
+        let unchanged = cmds
+            .tabs
+            .borrow()
+            .active()
+            .editor
+            .document()
+            .content()
+            .to_owned();
+        assert!(cmds
+            .editor_pane
+            .emit_test_key(gtk4::gdk::Key::Escape, gtk4::gdk::ModifierType::empty()));
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content(),
+            unchanged
+        );
+        // Una pulsación nueva vuelve a habilitar sugerencias tras Escape.
+        cmds.tabs
+            .borrow_mut()
+            .insert_active(Position::new(2, 6), ".");
+        cmds.reload_active();
+        *cmds.completion_source.borrow_mut() = None;
+        cmds.refresh_intelligence(true);
+        pump_until(|| cmds.completion_source.borrow().is_some());
+        assert!(cmds
+            .editor_pane
+            .emit_test_key(gtk4::gdk::Key::Tab, gtk4::gdk::ModifierType::empty()));
+        assert!(cmds
+            .tabs
+            .borrow()
+            .active()
+            .editor
+            .document()
+            .content()
+            .contains("[ir](b.md"));
+        cmds.tabs.borrow_mut().undo_active();
+        assert!(cmds
+            .tabs
+            .borrow()
+            .active()
+            .editor
+            .document()
+            .content()
+            .contains("[ir](b.\n"));
+        cmds.window.destroy();
+        let _ = std::fs::remove_dir_all(root);
     }
 }

@@ -158,10 +158,7 @@ pub fn resolve(layers: &[ConfigLayer]) -> Resolved {
         }
     }
 
-    Resolved {
-        settings,
-        warnings,
-    }
+    Resolved { settings, warnings }
 }
 
 #[cfg(test)]
@@ -236,11 +233,7 @@ mod tests {
 
     #[test]
     fn clave_desconocida_se_ignora_con_aviso() {
-        let resolved = resolve(&layers(&[(
-            Level::Project,
-            "no_existe",
-            Value::Bool(true),
-        )]));
+        let resolved = resolve(&layers(&[(Level::Project, "no_existe", Value::Bool(true))]));
         assert_eq!(resolved.settings, Settings::default());
         assert_eq!(resolved.warnings.len(), 1);
         assert_eq!(resolved.warnings[0].reason, WarningReason::UnknownKey);
@@ -275,5 +268,76 @@ mod tests {
                 "{key} no reconocida por apply"
             );
         }
+    }
+}
+
+/// Capa de ajustes escalares en el nivel raíz de TOML o front matter YAML.
+/// Las tablas, colecciones y claves ajenas a Settings no se reinterpretan.
+pub fn parse_scalar_layer(source: &str, level: Level) -> ConfigLayer {
+    let mut layer = ConfigLayer::new(level);
+    for line in source.lines() {
+        if level != Level::Document && line.trim_start().starts_with('[') {
+            break;
+        }
+        if line.starts_with([' ', '\t']) {
+            continue;
+        }
+        let separator = if level == Level::Document { ':' } else { '=' };
+        let Some((key, raw)) = line.split_once(separator) else {
+            continue;
+        };
+        let key = key.trim();
+        if !KEYS.iter().any(|(known, _)| *known == key) {
+            continue;
+        }
+        let raw = raw.trim();
+        let value = if let Some(quote) = raw.chars().next().filter(|c| *c == '"' || *c == '\'') {
+            let Some(end) = raw[1..].find(quote).map(|i| i + 1) else {
+                continue;
+            };
+            let suffix = raw[end + 1..].trim();
+            if !suffix.is_empty() && !suffix.starts_with('#') {
+                continue;
+            }
+            Value::Text(raw[1..end].to_owned())
+        } else {
+            let raw = raw.split('#').next().unwrap_or("").trim();
+            match raw {
+                "true" => Value::Bool(true),
+                "false" => Value::Bool(false),
+                _ => {
+                    if let Ok(value) = raw.parse::<i64>() {
+                        Value::Integer(value)
+                    } else if let Ok(value) = raw.parse::<f64>() {
+                        Value::Number(value)
+                    } else if level == Level::Document {
+                        Value::Text(raw.to_owned())
+                    } else {
+                        continue;
+                    }
+                }
+            }
+        };
+        layer.set(key, value);
+    }
+    layer
+}
+
+#[cfg(test)]
+mod scalar_layer_tests {
+    use super::*;
+    #[test]
+    fn idioma_y_wiki_respetan_ambitos_y_precedencia() {
+        let global = parse_scalar_layer("wiki_links = true\nlanguage = \"en\"", Level::Global);
+        let project = parse_scalar_layer(
+            "wiki_links = false # explícito\nlanguage = 'es'\n[[composition]]\nlanguage = 'fr'",
+            Level::Project,
+        );
+        let document = parse_scalar_layer("language: en\nwiki_links: true", Level::Document);
+        let resolved = resolve(&[document, project, global]);
+        assert!(!resolved.settings.wiki_links);
+        assert_eq!(resolved.settings.language, "en");
+        assert_eq!(resolved.warnings[0].reason, WarningReason::NotApplicable);
+        assert!(!Settings::default().wiki_links);
     }
 }

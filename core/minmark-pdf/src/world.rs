@@ -17,10 +17,11 @@ pub struct MiniWorld {
     library: LazyHash<Library>,
     book: LazyHash<FontBook>,
     fonts: Vec<Font>,
+    files: std::collections::BTreeMap<PathBuf, Vec<u8>>,
 }
 
 impl MiniWorld {
-    pub fn new(text: String) -> Self {
+    pub fn new(text: String, files: std::collections::BTreeMap<PathBuf, Vec<u8>>) -> Self {
         let fonts: Vec<Font> = typst_assets::fonts()
             .filter_map(|data| Font::new(Bytes::new(data), 0))
             .collect();
@@ -31,6 +32,7 @@ impl MiniWorld {
             library: LazyHash::new(Library::builder().build()),
             book: LazyHash::new(book),
             fonts,
+            files,
         }
     }
 }
@@ -57,6 +59,11 @@ impl World for MiniWorld {
     }
 
     fn file(&self, id: FileId) -> FileResult<Bytes> {
+        if id.package().is_none() {
+            if let Some(bytes) = self.files.get(id.vpath().as_rootless_path()) {
+                return Ok(Bytes::new(bytes.clone()));
+            }
+        }
         Err(FileError::NotFound(
             id.vpath().as_rootless_path().to_owned(),
         ))

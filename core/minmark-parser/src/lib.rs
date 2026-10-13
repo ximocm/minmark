@@ -70,3 +70,88 @@ pub fn visual(source: &str) -> VisualPlan {
 pub fn visual_with(source: &str, options: &ParseOptions) -> VisualPlan {
     visual::build(source, options)
 }
+
+/// Destinos navegables: headings y IDs explícitos de figuras/tablas/ecuaciones.
+/// El nivel cero distingue un objeto de un heading sin crear otro índice.
+pub fn destination_anchors(source: &str) -> Vec<minmark_document::Anchor> {
+    use minmark_document::{Anchor, Attributes, Block, BlockKind, Inline};
+    fn add(attrs: &Option<Attributes>, line: u32, out: &mut Vec<Anchor>) {
+        if let Some(id) = attrs.as_ref().and_then(|a| a.id.as_ref()) {
+            out.push(Anchor {
+                id: id.clone(),
+                level: 0,
+                text: attrs
+                    .as_ref()
+                    .and_then(|a| a.caption.clone())
+                    .unwrap_or_else(|| id.clone()),
+                line,
+            });
+        }
+    }
+    fn inlines(items: &[Inline], line: u32, out: &mut Vec<Anchor>) {
+        for item in items {
+            match item {
+                Inline::Image { attrs, .. } => add(attrs, line, out),
+                Inline::Emphasis(c)
+                | Inline::Strong(c)
+                | Inline::Strikethrough(c)
+                | Inline::Link { content: c, .. } => inlines(c, line, out),
+                _ => {}
+            }
+        }
+    }
+    fn walk(blocks: &[Block], source: &str, out: &mut Vec<Anchor>) {
+        for block in blocks {
+            let line = source[..block.span.start as usize]
+                .bytes()
+                .filter(|&b| b == b'\n')
+                .count() as u32
+                + 1;
+            match &block.kind {
+                BlockKind::Paragraph { content } | BlockKind::Heading { content, .. } => {
+                    inlines(content, line, out)
+                }
+                BlockKind::Table {
+                    attrs,
+                    header,
+                    rows,
+                    ..
+                } => {
+                    add(attrs, line, out);
+                    for c in header.iter().chain(rows.iter().flatten()) {
+                        inlines(c, line, out);
+                    }
+                }
+                BlockKind::MathBlock { attrs, .. } => add(attrs, line, out),
+                BlockKind::Quote { blocks } | BlockKind::Callout { blocks, .. } => {
+                    walk(blocks, source, out)
+                }
+                BlockKind::List { items, .. } => {
+                    for item in items {
+                        walk(&item.blocks, source, out);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut out = minmark_document::document_anchors(&minmark_document::find_heading_nodes(source));
+    walk(&parse(source).blocks, source, &mut out);
+    out.sort_by_key(|a| a.line);
+    out
+}
+
+#[cfg(test)]
+mod intelligence_tests {
+    #[test]
+    fn destinos_de_objetos_y_outline_excluyen_codigo_y_comentarios() {
+        let source = "<!--\n# Oculto\n-->\n\n````\n```\n# Tampoco\n````\n\nTítulo\n======\n\n![x](x){#fig:uno}\n\n| A |\n| - |\n| B |\n{#tbl:uno}\n\n$$\nx\n$$\n{#eq:uno}\n";
+        let anchors = super::destination_anchors(source);
+        assert_eq!(
+            anchors.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(),
+            ["título", "fig:uno", "tbl:uno", "eq:uno"]
+        );
+        assert_eq!(anchors[0].level, 1);
+        assert!(anchors[1..].iter().all(|a| a.level == 0));
+    }
+}

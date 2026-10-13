@@ -23,6 +23,9 @@ pub enum Command {
     Open,
     /// Quick Open (§41, §39: `Ctrl+P`): paleta fuzzy de archivos del proyecto.
     QuickOpen,
+    Outline,
+    FollowLink,
+    Backlinks,
     /// Abrir carpeta como ventana de proyecto nueva (ISSUE-021).
     OpenFolder,
     /// Import Markdown (§15, ISSUE-024): copia un `.md` externo al proyecto.
@@ -61,6 +64,9 @@ impl Command {
             Command::NewWindow => "win.new-window",
             Command::Open => "win.open",
             Command::QuickOpen => "win.quick-open",
+            Command::Outline => "win.outline",
+            Command::FollowLink => "win.follow-link",
+            Command::Backlinks => "win.backlinks",
             Command::OpenFolder => "win.open-folder",
             Command::ImportMarkdown => "win.import-markdown",
             Command::Save => "win.save",
@@ -91,6 +97,9 @@ impl Command {
             Command::NewWindow => "New Window",
             Command::Open => "Open",
             Command::QuickOpen => "Quick Open",
+            Command::Outline => "Outline",
+            Command::FollowLink => "Open Link",
+            Command::Backlinks => "Backlinks",
             Command::OpenFolder => "Open Folder",
             Command::ImportMarkdown => "Import Markdown",
             Command::Save => "Save",
@@ -120,6 +129,9 @@ pub trait Commands {
     fn open(&self);
     /// Abre la paleta Quick Open (§41, §39: `Ctrl+P`).
     fn quick_open(&self);
+    fn outline(&self) {}
+    fn follow_link(&self) {}
+    fn backlinks(&self) {}
     /// Abre una carpeta en una ventana de proyecto nueva (ISSUE-021).
     fn open_folder(&self);
     /// Import Markdown (§15): copia un `.md` externo dentro del proyecto.
@@ -155,6 +167,9 @@ pub const ACCELERATORS: &[(&str, &str)] = &[
     ("win.new-window", "<Control><Shift>n"),
     ("win.open", "<Control>o"),
     ("win.quick-open", "<Control>p"),
+    ("win.outline", "<Control><Alt>o"),
+    ("win.follow-link", "<Control>Return"),
+    ("win.backlinks", "<Control><Alt>b"),
     ("win.open-folder", "<Control><Shift>o"),
     ("win.save", "<Control>s"),
     ("win.save-as", "<Control><Shift>s"),
@@ -175,6 +190,9 @@ const ALL_COMMANDS: &[Command] = &[
     Command::NewWindow,
     Command::Open,
     Command::QuickOpen,
+    Command::Outline,
+    Command::FollowLink,
+    Command::Backlinks,
     Command::OpenFolder,
     Command::ImportMarkdown,
     Command::Save,
@@ -230,6 +248,7 @@ const MENUBAR_SPEC: &[SubmenuSpec] = &[
             ("Find", "win.find"),
             ("Replace", "win.replace"),
             ("Project Search", "win.project-search"),
+            ("Open Link", "win.follow-link"),
         ]],
     ),
     (
@@ -239,6 +258,8 @@ const MENUBAR_SPEC: &[SubmenuSpec] = &[
                 ("Markdown/Visual", "win.toggle-mode"),
                 ("Toggle Visual Syntax", "win.visual-syntax"),
                 ("Toggle Explorer", "win.toggle-explorer"),
+                ("Outline", "win.outline"),
+                ("Backlinks", "win.backlinks"),
             ],
             &[
                 ("Editor", "win.view-editor"),
@@ -278,6 +299,9 @@ fn dispatch(cmd: Command, host: &dyn Commands) {
         Command::NewWindow => host.new_window(),
         Command::Open => host.open(),
         Command::QuickOpen => host.quick_open(),
+        Command::Outline => host.outline(),
+        Command::FollowLink => host.follow_link(),
+        Command::Backlinks => host.backlinks(),
         Command::OpenFolder => host.open_folder(),
         Command::ImportMarkdown => host.import_markdown(),
         Command::Save => host.save(),
@@ -345,6 +369,9 @@ mod tests {
             ("win.new", "<Control>n"),
             ("win.open", "<Control>o"),
             ("win.quick-open", "<Control>p"),
+            ("win.outline", "<Control><Alt>o"),
+            ("win.follow-link", "<Control>Return"),
+            ("win.backlinks", "<Control><Alt>b"),
             ("win.save", "<Control>s"),
             ("win.save-as", "<Control><Shift>s"),
             ("win.export-pdf", "<Control>e"),
@@ -364,7 +391,10 @@ mod tests {
         let mut aceleradores = HashSet::new();
         for &(id, accel) in ACCELERATORS {
             assert!(registrados.contains(id), "acción sin registrar: {id}");
-            assert!(acciones.insert(id), "acción duplicada en ACCELERATORS: {id}");
+            assert!(
+                acciones.insert(id),
+                "acción duplicada en ACCELERATORS: {id}"
+            );
             assert!(
                 aceleradores.insert(accel),
                 "acelerador duplicado en ACCELERATORS: {accel}"
@@ -415,6 +445,7 @@ mod tests {
                     ("Find", "win.find"),
                     ("Replace", "win.replace"),
                     ("Project Search", "win.project-search"),
+                    ("Open Link", "win.follow-link"),
                 ]],
             ),
             (
@@ -424,6 +455,8 @@ mod tests {
                         ("Markdown/Visual", "win.toggle-mode"),
                         ("Toggle Visual Syntax", "win.visual-syntax"),
                         ("Toggle Explorer", "win.toggle-explorer"),
+                        ("Outline", "win.outline"),
+                        ("Backlinks", "win.backlinks"),
                     ],
                     &[
                         ("Editor", "win.view-editor"),
@@ -534,7 +567,13 @@ mod tests {
             );
         }
         // El validador no es vacío: conoce los fallos reales.
-        for malo in ["<Control>Alt>m", "<Controll>n", "<Control>", "Control>n", ""] {
+        for malo in [
+            "<Control>Alt>m",
+            "<Controll>n",
+            "<Control>",
+            "Control>n",
+            "",
+        ] {
             assert!(!accel_es_valido(malo), "{malo:?} no debería validar");
         }
     }

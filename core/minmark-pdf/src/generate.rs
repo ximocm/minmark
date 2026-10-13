@@ -20,8 +20,14 @@ use std::fmt::Write;
 
 /// Genera el documento Typst completo para la AST y los ajustes dados.
 pub fn generate(ast: &Ast, settings: &Settings) -> String {
+    let (ast, diagnostics) = minmark_renderer::resolve_cross_references(ast, settings);
+    let labels = minmark_renderer::reference_ids(&ast);
     let mut out = preamble(settings);
-    render_blocks(&ast.blocks, settings, &mut out);
+    render_blocks(&ast.blocks, settings, &labels, &mut out);
+    for diagnostic in diagnostics {
+        out.push_str(&escape_text(&diagnostic));
+        out.push_str("\n\n");
+    }
     out
 }
 
@@ -86,29 +92,48 @@ fn number_align(position: PageNumberPosition) -> &'static str {
     }
 }
 
-fn render_blocks(blocks: &[Block], settings: &Settings, out: &mut String) {
+fn render_blocks(
+    blocks: &[Block],
+    settings: &Settings,
+    labels: &std::collections::BTreeSet<String>,
+    out: &mut String,
+) {
     for block in blocks {
-        render_block(block, settings, out);
+        render_block(block, settings, labels, out);
     }
 }
 
-fn render_block(block: &Block, settings: &Settings, out: &mut String) {
+fn render_block(
+    block: &Block,
+    settings: &Settings,
+    labels: &std::collections::BTreeSet<String>,
+    out: &mut String,
+) {
+    let attrs = match &block.kind {
+        BlockKind::Heading { attrs, .. }
+        | BlockKind::Table { attrs, .. }
+        | BlockKind::MathBlock { attrs, .. } => attrs.as_ref(),
+        _ => None,
+    };
+    if let Some(id) = attrs.and_then(|a| a.id.as_ref()) {
+        let _ = writeln!(out, "#box[]#label({})", typst_string(id));
+    }
     match &block.kind {
         BlockKind::Heading { level, content, .. } => {
             for _ in 0..(*level).clamp(1, 6) {
                 out.push('=');
             }
             out.push(' ');
-            render_inlines(content, settings, out);
+            render_inlines(content, settings, labels, out);
             out.push_str("\n\n");
         }
         BlockKind::Paragraph { content } => {
-            render_inlines(content, settings, out);
+            render_inlines(content, settings, labels, out);
             out.push_str("\n\n");
         }
         BlockKind::Quote { blocks } => {
             out.push_str("#quote(block: true)[\n");
-            render_blocks(blocks, settings, out);
+            render_blocks(blocks, settings, labels, out);
             out.push_str("]\n\n");
         }
         BlockKind::List {
@@ -122,7 +147,7 @@ fn render_block(block: &Block, settings: &Settings, out: &mut String) {
                 out.push_str("#list(\n");
             }
             for item in items {
-                render_list_item(item, settings, out);
+                render_list_item(item, settings, labels, out);
             }
             out.push_str(")\n\n");
         }
@@ -164,14 +189,14 @@ fn render_block(block: &Block, settings: &Settings, out: &mut String) {
             out.push_str("  table.header(\n");
             for cell in header {
                 out.push_str("    [");
-                render_inlines(cell, settings, out);
+                render_inlines(cell, settings, labels, out);
                 out.push_str("],\n");
             }
             out.push_str("  ),\n");
             for row in rows {
                 for cell in row {
                     out.push_str("    [");
-                    render_inlines(cell, settings, out);
+                    render_inlines(cell, settings, labels, out);
                     out.push_str("],\n");
                 }
             }
@@ -206,20 +231,30 @@ fn render_block(block: &Block, settings: &Settings, out: &mut String) {
                 out.push_str(&escape_text(title));
                 out.push_str("*\n");
             }
-            render_blocks(blocks, settings, out);
+            render_blocks(blocks, settings, labels, out);
             out.push_str("]\n\n");
         }
         BlockKind::Rule => out.push_str("#line(length: 100%)\n\n"),
     }
 }
 
-fn render_list_item(item: &ListItem, settings: &Settings, out: &mut String) {
+fn render_list_item(
+    item: &ListItem,
+    settings: &Settings,
+    labels: &std::collections::BTreeSet<String>,
+    out: &mut String,
+) {
     out.push_str("  [\n");
-    render_blocks(&item.blocks, settings, out);
+    render_blocks(&item.blocks, settings, labels, out);
     out.push_str("  ],\n");
 }
 
-fn render_inlines(inlines: &[Inline], settings: &Settings, out: &mut String) {
+fn render_inlines(
+    inlines: &[Inline],
+    settings: &Settings,
+    labels: &std::collections::BTreeSet<String>,
+    out: &mut String,
+) {
     for inline in inlines {
         match inline {
             Inline::Text(text) => out.push_str(&escape_text(text)),
@@ -228,11 +263,11 @@ fn render_inlines(inlines: &[Inline], settings: &Settings, out: &mut String) {
                 out.push_str(&typst_string(code));
                 out.push(')');
             }
-            Inline::Emphasis(content) => wrap(out, "_", "_", content, settings),
-            Inline::Strong(content) => wrap(out, "*", "*", content, settings),
+            Inline::Emphasis(content) => wrap(out, "_", "_", content, settings, labels),
+            Inline::Strong(content) => wrap(out, "*", "*", content, settings, labels),
             Inline::Strikethrough(content) => {
                 out.push_str("#strike[");
-                render_inlines(content, settings, out);
+                render_inlines(content, settings, labels, out);
                 out.push(']');
             }
             Inline::Link {
@@ -240,8 +275,15 @@ fn render_inlines(inlines: &[Inline], settings: &Settings, out: &mut String) {
                 content,
                 ..
             } => {
-                let _ = write!(out, "#link({})[", typst_string(destination));
-                render_inlines(content, settings, out);
+                if let Some(id) = destination
+                    .strip_prefix('#')
+                    .filter(|id| labels.contains(*id))
+                {
+                    let _ = write!(out, "#link(label({}))[", typst_string(id));
+                } else {
+                    let _ = write!(out, "#link({})[", typst_string(destination));
+                }
+                render_inlines(content, settings, labels, out);
                 out.push(']');
             }
             Inline::Image {
@@ -250,6 +292,9 @@ fn render_inlines(inlines: &[Inline], settings: &Settings, out: &mut String) {
                 attrs,
                 ..
             } => {
+                if let Some(id) = attrs.as_ref().and_then(|a| a.id.as_ref()) {
+                    let _ = write!(out, "#box[]#label({})", typst_string(id));
+                }
                 let _ = write!(
                     out,
                     "#image({}, alt: {}",
@@ -324,9 +369,10 @@ fn wrap(
     close: &str,
     content: &[Inline],
     settings: &Settings,
+    labels: &std::collections::BTreeSet<String>,
 ) {
     out.push_str(open);
-    render_inlines(content, settings, out);
+    render_inlines(content, settings, labels, out);
     out.push_str(close);
 }
 
@@ -520,6 +566,6 @@ mod tests {
         let out = source("{{toc}}\n\n{{pagebreak}}\n\n{{ref:fig:a}}\n");
         assert!(out.contains("#outline()"));
         assert!(out.contains("#pagebreak()"));
-        assert!(out.contains("{{ref:fig:a}}"));
+        assert!(out.contains("Referencia inexistente: fig:a"));
     }
 }
