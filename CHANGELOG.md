@@ -1,9 +1,7 @@
 # Changelog
 
 Cambios notables para usuarios y colaboradores. `Unreleased` reúne el trabajo
-que todavía no se ha publicado como release; `0.1.0` en los manifiestos Cargo
-no implica que exista una release de esa versión. Al publicar, estas entradas
-se agruparán bajo la versión y fecha correspondientes.
+que todavía no se ha publicado como release.
 
 El [historial técnico de las fases 0–3](docs/DEVELOPMENT_HISTORY.md) conserva las
 entradas originales con decisiones, referencias a la especificación y pruebas.
@@ -16,6 +14,41 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 - CI del core en Linux, Windows y macOS; pruebas y compilación de la UI en
   Linux. Paquetes Linux x86_64 con licencias y checksums; los tags de versión
   generan borradores de release tras superar la matriz de pruebas.
+
+### Trabajo en curso
+
+- Integración de exportación PDF en la interfaz: documento activo desde el
+  menú File y `Ctrl+E`. Sigue pendiente de completar su verificación,
+  incluidos el diálogo, la escritura a disco y los errores de exportación.
+  La composición de varios documentos sigue prevista para la Fase 6.
+
+Las fases 0–3 están completadas. Markdown Intelligence, funciones académicas,
+composición, controles contextuales y Windows siguen en el plan de desarrollo.
+
+## [0.1.1] — 2026-10-13
+
+### Cambiado
+
+- Exportación PDF desde `File → Export PDF` y `Ctrl+E`, sin botón adicional
+  en la barra de menús.
+- Core y UI comparten `target/` para reutilizar dependencias compiladas.
+  Desarrollo omite información de depuración y caché incremental; release
+  elimina los símbolos del ejecutable para reducir el espacio ocupado.
+- Guía de compilación e instalación actualizada, con instrucciones para
+  liberar los archivos de compilación después de copiar el ejecutable.
+
+### Eliminado
+
+- Prototipos de la Fase 0 y benchmarks históricos, incluidos los corpus locales.
+  Las decisiones de arquitectura conservan sus métricas de referencia.
+
+### Corregido
+
+- Error de compilación por la referencia a `gtk::Button` del botón PDF retirado.
+
+## [0.1.0]
+
+### Añadido
 
 - `CODEOWNERS` con `@ximocm` como revisor de todos los archivos y flujo de
   contribución por pull request para el repositorio público.
@@ -65,20 +98,7 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 
 ### Corregido
 
-- Referencia al botón de exportación PDF corregida a `gtk4::Button`, que
-  impedía compilar la aplicación de escritorio desde un checkout limpio.
-
 - Comandos con diálogos que no respondían por una referencia débil inválida.
 - Fallo de arranque de WebKit en sistemas donde no funciona `bwrap`: se detecta
   la situación y se desactiva su sandbox. La limitación de aislamiento se
   explica en [BUILDING.md](BUILDING.md).
-
-### Trabajo en curso
-
-- Integración de exportación PDF en la interfaz: documento activo desde el
-  menú File, botón y `Ctrl+E`. Sigue pendiente de completar su verificación,
-  incluidos el diálogo, la escritura a disco y los errores de exportación.
-  La composición de varios documentos sigue prevista para la Fase 6.
-
-Las fases 0–3 están completadas. Markdown Intelligence, funciones académicas,
-composición, controles contextuales y Windows siguen en el plan de desarrollo.

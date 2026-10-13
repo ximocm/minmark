@@ -1,9 +1,0 @@
-prototipo,metrica,valor,unidad,contexto
-ui-webview,startup_time,3.09,s,DISPLAY=:1
-ui-webview,ram_peak,173.59,MB,ejecutando 3s
-ui-webview,binario,620,K,release
-ui-webview,dependencias,221,crates,cargo tree
-ui-rust-native,startup_time,3.06,s,DISPLAY=:1
-ui-rust-native,ram_peak,223.059,MB,ejecutando 3s
-ui-rust-native,binario,16,M,release
-ui-rust-native,dependencias,537,crates,cargo tree

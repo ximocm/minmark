@@ -19,7 +19,7 @@ def main():
     if platform.system() != "Linux" or platform.machine() != "x86_64":
         raise SystemExit("This package supports Linux x86_64 only")
     version = tomllib.loads((ROOT / "ui/Cargo.toml").read_text())["package"]["version"]
-    target = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "ui/target"))
+    target = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target"))
     binary = target / "release/minmark"
     if not binary.is_file():
         raise SystemExit(f"Build the release binary first: {binary}")

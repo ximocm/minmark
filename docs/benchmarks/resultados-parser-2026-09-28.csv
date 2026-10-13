@@ -1,5 +1,0 @@
-prototipo,commit,fecha,metrica,contexto,mediana,min,max,unidad,sesion
-parser,c1b2c3d,2026-09-28,parse_time,corpus-51.58MB,0.926,0.926,0.926,s,x11
-parser,c1b2c3d,2026-09-28,parse_time,corpus-100MB,1.885,1.885,1.885,s,x11
-parser,c1b2c3d,2026-09-28,events_count,corpus-51.58MB,11009700,11009700,11009700,events,x11
-parser,c1b2c3d,2026-09-28,events_count,corpus-100MB,25862500,25862500,25862500,events,x11

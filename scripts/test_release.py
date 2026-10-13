@@ -90,7 +90,7 @@ class LinuxPackage(unittest.TestCase):
                         "source": "registry", "manifest_path": str(dep / "Cargo.toml"),
                         "license": "Apache-2.0"}]}
             with patch.object(module, "ROOT", root), \
-                 patch.dict(os.environ, {"CARGO_TARGET_DIR": str(root / "target")}), \
+                 patch.dict(os.environ, clear=True), \
                  patch.object(module.platform, "system", return_value="Linux"), \
                  patch.object(module.platform, "machine", return_value="x86_64"), \
                  patch.object(module.subprocess, "check_output", side_effect=["libc found\n", json.dumps(metadata)]):

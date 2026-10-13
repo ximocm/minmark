@@ -23,16 +23,10 @@ GitHub Issues, con milestones para las fases del desarrollo.
 - [ADR-002: LaTeX a Typst](adr/002-latex-a-typst.md).
 - [ADR-003: motor bibliográfico](adr/003-motor-bibliografico.md).
 
-## Seguimiento y mediciones
+## Seguimiento
 
 - GitHub Issues: seguimiento de errores y propuestas, según la
   [guía de contribución](../CONTRIBUTING.md#seguimiento-en-github).
-- [Protocolo de benchmarks](benchmarks/PROTOCOLO.md).
-- [Resultados del parser](benchmarks/resultados-parser-2026-09-28.csv) y
-  [medición actualizada](benchmarks/resultados-parser-2026-09-28-actualizado.csv).
-- [Comparativa de UI](benchmarks/resultados-ui-comparativa-2026-09-28.csv).
-- [Prototipos de la Fase 0](../prototypes/README.md).
 
-Los benchmarks son mediciones históricas con un entorno concreto; no garantizan
-el rendimiento de la aplicación actual ni de otros equipos. Los nombres de los
-corpus históricos no reflejan su tamaño real; véase [publicación](PUBLISHING.md).
+Los prototipos y benchmarks de la Fase 0 se retiraron del repositorio. La
+[decisión de UI](adr/001-tecnologia-ui.md) conserva las métricas que la motivaron.
