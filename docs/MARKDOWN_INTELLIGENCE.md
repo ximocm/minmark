@@ -156,8 +156,10 @@ seguir escribiendo en él, contenido actualizado, navegación explícita y cambi
 de documento. Pendiente de confirmación manual del usuario.
 
 La comprobación del diálogo PDF (#2) se realiza sobre el desarrollo de la PR
-#36 (`6abe9ee`), no sobre el binario publicado v0.1.1. Quedan pendientes el
-menú File, nombre/filtro, cancelación, sobrescritura y escenarios de error.
+#36 (`6abe9ee`), no sobre el binario publicado v0.1.1. El usuario ha confirmado
+el menú File, nombre/filtro, cancelación conservando cambios del documento,
+cancelación de sobrescritura conservando el PDF anterior y sobrescritura
+aceptada con contenido actualizado. Quedan pendientes los escenarios de error.
 
 Para el cierre definitivo del milestone queda la revisión con
 lector de pantalla, una sesión Wayland y la respuesta percibida en un proyecto
