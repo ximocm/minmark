@@ -162,7 +162,10 @@ cancelación de sobrescritura conservando el PDF anterior y sobrescritura
 aceptada con contenido actualizado. También ha confirmado que exportar a un
 destino sin permiso de escritura muestra el error esperado. La carpeta local
 de prueba `sin-permiso-pdf` tiene permisos 0555 y se comprobó previamente que
-rechaza la escritura. Queda pendiente el error del motor y su recuperación.
+rechaza la escritura. El usuario ha confirmado también el error del motor con
+una imagen SVG dañada: pudo continuar editando y, al sustituirla por una imagen
+válida, exportar correctamente. Estos escenarios del diálogo están validados
+en la versión de desarrollo indicada; no constituyen una prueba de v0.1.1.
 
 Para el cierre definitivo del milestone queda la revisión con
 lector de pantalla, una sesión Wayland y la respuesta percibida en un proyecto
