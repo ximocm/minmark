@@ -427,7 +427,8 @@ fn percent_decode(value: &str) -> Option<String> {
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' && i + 2 < bytes.len() {
-            let byte = u8::from_str_radix(&value[i + 1..i + 3], 16).ok()?;
+            let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).ok()?;
+            let byte = u8::from_str_radix(hex, 16).ok()?;
             out.push(byte);
             i += 3;
         } else {
@@ -634,6 +635,19 @@ mod tests {
 
         assert_eq!(r.resolve("imagen.png", "index.md").kind, TargetKind::Local);
         assert_eq!(r.resolve("imagen.png#titulo", "index.md").kind, TargetKind::Missing);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn porcentajes_literales_junto_a_unicode_no_provocan_panic() {
+        let root = project("porcentaje-unicode");
+        fs::write(root.join("100%año.md"), "# Título\n").unwrap();
+        let index = ProjectIndex::new(root.clone());
+        let open = OpenBuffers::new();
+        let r = resolver(&index, &open);
+
+        assert_eq!(r.resolve("100%año.md", "index.md").kind, TargetKind::Local);
+        assert_eq!(r.resolve("index.md#%año", "index.md").kind, TargetKind::Missing);
         let _ = fs::remove_dir_all(&root);
     }
 
