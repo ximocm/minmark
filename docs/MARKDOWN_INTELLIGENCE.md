@@ -141,16 +141,23 @@ cierre con Escape y estado vacío.
 El usuario ha confirmado el paso 6 (outline): orden y jerarquía de headings,
 inclusión de Setext, exclusión de código/comentarios, navegación y actualización
 con títulos sin guardar, y cierre con Escape sin modificar el documento.
-El paso 7 sigue pendiente de su revisión manual.
+El paso 7 está parcialmente validado: el usuario ha confirmado la exportación
+con Ctrl+E del documento activo con cambios sin guardar, pies de figura y
+referencias resueltas, sin incluir el contenido de la otra pestaña abierta.
+La revisión restante de idiomas, renumeración y diagnósticos sigue pendiente.
 En esa revisión se detectó la ausencia de pies de figura; se corrigió su salida
 en Preview/PDF y se añadieron regresiones de posición, idioma y numeración.
 Verificación de la corrección: 33 pruebas de renderer/PDF y una exportación
-real de figura local a PDF pasan; pendiente de confirmación manual del usuario.
+real de figura local a PDF pasan; el usuario ha confirmado los pies en el PDF.
 También se corrigió el reinicio del scroll de Preview al escribir. Pasan las
 89 pruebas de UI y la integración GTK ampliada, que verifica conservación del
 scroll en refrescos generales, seguimiento del bloque editado, estabilidad al
 seguir escribiendo en él, contenido actualizado, navegación explícita y cambio
 de documento. Pendiente de confirmación manual del usuario.
+
+La comprobación del diálogo PDF (#2) se realiza sobre el desarrollo de la PR
+#36 (`6abe9ee`), no sobre el binario publicado v0.1.1. Quedan pendientes el
+menú File, nombre/filtro, cancelación, sobrescritura y escenarios de error.
 
 Para el cierre definitivo del milestone queda la revisión con
 lector de pantalla, una sesión Wayland y la respuesta percibida en un proyecto
