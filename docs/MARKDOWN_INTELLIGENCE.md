@@ -130,7 +130,10 @@ prueba y alternar `wiki_links` en la configuración del proyecto.
 El usuario ha confirmado el paso 5 (backlinks), siguiendo la revisión de
 ocurrencias, navegación al origen, actualización con cambios sin guardar,
 cierre con Escape y estado vacío.
-Los pasos 6–7 siguen pendientes de su revisión manual.
+El usuario ha confirmado el paso 6 (outline): orden y jerarquía de headings,
+inclusión de Setext, exclusión de código/comentarios, navegación y actualización
+con títulos sin guardar, y cierre con Escape sin modificar el documento.
+El paso 7 sigue pendiente de su revisión manual.
 
 Para el cierre definitivo del milestone queda la revisión con
 lector de pantalla, una sesión Wayland y la respuesta percibida en un proyecto
