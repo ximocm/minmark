@@ -125,7 +125,9 @@ cancelación con Escape, deshacer y exclusión de código/comentarios.
 El usuario ha confirmado también el paso 3 (diagnósticos), siguiendo la revisión
 de enlaces a archivos y headings inexistentes, explicación en Preview y
 actualización al corregir el fragmento o crear el archivo de destino.
-Los pasos 4–7 siguen pendientes de su revisión manual.
+El usuario ha confirmado el paso 4 (wiki links) tras revisar el documento de
+prueba y alternar `wiki_links` en la configuración del proyecto.
+Los pasos 5–7 siguen pendientes de su revisión manual.
 
 Para el cierre definitivo del milestone queda la revisión con
 lector de pantalla, una sesión Wayland y la respuesta percibida en un proyecto
