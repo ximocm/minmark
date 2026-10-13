@@ -19,6 +19,8 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
   destinos externos, wiki links por nombre y buffers abiertos sin guardar
   (que priorizan sobre el disco). El índice guarda además la línea de cada
   heading y pasa al formato v2 (los índices antiguos se reconstruyen solos).
+  Los archivos binarios sin fragmento también resuelven como destinos locales;
+  buffers y anclas indexadas respetan los límites del proyecto y `.gitignore`.
   Decisiones en [ADR-004](docs/adr/004-anclas-y-resolucion-de-enlaces.md).
 
 - CI del core en Linux, Windows y macOS; pruebas y compilación de la UI en

@@ -211,9 +211,14 @@ impl<'a> Resolver<'a> {
     /// Resolución dentro de un documento ya determinado (`#fragmento`).
     fn resolve_in_doc(&self, rel_path: &str, fragment: Option<&str>) -> LinkTarget {
         let fragment_owned = fragment.map(str::to_owned);
-        let Some(anchors) = self.doc_anchors(rel_path) else {
+        if self.ignore.is_ignored(Path::new(rel_path), false)
+            || resolve_in_project(self.index.root(), &self.index.root().join(rel_path)).is_err()
+            || !(self.index.get(rel_path).is_some()
+                || self.open.get(rel_path).is_some()
+                || self.on_disk(rel_path))
+        {
             return LinkTarget::missing(fragment_owned);
-        };
+        }
         match fragment {
             None => LinkTarget {
                 kind: TargetKind::Local,
@@ -222,24 +227,29 @@ impl<'a> Resolver<'a> {
                 anchor: None,
                 candidates: Vec::new(),
             },
-            Some(fragment) => match find_anchor(&anchors, fragment)
-                .or_else(|| percent_decode(fragment).and_then(|decoded| find_anchor(&anchors, &decoded)))
-            {
-                Some(anchor) => LinkTarget {
-                    kind: TargetKind::Local,
-                    rel_path: Some(rel_path.to_owned()),
-                    fragment: fragment_owned,
-                    anchor: Some(anchor.clone()),
-                    candidates: Vec::new(),
-                },
-                None => LinkTarget {
-                    kind: TargetKind::Missing,
-                    rel_path: Some(rel_path.to_owned()),
-                    fragment: fragment_owned,
-                    anchor: None,
-                    candidates: Vec::new(),
-                },
-            },
+            Some(fragment) => {
+                let Some(anchors) = self.doc_anchors(rel_path) else {
+                    return LinkTarget::missing(fragment_owned);
+                };
+                match find_anchor(&anchors, fragment)
+                    .or_else(|| percent_decode(fragment).and_then(|decoded| find_anchor(&anchors, &decoded)))
+                {
+                    Some(anchor) => LinkTarget {
+                        kind: TargetKind::Local,
+                        rel_path: Some(rel_path.to_owned()),
+                        fragment: fragment_owned,
+                        anchor: Some(anchor.clone()),
+                        candidates: Vec::new(),
+                    },
+                    None => LinkTarget {
+                        kind: TargetKind::Missing,
+                        rel_path: Some(rel_path.to_owned()),
+                        fragment: fragment_owned,
+                        anchor: None,
+                        candidates: Vec::new(),
+                    },
+                }
+            }
         }
     }
 
@@ -275,10 +285,14 @@ impl<'a> Resolver<'a> {
     /// Fuente del documento de origen (para definiciones §16): buffer abierto
     /// primero; si no, disco.
     fn source_of(&self, rel_path: &str) -> Option<String> {
+        if self.ignore.is_ignored(Path::new(rel_path), false) {
+            return None;
+        }
+        let path = resolve_in_project(self.index.root(), &self.index.root().join(rel_path)).ok()?;
         if let Some(source) = self.open.get(rel_path) {
             return Some(source.to_owned());
         }
-        std::fs::read_to_string(self.index.root().join(rel_path)).ok()
+        std::fs::read_to_string(path).ok()
     }
 
     /// ¿Existe el archivo en disco dentro del proyecto (§48) y sin ignorar
@@ -608,6 +622,56 @@ mod tests {
         assert_eq!(r.resolve("../../etc/passwd", "cap/a.md").kind, TargetKind::Missing, "§48");
         assert_eq!(r.resolve("/../fuera.md", "index.md").kind, TargetKind::Missing, "§48");
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn archivos_binarios_sin_fragmento_son_destinos_locales() {
+        let root = project("binarios");
+        fs::write(root.join("imagen.png"), [0x89, 0x50, 0x4e, 0x47, 0xff]).unwrap();
+        let index = ProjectIndex::new(root.clone());
+        let open = OpenBuffers::new();
+        let r = resolver(&index, &open);
+
+        assert_eq!(r.resolve("imagen.png", "index.md").kind, TargetKind::Local);
+        assert_eq!(r.resolve("imagen.png#titulo", "index.md").kind, TargetKind::Missing);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn buffers_y_fragmentos_respetan_limites_e_ignorados_14_6_48() {
+        let root = project("buffer-limites");
+        fs::write(root.join(".gitignore"), "generado.md\n").unwrap();
+        let index = ProjectIndex::new(root.clone());
+        let mut open = OpenBuffers::new();
+        let source = "# Secreto\n\n[id]: /index.md\n";
+        open.insert("../fuera.md", source);
+        open.insert("generado.md", source);
+        let r = resolver(&index, &open);
+
+        for from in ["../fuera.md", "generado.md"] {
+            assert_eq!(r.resolve("#secreto", from).kind, TargetKind::Missing, "{from}");
+            assert_eq!(r.resolve_usage("id", from).kind, TargetKind::Missing, "{from}");
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn symlinks_externos_no_reutilizan_anclas_del_indice_48() {
+        let root = project("symlink-indice");
+        let outside = temp_tree("symlink-fuera");
+        fs::write(outside.join("fuera.md"), "# Fuera\n").unwrap();
+        let mut index = ProjectIndex::new(root.clone());
+        index.refresh().unwrap();
+        fs::remove_file(root.join("cap/a.md")).unwrap();
+        std::os::unix::fs::symlink(outside.join("fuera.md"), root.join("cap/a.md")).unwrap();
+        let open = OpenBuffers::new();
+        let r = resolver(&index, &open);
+
+        assert_eq!(r.resolve("cap/a.md", "index.md").kind, TargetKind::Missing);
+        assert_eq!(r.resolve("cap/a.md#detalle", "index.md").kind, TargetKind::Missing);
+        assert_eq!(r.resolve("#detalle", "cap/a.md").kind, TargetKind::Missing);
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&outside);
     }
 
     #[test]
