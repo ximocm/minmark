@@ -69,7 +69,9 @@ pub struct PreviewPane {
     scrolled: gtk::ScrolledWindow,
     webview: webkit6::WebView,
     diagnostic_script: std::rc::Rc<std::cell::RefCell<String>>,
-    scroll_byte: std::rc::Rc<std::cell::Cell<Option<u32>>>,
+    scroll_byte: std::rc::Rc<std::cell::Cell<Option<(u32, bool)>>>,
+    document_key: std::cell::RefCell<Option<(Option<std::path::PathBuf>, u64)>>,
+    pending_html: std::rc::Rc<std::cell::RefCell<Option<String>>>,
 }
 
 impl PreviewPane {
@@ -89,12 +91,38 @@ impl PreviewPane {
     pub fn test_is_loading(&self) -> bool {
         self.webview.is_loading()
     }
+    #[cfg(test)]
+    pub fn test_eval_number(
+        &self,
+        script: &str,
+        result: std::rc::Rc<std::cell::Cell<Option<f64>>>,
+    ) {
+        self.webview.evaluate_javascript(
+            script,
+            None,
+            None,
+            None::<&gtk::gio::Cancellable>,
+            move |value| {
+                result.set(Some(value.expect("Preview JavaScript").to_double()));
+            },
+        );
+    }
     fn run_script(view: &webkit6::WebView, script: &str) {
         view.evaluate_javascript(script, None, None, None::<&gtk::gio::Cancellable>, |_| {});
     }
     pub fn scroll_to_byte(&self, byte: u32) {
-        self.scroll_byte.set(Some(byte));
-        Self::run_script(&self.webview, &scroll_script(byte));
+        self.request_scroll(byte, false);
+    }
+    /// Mantiene visible el bloque editado sin centrarlo con cada pulsación.
+    pub fn follow_edit(&self, byte: u32) {
+        self.request_scroll(byte, true);
+    }
+    fn request_scroll(&self, byte: u32, follow: bool) {
+        if self.webview.is_loading() {
+            self.scroll_byte.set(Some((byte, follow)));
+        } else {
+            Self::run_script(&self.webview, &scroll_script(byte, follow));
+        }
     }
     pub fn set_link_diagnostics(&self, links: &[crate::intelligence::Link]) {
         let entries = links
@@ -146,13 +174,18 @@ impl PreviewPane {
         scrolled.set_child(Some(&webview));
         let diagnostic_script = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
         let scroll_byte = std::rc::Rc::new(std::cell::Cell::new(None));
+        let pending_html = std::rc::Rc::new(std::cell::RefCell::new(None::<String>));
         let script = diagnostic_script.clone();
         let scroll = scroll_byte.clone();
+        let pending = pending_html.clone();
         webview.connect_load_changed(move |view, event| {
             if event == webkit6::LoadEvent::Finished {
+                if let Some(html) = pending.borrow_mut().take() {
+                    Self::run_script(view, &update_script(&html));
+                }
                 Self::run_script(view, &script.borrow());
-                if let Some(byte) = scroll.get() {
-                    Self::run_script(view, &scroll_script(byte));
+                if let Some((byte, follow)) = scroll.take() {
+                    Self::run_script(view, &scroll_script(byte, follow));
                 }
             }
         });
@@ -161,6 +194,8 @@ impl PreviewPane {
             webview,
             diagnostic_script,
             scroll_byte,
+            document_key: std::cell::RefCell::new(None),
+            pending_html,
         }
     }
 
@@ -172,12 +207,55 @@ impl PreviewPane {
     /// Carga un HTML ya renderizado: el integrador comparte un único render
     /// del buffer entre el Preview y la vista Visual (§6.1, §8.2) en vez de
     /// renderizar dos veces por refresco.
-    pub fn update_html(&self, html: &str, base_uri: Option<&str>) {
+    pub fn update_html(
+        &self,
+        html: &str,
+        base_uri: Option<&str>,
+        document_key: (Option<std::path::PathBuf>, u64),
+    ) {
         self.diagnostic_script.borrow_mut().clear();
+        if self.document_key.borrow().as_ref() == Some(&document_key) {
+            // Las ediciones actualizan el DOM en la misma página. Recargar
+            // la WebView descartaría su posición de lectura en cada tecla.
+            if self.webview.is_loading() {
+                *self.pending_html.borrow_mut() = Some(html.to_owned());
+            } else {
+                Self::run_script(&self.webview, &update_script(html));
+            }
+            return;
+        }
+        *self.document_key.borrow_mut() = Some(document_key);
+        self.pending_html.borrow_mut().take();
         self.scroll_byte.set(None);
         self.webview
             .load_html(html, Some(base_uri.unwrap_or(BASE_URI)));
     }
+}
+
+fn update_script(html: &str) -> String {
+    format!(
+        r#"{{
+        const x = window.scrollX, y = window.scrollY;
+        const next = new DOMParser().parseFromString({}, 'text/html');
+        // Reutilizar imágenes idénticas conserva su tamaño ya cargado y
+        // evita saltos adicionales al decodificarlas tras cada edición.
+        const images = new Map();
+        document.querySelectorAll('img').forEach(img => {{
+            const key = img.outerHTML;
+            if (!images.has(key)) images.set(key, []);
+            images.get(key).push(img);
+        }});
+        next.querySelectorAll('img').forEach(img => {{
+            const previous = images.get(img.outerHTML)?.shift();
+            if (previous) img.replaceWith(previous);
+        }});
+        document.documentElement.dataset.theme = next.documentElement.dataset.theme;
+        document.head.replaceChildren(...next.head.childNodes);
+        document.body.replaceChildren(...next.body.childNodes);
+        window.scrollTo(x, y);
+    }}"#,
+        js_string(html)
+    )
 }
 
 fn js_string(value: &str) -> String {
@@ -189,8 +267,33 @@ fn js_string(value: &str) -> String {
             .collect::<String>()
     )
 }
-fn scroll_script(byte: u32) -> String {
-    format!("{{ let best; document.querySelectorAll('[data-mm-span]').forEach(e => {{ const [a,b] = e.dataset.mmSpan.split(',').map(Number); if (a <= {byte} && {byte} < b) best=e; }}); if(best) best.scrollIntoView({{block:'center'}}); }}")
+fn scroll_script(byte: u32, follow: bool) -> String {
+    format!(
+        r#"{{
+        let best, distance = Infinity, size = Infinity;
+        document.querySelectorAll('[data-mm-span]').forEach(e => {{
+            const [a,b] = e.dataset.mmSpan.split(',').map(Number);
+            const d = {byte} < a ? a - {byte} : Math.max(0, {byte} - b);
+            if (d < distance || (d === distance && b-a < size)) {{
+                best = e; distance = d; size = b-a;
+            }}
+        }});
+        if (best) {{
+            const rect = best.getBoundingClientRect();
+            if (!{follow}) best.scrollIntoView({{block: 'center'}});
+            else if (rect.height <= window.innerHeight - 48) {{
+                if (rect.top < 24 || rect.bottom > window.innerHeight - 24)
+                    best.scrollIntoView({{block: 'center'}});
+            }} else {{
+                const [a,b] = best.dataset.mmSpan.split(',').map(Number);
+                const ratio = Math.max(0, Math.min(1, ({byte}-a) / Math.max(1,b-a)));
+                const y = rect.top + ratio * rect.height;
+                if (y < 24 || y > window.innerHeight - 24)
+                    window.scrollBy(0, y - window.innerHeight / 2);
+            }}
+        }}
+    }}"#
+    )
 }
 
 impl Default for PreviewPane {

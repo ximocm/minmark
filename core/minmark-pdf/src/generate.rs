@@ -292,6 +292,10 @@ fn render_inlines(
                 attrs,
                 ..
             } => {
+                let caption = attrs.as_ref().and_then(|a| a.caption.as_deref());
+                if caption.is_some() {
+                    out.push_str("#block(breakable: false)[");
+                }
                 if let Some(id) = attrs.as_ref().and_then(|a| a.id.as_ref()) {
                     let _ = write!(out, "#box[]#label({})", typst_string(id));
                 }
@@ -305,6 +309,11 @@ fn render_inlines(
                     let _ = write!(out, ", width: {width}%");
                 }
                 out.push(')');
+                if let Some(caption) = caption {
+                    out.push_str("#parbreak()#align(center)[#text(size: 0.9em)[");
+                    out.push_str(&escape_text(caption));
+                    out.push_str("]]]");
+                }
             }
             Inline::Math(latex) => {
                 let translation = translate(latex);
@@ -567,5 +576,22 @@ mod tests {
         assert!(out.contains("#outline()"));
         assert!(out.contains("#pagebreak()"));
         assert!(out.contains("Referencia inexistente: fig:a"));
+    }
+
+    #[test]
+    fn pie_de_figura_numerado_debajo_de_imagen_en_ambos_idiomas() {
+        let source = "![Esquema](image.svg){#fig:one}";
+        for (language, name) in [("es", "Figura"), ("en", "Figure")] {
+            let settings = Settings {
+                language: language.into(),
+                ..Default::default()
+            };
+            let out = generate(&minmark_parser::parse(source), &settings);
+            let image = out.find("#image(").unwrap();
+            let caption = out.find(&format!("{name} 1. Esquema")).unwrap();
+            assert!(image < caption);
+            assert!(out[image..caption].contains("#parbreak()#align(center)"));
+            assert!(out.contains("#block(breakable: false)["));
+        }
     }
 }

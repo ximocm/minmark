@@ -10,6 +10,11 @@ archivos. Los buffers abiertos prevalecen sobre el índice de disco.
   cursor en Markdown y Visual. Preview activa enlaces con clic o teclado.
   Se reutiliza una pestaña abierta, incluidos sus cambios sin guardar; un
   fragmento coloca el cursor y desplaza editor y Preview al destino.
+- Las ediciones del documento activo actualizan el DOM de Preview y mantienen
+  visible el bloque donde se escribe, sin desplazarlo en cada pulsación si ya
+  está visible. Los refrescos generales conservan el scroll y se reutilizan las
+  imágenes sin cambios. Cambiar de documento carga una página independiente;
+  navegar a un heading sigue desplazando Preview.
 - Al escribir `[texto](destino)`, aparecen archivos relativos al documento.
   Tras `#`, aparecen los headings del destino, incluidos cambios sin guardar.
   Flechas recorren la lista; Enter/Tab aceptan y Escape cancela. La aceptación
@@ -69,6 +74,9 @@ Ver {{ref:metodo}}, {{ref:fig:esquema}}, {{ref:tbl:datos}} y {{ref:eq:uno}}.
 ```
 
 Los IDs duplicados y las referencias ausentes tienen un diagnóstico visible.
+Las imágenes con ID `fig:` muestran debajo su texto alternativo como pie de
+figura numerado (por ejemplo, «Figura 1. Esquema») en Preview y PDF, con el
+mismo idioma y ámbito de numeración que sus referencias.
 El modo Visual conserva los tokens editables. Reordenar el documento recalcula
 las etiquetas sin escribir números en el fuente. Las referencias entre archivos
 compuestos y su numeración combinada siguen perteneciendo a la fase 6.
@@ -134,6 +142,15 @@ El usuario ha confirmado el paso 6 (outline): orden y jerarquía de headings,
 inclusión de Setext, exclusión de código/comentarios, navegación y actualización
 con títulos sin guardar, y cierre con Escape sin modificar el documento.
 El paso 7 sigue pendiente de su revisión manual.
+En esa revisión se detectó la ausencia de pies de figura; se corrigió su salida
+en Preview/PDF y se añadieron regresiones de posición, idioma y numeración.
+Verificación de la corrección: 33 pruebas de renderer/PDF y una exportación
+real de figura local a PDF pasan; pendiente de confirmación manual del usuario.
+También se corrigió el reinicio del scroll de Preview al escribir. Pasan las
+89 pruebas de UI y la integración GTK ampliada, que verifica conservación del
+scroll en refrescos generales, seguimiento del bloque editado, estabilidad al
+seguir escribiendo en él, contenido actualizado, navegación explícita y cambio
+de documento. Pendiente de confirmación manual del usuario.
 
 Para el cierre definitivo del milestone queda la revisión con
 lector de pantalla, una sesión Wayland y la respuesta percibida en un proyecto

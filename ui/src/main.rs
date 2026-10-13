@@ -732,7 +732,12 @@ impl AppCmds {
                 gtk4::gio::File::for_path(dir).uri().trim_end_matches('/')
             )
         });
-        self.preview.update_html(&html, base_uri.as_deref());
+        let document_key = {
+            let tabs = self.tabs.borrow();
+            (tabs.active().path.clone(), tabs.active().untitled_number)
+        };
+        self.preview
+            .update_html(&html, base_uri.as_deref(), document_key);
         {
             let tabs = self.tabs.borrow();
             self.tab_bar.sync(&tabs);
@@ -1269,6 +1274,14 @@ impl AppCmds {
         glib::timeout_add_local_once(Duration::from_millis(REFRESH_DEBOUNCE_MS), move || {
             me.refresh_scheduled.set(false);
             me.refresh_now();
+            let byte = {
+                let tabs = me.tabs.borrow();
+                let editor = &tabs.active().editor;
+                editor.offset_of(editor.selection().head).ok()
+            };
+            if let Some(byte) = byte {
+                me.preview.follow_edit(byte as u32);
+            }
             me.refresh_intelligence(true);
             me.refresh_navigation();
         });
@@ -2395,6 +2408,91 @@ mod gtk_integration_tests {
             .document()
             .content()
             .contains("[ir](b.\n"));
+        // Mantener la posición de lectura durante ediciones sucesivas,
+        // sin iniciar una nueva carga de WebKit ni perder el contenido.
+        let long_source = (0..100)
+            .map(|n| format!("Párrafo {n}.\n\n"))
+            .collect::<String>();
+        cmds.tabs
+            .borrow_mut()
+            .insert_active(Position::new(0, 0), &long_source);
+        cmds.reload_active();
+        pump_until(|| !cmds.preview.test_is_loading());
+        let scroll = Rc::new(Cell::new(None));
+        cmds.preview
+            .test_eval_number("window.scrollTo(0, 900); window.scrollY", scroll.clone());
+        pump_until(|| scroll.get().is_some());
+        let before_scroll = scroll.get().unwrap();
+        assert!(
+            before_scroll > 500.0,
+            "Preview must be scrolled for this regression"
+        );
+        for _ in 0..3 {
+            cmds.tabs
+                .borrow_mut()
+                .insert_active(Position::new(0, 0), "x");
+            cmds.refresh_now();
+            assert!(
+                !cmds.preview.test_is_loading(),
+                "editing must not reload Preview"
+            );
+        }
+        scroll.set(None);
+        cmds.preview.test_eval_number(
+            "document.body.textContent.includes('xxxPárrafo') ? window.scrollY : -1",
+            scroll.clone(),
+        );
+        pump_until(|| scroll.get().is_some());
+        assert!((scroll.get().unwrap() - before_scroll).abs() < 2.0);
+        // Navegar explícitamente sigue prevaleciendo sobre la posición previa.
+        cmds.focus_line(1);
+        scroll.set(None);
+        cmds.preview
+            .test_eval_number("window.scrollY", scroll.clone());
+        pump_until(|| scroll.get().is_some());
+        assert!(scroll.get().unwrap() < 50.0);
+        // Una edición real sigue el cursor hasta un bloque fuera de pantalla.
+        cmds.tabs
+            .borrow_mut()
+            .insert_active(Position::new(160, 0), "editando ");
+        cmds.tabs
+            .borrow_mut()
+            .set_selection_active(Selection::collapsed(Position::new(160, 9)));
+        cmds.schedule_refresh();
+        pump_until(|| !cmds.refresh_scheduled.get());
+        scroll.set(None);
+        cmds.preview.test_eval_number(
+            "(() => { const e = [...document.querySelectorAll('p')].find(e => e.textContent.startsWith('editando Párrafo 80')); if (!e) return -1; const r = e.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight ? scrollY : -1; })()",
+            scroll.clone(),
+        );
+        pump_until(|| scroll.get().is_some());
+        assert!(
+            scroll.get().unwrap() > 900.0,
+            "Preview must follow the edited block"
+        );
+        let edit_scroll = scroll.get().unwrap();
+        // Seguir escribiendo en un bloque visible no produce saltos.
+        cmds.tabs
+            .borrow_mut()
+            .insert_active(Position::new(160, 9), "x");
+        cmds.tabs
+            .borrow_mut()
+            .set_selection_active(Selection::collapsed(Position::new(160, 10)));
+        cmds.schedule_refresh();
+        pump_until(|| !cmds.refresh_scheduled.get());
+        scroll.set(None);
+        cmds.preview
+            .test_eval_number("window.scrollY", scroll.clone());
+        pump_until(|| scroll.get().is_some());
+        assert!((scroll.get().unwrap() - edit_scroll).abs() < 2.0);
+        // Otro documento no hereda el scroll de este.
+        cmds.select_tab(2);
+        pump_until(|| !cmds.preview.test_is_loading());
+        scroll.set(None);
+        cmds.preview
+            .test_eval_number("window.scrollY", scroll.clone());
+        pump_until(|| scroll.get().is_some());
+        assert!(scroll.get().unwrap() < 50.0);
         cmds.window.destroy();
         let _ = std::fs::remove_dir_all(root);
     }

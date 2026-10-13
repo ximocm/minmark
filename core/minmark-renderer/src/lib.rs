@@ -91,6 +91,8 @@ const BASE_CSS: &str = r#"body { margin: 0; background: var(--mm-bg); color: var
 .mm-callout-danger { border-left-color: var(--mm-color-danger); }
 .mm-callout-success { border-left-color: var(--mm-color-success); }
 .mm-caption { color: var(--mm-muted); font-size: 0.9em; text-align: center; }
+.mm-figure { display: inline-block; max-width: 100%; }
+.mm-figure > .mm-caption { display: block; }
 .mm-math { font-family: serif; }
 .mm-math-block { text-align: center; margin: 1em 0; font-family: serif; }
 .mm-ref, .mm-citation { color: var(--mm-color-accent); }
@@ -377,6 +379,10 @@ fn render_inlines(inlines: &[Inline], settings: &Settings, out: &mut String) {
                 alt,
                 attrs,
             } => {
+                let caption = attrs.as_ref().and_then(|a| a.caption.as_deref());
+                if caption.is_some() {
+                    out.push_str("<span class=\"mm-figure\">");
+                }
                 out.push_str("<img src=\"");
                 push_escaped(out, destination);
                 out.push_str("\" alt=\"");
@@ -395,6 +401,11 @@ fn render_inlines(inlines: &[Inline], settings: &Settings, out: &mut String) {
                     out.push_str("%\"");
                 }
                 out.push_str(" />");
+                if let Some(caption) = caption {
+                    out.push_str("<span class=\"mm-caption\">");
+                    push_escaped(out, caption);
+                    out.push_str("</span></span>");
+                }
             }
             Inline::Math(latex) => {
                 out.push_str("<span class=\"mm-math\">");

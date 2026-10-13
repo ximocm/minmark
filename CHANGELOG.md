@@ -17,6 +17,11 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 - Referencias cruzadas a IDs de headings, figuras, tablas y ecuaciones con
   etiquetas comunes en Preview/PDF, idiomas español/inglés y numeración
   derivada del documento (#11). El PDF recibe imágenes locales en memoria.
+- Pies de figura debajo de imágenes con ID `fig:`, a partir del texto alternativo,
+  con numeración e idioma comunes en Preview y PDF.
+- Preview actualiza su contenido sin recargar la página y sigue el bloque
+  donde se escribe, sin desplazarlo si ya está visible; los refrescos generales
+  conservan el scroll y los saltos explícitos a destinos siguen funcionando.
 - Prueba de integración GTK/WebKit y regresiones de Markdown Intelligence;
   comportamiento y comprobaciones pendientes en
   [la guía de fase 4](docs/MARKDOWN_INTELLIGENCE.md).

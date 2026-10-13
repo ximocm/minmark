@@ -131,7 +131,24 @@ impl Context {
                 | Inline::Strong(c)
                 | Inline::Strikethrough(c)
                 | Inline::Link { content: c, .. } => self.expand_inlines(c),
-                Inline::Image { alt, .. } => self.expand_inlines(alt),
+                Inline::Image { alt, attrs, .. } => {
+                    self.expand_inlines(alt);
+                    if let Some(attrs) = attrs {
+                        if let Some(id) = attrs.id.as_ref().filter(|id| id.starts_with("fig:")) {
+                            let caption = super::plain_text(alt);
+                            attrs.caption = Some(match self.labels.get(id) {
+                                Some(label) if !self.duplicates.contains(id) => {
+                                    if caption.is_empty() {
+                                        label.clone()
+                                    } else {
+                                        format!("{label}. {caption}")
+                                    }
+                                }
+                                _ => caption,
+                            });
+                        }
+                    }
+                }
                 _ => {}
             }
         }
@@ -205,6 +222,28 @@ mod tests {
     use super::*;
     const SOURCE: &str = "# Inicio {#intro}\n\n![á](image.png){#fig:one}\n\n| A |\n| - |\n| B |\n{#tbl:one}\n\n$$\nx=1\n$$\n{#eq:one}\n\n{{ref:intro}} {{ref:fig:one}} {{ref:tbl:one}} {{ref:eq:one}}\n";
     #[test]
+    fn pie_de_figura_debajo_con_alt_escapado_e_idioma_sin_mutar_ast() {
+        let source = "![**A** & B](image.svg){#fig:one}\n\n![Sin pie](icon.svg)";
+        let ast = minmark_parser::parse(source);
+        let before = ast.clone();
+        for (language, name) in [("es", "Figura"), ("en", "Figure")] {
+            let settings = Settings {
+                language: language.into(),
+                ..Default::default()
+            };
+            let html = crate::render_preview(&ast, source, &settings);
+            assert!(
+                html.contains(&format!(
+                    "/><span class=\"mm-caption\">{name} 1. A &amp; B</span>"
+                )),
+                "{html}"
+            );
+            assert_eq!(html.matches("class=\"mm-caption\"").count(), 1);
+        }
+        assert_eq!(ast, before);
+    }
+
+    #[test]
     fn etiquetas_destinos_e_idioma_compartidos() {
         let ast = minmark_parser::parse(SOURCE);
         let before = ast.clone();
@@ -250,10 +289,12 @@ mod tests {
         };
         let html = crate::render_preview(&minmark_parser::parse(source), source, &settings);
         assert!(html.contains("Figura 2.1"));
+        assert!(html.contains("class=\"mm-caption\">Figura 2.1. b</span>"));
         assert!(html.contains("2.1 Parte"));
         let html =
             crate::render_preview(&minmark_parser::parse(source), source, &Settings::default());
         assert!(html.contains("Figura 2"));
+        assert!(html.contains("class=\"mm-caption\">Figura 2. b</span>"));
         assert!(!html.contains("2.1 Parte"));
     }
 }
