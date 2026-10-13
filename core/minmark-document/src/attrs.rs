@@ -4,8 +4,12 @@
 //! caption entrecomillado y pares `clave=valor`. Único valor con significado
 //! en v1: `width=N%` con N en 1–100 (§18.5). Cualquier otra cosa no encaja
 //! con la gramática y la construcción completa es texto literal (§7.4.1).
+//!
+//! El parser (`minmark-parser`) y el escáner de anclas ([`crate::anchors`])
+//! comparten esta única implementación para que los IDs explícitos del AST y
+//! los del índice sean siempre los mismos (ISSUE: resolución de destinos).
 
-use minmark_document::Attributes;
+use crate::ast::Attributes;
 
 fn is_id_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || matches!(c, ':' | '.' | '_' | '-')
@@ -21,7 +25,7 @@ fn is_value_char(c: char) -> bool {
 
 /// Parsea el interior de `{...}` (sin las llaves) como atributos.
 /// `None` = no encaja con la gramática (la construcción será texto literal).
-pub(crate) fn parse_attributes(inner: &str) -> Option<Attributes> {
+pub fn parse_attributes(inner: &str) -> Option<Attributes> {
     let mut attrs = Attributes::default();
     let mut cur = inner.chars().peekable();
     let mut seen_id = false;
@@ -100,13 +104,34 @@ fn take_while(cur: &mut std::iter::Peekable<std::str::Chars<'_>>, f: fn(char) ->
     out
 }
 
+/// Atributos `{...}` al final de un texto (posición 3 §7.4.3: fin de un
+/// heading, §26.1). Devuelve el texto sin los atributos y los atributos;
+/// `None` si el final del texto no es una construcción de atributos válida.
+///
+/// Es la misma regla que aplica el parser sobre el último texto literal del
+/// heading (§26.1): `rfind('{')` más cierre `}` y gramática no vacía.
+pub fn strip_trailing_attrs(text: &str) -> Option<(&str, Attributes)> {
+    let open = text.rfind('{')?;
+    if !text.ends_with('}') || open + 1 >= text.len() - 1 {
+        return None;
+    }
+    let attrs = parse_attributes(&text[open + 1..text.len() - 1])?;
+    if attrs.is_empty() {
+        return None;
+    }
+    Some((text[..open].trim_end(), attrs))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn formas_validas() {
-        assert_eq!(parse_attributes("#architecture"), Some(Attributes { id: Some("architecture".into()), ..Default::default() }));
+        assert_eq!(
+            parse_attributes("#architecture"),
+            Some(Attributes { id: Some("architecture".into()), ..Default::default() })
+        );
 
         let attrs = parse_attributes("#tbl:results \"Resultados del experimento\"").unwrap();
         assert_eq!(attrs.id.as_deref(), Some("tbl:results"));
@@ -119,26 +144,36 @@ mod tests {
         assert_eq!(attrs.id.as_deref(), Some("fig:arq"));
         assert_eq!(attrs.caption.as_deref(), Some("Diagrama"));
         assert_eq!(attrs.width_percent, Some(30));
-        assert_eq!(attrs.extra, vec![("other".to_string(), "x".to_string())]);
+        assert_eq!(attrs.extra, vec![("other".to_owned(), "x".to_owned())]);
     }
 
     #[test]
     fn formas_invalidas() {
-        // §18.5: fuera de 1–100 no es gramática de atributos.
         assert_eq!(parse_attributes("width=150%"), None);
         assert_eq!(parse_attributes("width=0%"), None);
         assert_eq!(parse_attributes("width=50"), None);
-        // Colores no son atributos (§7.4.4): hay dos puntos, sin `=`.
+        // No es `clave=valor` ni `#id` ni caption: texto literal (§7.4.1).
         assert_eq!(parse_attributes("danger: texto"), None);
-        // Caption sin cerrar, id duplicado, clave sin valor.
         assert_eq!(parse_attributes("\"sin cerrar"), None);
         assert_eq!(parse_attributes("#a #b"), None);
         assert_eq!(parse_attributes("solo-clave"), None);
     }
 
     #[test]
-    fn escapes_en_caption() {
+    fn caption_con_escapes() {
         let attrs = parse_attributes("#x \"dijo: \\\"hola\\\"\"").unwrap();
         assert_eq!(attrs.caption.as_deref(), Some("dijo: \"hola\""));
+    }
+
+    #[test]
+    fn atributos_al_final_del_texto_26_1() {
+        assert_eq!(
+            strip_trailing_attrs("Título {#id}"),
+            Some(("Título", Attributes { id: Some("id".into()), ..Default::default() }))
+        );
+        // Sin gramática válida el texto se conserva tal cual (§7.4.1).
+        assert_eq!(strip_trailing_attrs("Título {sin atributos}"), None);
+        assert_eq!(strip_trailing_attrs("Título"), None);
+        assert_eq!(strip_trailing_attrs("{#solo}"), Some(("", Attributes { id: Some("solo".into()), ..Default::default() })));
     }
 }

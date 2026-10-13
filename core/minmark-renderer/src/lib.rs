@@ -23,11 +23,20 @@ mod palette;
 
 use minmark_config::{Settings, Theme};
 use minmark_document::{
-    Align, Ast, Attributes, Block, BlockKind, CitationItem, Inline, ListItem, Span, Substitution,
+    document_anchors, find_heading_nodes, Align, Ast, Attributes, Block, BlockKind, CitationItem,
+    Inline, ListItem, Span, Substitution,
 };
+use std::collections::BTreeMap;
 
 /// Renderiza la AST a la página completa del Preview.
-pub fn render_preview(ast: &Ast, settings: &Settings) -> String {
+///
+/// `source` es el Markdown del que deriva `ast`: de él salen las anclas de los
+/// headings (§26) con la política única de [`document_anchors`], la misma que
+/// usa el índice del proyecto — Preview e índice producen los mismos
+/// destinos, de modo que un `#fragmento` resuelto por el índice apunta al
+/// `id` emitido aquí.
+pub fn render_preview(ast: &Ast, source: &str, settings: &Settings) -> String {
+    let ids = HeadingIds::for_source(source);
     let mut out = String::new();
     out.push_str("<!DOCTYPE html>\n<html data-theme=\"");
     out.push_str(match settings.theme {
@@ -42,7 +51,7 @@ pub fn render_preview(ast: &Ast, settings: &Settings) -> String {
     out.push_str(&settings.preview_max_width_px.to_string());
     out.push_str("px\">\n<div class=\"minmark-preview\">");
     for block in &ast.blocks {
-        render_block(block, settings, &mut out);
+        render_block(block, &ids, settings, &mut out);
     }
     out.push_str("</div>\n</div>\n</body>\n</html>\n");
     out
@@ -81,7 +90,7 @@ const BASE_CSS: &str = r#"body { margin: 0; background: var(--mm-bg); color: var
 .mm-toc { border: 1px dashed var(--mm-rule); padding: 0.5em 1em; border-radius: 4px; }
 "#;
 
-fn render_block(block: &Block, settings: &Settings, out: &mut String) {
+fn render_block(block: &Block, ids: &HeadingIds, settings: &Settings, out: &mut String) {
     match &block.kind {
         BlockKind::Heading {
             level,
@@ -92,7 +101,7 @@ fn render_block(block: &Block, settings: &Settings, out: &mut String) {
             out.push_str("<h");
             out.push(char::from(b'0' + level));
             push_span(out, block.span);
-            push_id(out, attrs);
+            push_heading_id(out, attrs, block.span, ids);
             out.push('>');
             render_inlines(content, settings, out);
             out.push_str("</h");
@@ -110,7 +119,7 @@ fn render_block(block: &Block, settings: &Settings, out: &mut String) {
             out.push_str("<blockquote");
             push_span(out, block.span);
             out.push_str(">\n");
-            render_blocks(blocks, settings, out);
+            render_blocks(blocks, ids, settings, out);
             out.push_str("</blockquote>\n");
         }
         BlockKind::List {
@@ -127,7 +136,7 @@ fn render_block(block: &Block, settings: &Settings, out: &mut String) {
             }
             out.push_str(">\n");
             for item in items {
-                render_list_item(item, settings, out);
+                render_list_item(item, ids, settings, out);
             }
             out.push_str(if *ordered { "</ol>\n" } else { "</ul>\n" });
         }
@@ -197,7 +206,7 @@ fn render_block(block: &Block, settings: &Settings, out: &mut String) {
                 push_escaped(out, title);
                 out.push_str("</p>\n");
             }
-            render_blocks(blocks, settings, out);
+            render_blocks(blocks, ids, settings, out);
             out.push_str("</aside>\n");
         }
         BlockKind::Rule => {
@@ -208,17 +217,17 @@ fn render_block(block: &Block, settings: &Settings, out: &mut String) {
     }
 }
 
-fn render_blocks(blocks: &[Block], settings: &Settings, out: &mut String) {
+fn render_blocks(blocks: &[Block], ids: &HeadingIds, settings: &Settings, out: &mut String) {
     for block in blocks {
-        render_block(block, settings, out);
+        render_block(block, ids, settings, out);
     }
 }
 
-fn render_list_item(item: &ListItem, settings: &Settings, out: &mut String) {
+fn render_list_item(item: &ListItem, ids: &HeadingIds, settings: &Settings, out: &mut String) {
     out.push_str("<li");
     push_span(out, item.span);
     out.push('>');
-    render_blocks(&item.blocks, settings, out);
+    render_blocks(&item.blocks, ids, settings, out);
     out.push_str("</li>\n");
 }
 
@@ -257,6 +266,53 @@ fn push_id(out: &mut String, attrs: &Option<Attributes>) {
     if let Some(id) = attrs.as_ref().and_then(|a| a.id.as_deref()) {
         out.push_str(" id=\"");
         push_escaped(out, id);
+        out.push('"');
+    }
+}
+
+/// Anclas de los headings del documento (§26): línea (1-based) de inicio del
+/// heading → ID final, con la política única de [`document_anchors`] — la
+/// misma que usa el índice del proyecto (`minmark-fs`), de modo que Preview e
+/// índice producen los mismos destinos.
+struct HeadingIds {
+    line_starts: Vec<u32>,
+    ids: BTreeMap<u32, String>,
+}
+
+impl HeadingIds {
+    fn for_source(source: &str) -> Self {
+        let nodes = find_heading_nodes(source);
+        let ids = document_anchors(&nodes)
+            .into_iter()
+            .map(|anchor| (anchor.line, anchor.id))
+            .collect();
+        let mut line_starts = vec![0u32];
+        for (offset, _) in source.match_indices('\n') {
+            line_starts.push(offset as u32 + 1);
+        }
+        Self { line_starts, ids }
+    }
+
+    fn line_of(&self, offset: u32) -> u32 {
+        self.line_starts.partition_point(|start| *start <= offset) as u32
+    }
+
+    fn id_for_span(&self, span: Span) -> Option<&str> {
+        self.ids.get(&self.line_of(span.start)).map(String::as_str)
+    }
+}
+
+/// ID de un heading: el ancla compartida del documento si el escáner conoce
+/// el heading; si no (p. ej. dentro de un bloque de cita), el ID explícito
+/// declarado en el heading (§26.1).
+fn push_heading_id(out: &mut String, attrs: &Option<Attributes>, span: Span, ids: &HeadingIds) {
+    let id = ids
+        .id_for_span(span)
+        .map(str::to_owned)
+        .or_else(|| attrs.as_ref().and_then(|a| a.id.clone()));
+    if let Some(id) = id {
+        out.push_str(" id=\"");
+        push_escaped(out, &id);
         out.push('"');
     }
 }
@@ -491,7 +547,7 @@ mod tests {
     use minmark_parser::parse;
 
     fn html(source: &str) -> String {
-        render_preview(&parse(source), &Settings::default())
+        render_preview(&parse(source), source, &Settings::default())
     }
 
     #[test]
@@ -515,7 +571,7 @@ mod tests {
                 preview_max_width_px: 640,
                 ..Settings::default()
             };
-            let out = render_preview(&parse("# T\n"), &settings);
+            let out = render_preview(&parse("# T\n"), "# T\n", &settings);
             assert!(out.contains(expected));
             assert!(out.contains("style=\"max-width: 640px\""));
         }
@@ -535,6 +591,45 @@ mod tests {
         assert!(out.contains(">Título</h1>"));
         assert!(out.contains(">Cuerpo con <em>énfasis</em> y <strong>fuerte</strong>.</p>"));
         assert!(out.contains("<ol data-mm-span="));
+    }
+
+    /// Preview e índice producen los mismos destinos (§26): los `id` de los
+    /// headings del HTML son exactamente las anclas que resuelve el índice,
+    /// en el mismo orden de documento.
+    #[test]
+    fn preview_e_indice_producen_los_mismos_destinos_26() {
+        let corpus = [
+            "# Introducción\n\n## Introducción\n",
+            "## Título {#architecture}\n\n### Otra {#architecture}\n",
+            "Título\n=====\n\npárrafo\ncontinuación\n---\n",
+            "---\ntitle: no heading\n---\n# Con front matter\n",
+            "```\n# en codigo\n```\n> # Citado\n\n- item\n\n  # En lista\n",
+            "# Ñandú 見出し\r\n\r\n## Otra sección\r\n",
+            "# [Arquitectura](architecture.md) y `code`\n",
+        ];
+        for source in corpus {
+            let out = html(source);
+            let ids: Vec<String> = document_anchors(&find_heading_nodes(source))
+                .into_iter()
+                .map(|anchor| anchor.id)
+                .collect();
+            assert_eq!(heading_ids_in_html(&out), ids, "paridad Preview == índice en {source:?}");
+        }
+    }
+
+    /// IDs de los headings renderizados, en orden de documento.
+    fn heading_ids_in_html(out: &str) -> Vec<String> {
+        let mut ids = Vec::new();
+        for piece in out.split("<h").skip(1) {
+            if !piece.starts_with(|c: char| c.is_ascii_digit()) {
+                continue; // <html>, <head>…
+            }
+            let tag = &piece[..piece.find('>').unwrap_or(0)];
+            if let Some((_, rest)) = tag.split_once("id=\"") {
+                ids.push(rest[..rest.find('"').unwrap_or(0)].to_owned());
+            }
+        }
+        ids
     }
 
     #[test]
@@ -584,7 +679,7 @@ mod tests {
         settings
             .custom_colors
             .insert("brand".to_string(), "#336699".to_string());
-        let out = render_preview(&ast, &settings);
+        let out = render_preview(&ast, "{brand: x}\n", &settings);
         assert!(out.contains("color: var(--mm-color-brand, #336699)"));
     }
 

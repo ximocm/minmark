@@ -41,9 +41,11 @@ impl ViewMode {
 
 /// Render puro del fuente Markdown a la página del Preview (§10.2):
 /// `minmark_parser::parse` + `minmark_renderer::render_preview`. Es el HTML
-/// que carga la WebView y también el que la vista Visual reutiliza.
+/// que carga la WebView y también el que la vista Visual reutiliza. El fuente
+/// viaja al renderer para que las anclas de los headings (§26) sean las mismas
+/// que resuelve el índice.
 pub fn render_document(source: &str, settings: &Settings) -> String {
-    minmark_renderer::render_preview(&minmark_parser::parse(source), settings)
+    minmark_renderer::render_preview(&minmark_parser::parse(source), source, settings)
 }
 
 /// Base URI de la carga en la WebView: cualquier URL relativa degrada a rutas

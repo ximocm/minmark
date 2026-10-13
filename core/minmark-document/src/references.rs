@@ -70,15 +70,79 @@ impl Reference {
 
 /// Referencias de un fuente Markdown (cuerpo + front matter §21).
 pub fn find_markdown_references(source: &str) -> Vec<Reference> {
-    let mut refs = Vec::new();
+    scan_markdown_links(source).references
+}
+
+/// Definiciones de enlace por referencia `[id]: dest` (§16) y usos
+/// `[texto][id]` / `[texto][]` de un fuente Markdown, junto con las
+/// referencias reescribibles ([`Reference`]).
+pub fn scan_markdown_links(source: &str) -> LinkScan {
+    let mut scan = LinkScan::default();
     let mut body_start = 0;
     if let Some((fm, body)) = split_front_matter(source) {
         let fm_source = &source[fm.start as usize..fm.end as usize];
-        find_config_lines(fm_source, fm.start as usize, &mut refs);
+        find_config_lines(fm_source, fm.start as usize, &mut scan.references);
         body_start = body;
     }
-    find_markdown_body(&source[body_start..], body_start, &mut refs);
-    refs
+    find_markdown_body(&source[body_start..], body_start, &mut scan);
+    scan
+}
+
+/// Definiciones de enlace por referencia `[id]: dest` (§16) de un fuente
+/// Markdown (el primero por etiqueta es el que gana al resolver).
+pub fn find_link_definitions(source: &str) -> Vec<LinkDefinition> {
+    scan_markdown_links(source).definitions
+}
+
+/// Usos por referencia de un fuente Markdown (§16).
+pub fn find_reference_usages(source: &str) -> Vec<ReferenceUsage> {
+    scan_markdown_links(source).usages
+}
+
+/// Referencias de un fuente Markdown en todas sus formas (§16, §19): lo que
+/// reescribe [`apply_replacements`] y lo que se resuelve al navegar.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct LinkScan {
+    /// Destinos referenciados reescribibles ([`Reference`]).
+    pub references: Vec<Reference>,
+    /// Definiciones `[id]: dest`.
+    pub definitions: Vec<LinkDefinition>,
+    /// Usos `[texto][id]` / `[texto][]`.
+    pub usages: Vec<ReferenceUsage>,
+}
+
+/// Definición de enlace por referencia `[id]: dest` (§16).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkDefinition {
+    /// Etiqueta normalizada ([`normalize_label`]).
+    pub label: String,
+    /// Destino literal tal cual aparece (incluye `#frag` si lo hay).
+    pub dest: String,
+    /// Rango de bytes del destino en el fuente (como [`Reference::span`]).
+    pub span: Span,
+}
+
+/// Uso por referencia `[texto][id]` / `[texto][]` (§16). El atajo `[texto]`
+/// no se considera uso: sin corchetes de etiqueta no hay forma de distinguirlo
+/// de un texto entre corchetes (frontera documentada).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReferenceUsage {
+    /// [`RefKind::MarkdownLink`] o [`RefKind::MarkdownImage`] (`![alt][id]`).
+    pub kind: RefKind,
+    /// Etiqueta normalizada ([`normalize_label`]); en `[texto][]` es el texto.
+    pub label: String,
+    /// Rango de bytes del uso completo en el fuente.
+    pub span: Span,
+}
+
+/// Etiqueta de enlace por referencia normalizada (CommonMark: sin espacios
+/// redundantes y sin distinguir mayúsculas).
+pub fn normalize_label(label: &str) -> String {
+    label
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
 }
 
 /// Referencias de un fuente TOML (`.mdproject.toml`, composiciones).
@@ -88,65 +152,8 @@ pub fn find_toml_references(source: &str) -> Vec<Reference> {
     refs
 }
 
-/// Heading ATX de un fuente Markdown (§27.1), para el índice §45.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Heading {
-    /// Nivel 1–6.
-    pub level: u8,
-    /// Texto del heading (sin los `#` ni el cierre opcional).
-    pub text: String,
-}
-
-/// Headings ATX del cuerpo de un fuente Markdown (§27.1).
-///
-/// Saltos de código cercado (` ``` ` / `~~~`) y del front matter (§21: un
-/// `#` allí es comentario YAML). Los headings setext no se indexan (frontera
-/// documentada en ISSUE-025): el dialecto §27 usa headings ATX.
-pub fn find_headings(source: &str) -> Vec<Heading> {
-    let mut headings = Vec::new();
-    let mut body_start = 0;
-    if let Some((_, body)) = split_front_matter(source) {
-        body_start = body;
-    }
-    let mut fence: Option<u8> = None;
-    for line in source[body_start..].lines() {
-        let trimmed = line.trim_start();
-        let indent = line.len() - trimmed.len();
-        let marker = trimmed.as_bytes().first().copied().filter(|b| *b == b'`' || *b == b'~');
-        if indent <= 3 {
-            if let Some(marker) = marker {
-                if run_len(trimmed, marker) >= 3 {
-                    fence = match fence {
-                        Some(open) if open == marker => None,
-                        Some(open) => Some(open),
-                        None => Some(marker),
-                    };
-                    continue;
-                }
-            }
-        }
-        if fence.is_some() || indent > 3 {
-            continue;
-        }
-        let hashes = run_len(trimmed, b'#');
-        if !(1..=6).contains(&hashes) {
-            continue;
-        }
-        let rest = &trimmed[hashes..];
-        if !rest.is_empty() && !rest.starts_with([' ', '\t']) {
-            continue; // p. ej. `#hashtag` no es heading
-        }
-        let mut text = rest.trim().to_owned();
-        // Cierre opcional ` #…` (CommonMark).
-        if let Some(pos) = text.rfind(' ') {
-            if text[pos + 1..].chars().all(|c| c == '#') && text[pos + 1..].len() > 0 {
-                text.truncate(pos);
-            }
-        }
-        headings.push(Heading { level: hashes as u8, text: text.trim_end().to_owned() });
-    }
-    headings
-}
+/// Headings: [`crate::anchors::find_headings`] y
+/// [`crate::anchors::find_heading_nodes`] (§27.1, §26.1).
 
 /// Aplica sustituciones de destino por rango de bytes, de mayor a menor
 /// offset (los rangos no se solapan por construcción).
@@ -164,7 +171,7 @@ pub fn apply_replacements(source: &str, edits: &[(Span, String)]) -> String {
 
 /// Devuelve el front matter inicial `(contenido, offset)` y el offset del
 /// cuerpo. El front matter es un bloque `---` al principio del fichero.
-fn split_front_matter(source: &str) -> Option<(Span, usize)> {
+pub(crate) fn split_front_matter(source: &str) -> Option<(Span, usize)> {
     let rest = source.strip_prefix("---\n").or_else(|| source.strip_prefix("---\r\n"))?;
     let offset = source.len() - rest.len();
     for end in ["\n---\n", "\n---\r\n", "\n---"] {
@@ -290,7 +297,7 @@ fn find_toml_strings(source: &str, base: usize, refs: &mut Vec<Reference>) {
 // --- Cuerpo Markdown ---------------------------------------------------------
 
 /// Escanea el cuerpo Markdown saltando código y comentarios HTML.
-fn find_markdown_body(source: &str, base: usize, refs: &mut Vec<Reference>) {
+fn find_markdown_body(source: &str, base: usize, scan: &mut LinkScan) {
     let bytes = source.as_bytes();
     let mut i = 0;
     let mut bracket_stack: Vec<usize> = Vec::new();
@@ -340,7 +347,7 @@ fn find_markdown_body(source: &str, base: usize, refs: &mut Vec<Reference>) {
                 if let Some(pos) = source[i + 2..].find("]]") {
                     let dest = source[i + 2..i + 2 + pos].to_owned();
                     let span = Span { start: (base + i + 2) as u32, end: (base + i + 2 + pos) as u32 };
-                    refs.push(Reference::new(RefKind::WikiLink, span, dest, DestForm::Plain));
+                    scan.references.push(Reference::new(RefKind::WikiLink, span, dest, DestForm::Plain));
                     i = i + 2 + pos + 2;
                     continue;
                 }
@@ -356,18 +363,38 @@ fn find_markdown_body(source: &str, base: usize, refs: &mut Vec<Reference>) {
                 i += 1;
                 let Some(open) = open else { continue };
                 let image = open > 0 && bytes[open - 1] == b'!';
+                let label = normalize_label(&source[open + 1..i - 1]);
                 if bytes.get(i) == Some(&b'(') {
                     // `[t](dest "title")` / `![a](dest)`.
                     if let Some((dest, form, span, next)) = parse_inline_dest(source, i + 1, base) {
                         let kind = if image { RefKind::MarkdownImage } else { RefKind::MarkdownLink };
-                        refs.push(Reference::new(kind, span, dest, form));
+                        scan.references.push(Reference::new(kind, span, dest, form));
                         i = next;
                     }
                 } else if bytes.get(i) == Some(&b':') && is_line_start(source, open) {
                     // Definición `[id]: dest`.
                     if let Some((dest, form, span, next)) = parse_inline_dest(source, i + 1, base) {
-                        refs.push(Reference::new(RefKind::MarkdownLink, span, dest, form));
+                        scan
+                            .definitions
+                            .push(LinkDefinition { label, dest: dest.clone(), span });
+                        scan.references.push(Reference::new(RefKind::MarkdownLink, span, dest, form));
                         i = next;
+                    }
+                } else if bytes.get(i) == Some(&b'[') && !source[i..].starts_with("[[") {
+                    // Uso por referencia `[texto][id]` / `[texto][]` (§16).
+                    if let Some(pos) = source[i + 1..].find(']') {
+                        let close = i + 1 + pos;
+                        let inner = &source[i + 1..close];
+                        let label = if inner.is_empty() { label } else { normalize_label(inner) };
+                        scan.usages.push(ReferenceUsage {
+                            kind: if image { RefKind::MarkdownImage } else { RefKind::MarkdownLink },
+                            label,
+                            span: Span {
+                                start: (base + if image { open - 1 } else { open }) as u32,
+                                end: (base + close + 1) as u32,
+                            },
+                        });
+                        i = close + 1;
                     }
                 }
             }
@@ -447,17 +474,70 @@ mod tests {
     }
 
     #[test]
-    fn headings_atx_27_1_para_el_indice() {
-        let source = "---\ntitle: # no heading\n---\n# Uno\n\n## Dos con `code` ###\n\n\
-                      ###hashtag no\n\n```\n# en codigo\n```\n\n####\n\nCuerpo\n";
+    fn definiciones_y_usos_por_referencia_16() {
+        let source = "Ver [texto][id] y ![fig][fig] y [colapsado][].\n\n\
+                      [id]: cap1/doc.md#frag\n[COLAPSADO]: otro.md\n[id]: duplicado.md\n";
+        let scan = scan_markdown_links(source);
         assert_eq!(
-            find_headings(source),
+            scan.definitions,
             [
-                Heading { level: 1, text: "Uno".to_owned() },
-                Heading { level: 2, text: "Dos con `code`".to_owned() },
-                Heading { level: 4, text: String::new() },
+                LinkDefinition {
+                    label: "id".to_owned(),
+                    dest: "cap1/doc.md#frag".to_owned(),
+                    span: Span { start: source.find("cap1").unwrap() as u32, end: source.find("cap1").unwrap() as u32 + "cap1/doc.md#frag".len() as u32 },
+                },
+                LinkDefinition {
+                    label: "colapsado".to_owned(),
+                    dest: "otro.md".to_owned(),
+                    span: Span { start: source.find("otro.md").unwrap() as u32, end: source.find("otro.md").unwrap() as u32 + "otro.md".len() as u32 },
+                },
+                LinkDefinition {
+                    label: "id".to_owned(),
+                    dest: "duplicado.md".to_owned(),
+                    span: Span { start: source.find("duplicado.md").unwrap() as u32, end: source.find("duplicado.md").unwrap() as u32 + "duplicado.md".len() as u32 },
+                },
+            ],
+            "las definiciones se conservan todas, en orden"
+        );
+        let usage_span = |text: &str| -> Span {
+            let start = source.find(text).unwrap() as u32;
+            Span { start, end: start + text.len() as u32 }
+        };
+        assert_eq!(
+            scan.usages,
+            [
+                ReferenceUsage {
+                    kind: RefKind::MarkdownLink,
+                    label: "id".to_owned(),
+                    span: usage_span("[texto][id]"),
+                },
+                ReferenceUsage {
+                    kind: RefKind::MarkdownImage,
+                    label: "fig".to_owned(),
+                    span: usage_span("![fig][fig]"),
+                },
+                ReferenceUsage {
+                    kind: RefKind::MarkdownLink,
+                    label: "colapsado".to_owned(),
+                    span: usage_span("[colapsado][]"),
+                },
             ]
         );
+    }
+
+    #[test]
+    fn etiquetas_normalizadas_y_atajo_fuera() {
+        assert_eq!(normalize_label("  Mi   Etiqueta "), "mi etiqueta");
+        let scan = scan_markdown_links("Un [texto] suelto y `[no](x.md)`.\n\n[id]: a.md\n");
+        assert!(scan.usages.is_empty(), "el atajo `[texto]` no es un uso");
+    }
+
+    #[test]
+    fn definiciones_y_usos_respetan_codigo_y_comentarios() {
+        let scan = scan_markdown_links("```\n[a][b]\n[b]: c.md\n```\n`[x][y]` <!-- [m][n] -->\n[o][p]\n");
+        assert!(scan.definitions.is_empty());
+        assert_eq!(scan.usages.len(), 1);
+        assert_eq!(scan.usages[0].label, "p");
     }
 
     #[test]

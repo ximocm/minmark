@@ -9,6 +9,18 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 
 ## [Unreleased]
 
+### Añadido
+
+- Anclas automáticas para los headings (ATX y setext) y resolución de destinos
+  de enlaces unificada en el índice, base de Markdown Intelligence (Fase 4):
+  `#fragmento` y `archivo.md#fragmento` resuelven a la misma posición que
+  ancla el Preview, con IDs explícitos `{#id}`, política documentada para
+  duplicados (sufijos `-1`, `-2`, …) y soporte de enlaces por referencia,
+  destinos externos, wiki links por nombre y buffers abiertos sin guardar
+  (que priorizan sobre el disco). El índice guarda además la línea de cada
+  heading y pasa al formato v2 (los índices antiguos se reconstruyen solos).
+  Decisiones en [ADR-004](docs/adr/004-anclas-y-resolucion-de-enlaces.md).
+
 ### Trabajo en curso
 
 - Integración de exportación PDF en la interfaz: documento activo desde el

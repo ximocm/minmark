@@ -14,7 +14,6 @@
 //! - §6.2: cada bloque conserva su [`Span`] en el fuente original y parsear
 //!   nunca modifica el buffer (la AST es derivada, §6.1).
 
-mod attrs;
 mod blocks;
 mod events;
 mod highlight;

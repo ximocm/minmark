@@ -9,7 +9,9 @@
 //!
 //! Crate sin dependencias: solo `std` (§4.1).
 
+mod anchors;
 mod ast;
+mod attrs;
 mod document;
 mod editor;
 mod position;
@@ -17,14 +19,19 @@ mod regex;
 mod references;
 mod search;
 
+pub use anchors::{
+    document_anchors, find_anchor, find_heading_nodes, find_headings, Anchor, Heading, HeadingNode,
+};
 pub use ast::{
     Align, Ast, Attributes, Block, BlockKind, CitationItem, Inline, ListItem, Span, Substitution,
 };
+pub use attrs::{parse_attributes, strip_trailing_attrs};
 pub use document::{Document, LineEnding};
 pub use editor::{EditError, Editor};
 pub use position::{Position, Range, Selection};
 pub use references::{
-    apply_replacements, find_headings, find_markdown_references, find_toml_references, DestForm,
-    Heading, RefKind, Reference,
+    apply_replacements, find_link_definitions, find_markdown_references, find_reference_usages,
+    find_toml_references, normalize_label, scan_markdown_links, DestForm, LinkDefinition, LinkScan,
+    RefKind, Reference, ReferenceUsage,
 };
 pub use search::{Matcher, SearchError, SearchOptions, TextMatch};

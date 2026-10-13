@@ -15,26 +15,41 @@
 //! ISSUE-025: sin dependencias nuevas), texto línea a línea:
 //!
 //! ```text
-//! minmark-index 1
+//! minmark-index 2
 //! root <raíz canónica, percent-encoded>
 //! <path-rel>\t<mtime-secs>\t<size>\t<payload>
 //! ```
 //!
-//! `payload` = registros separados por `\x1e`: `h=<nivel>:<texto>` (heading
-//! §27.1) o `l=<destino>` (referencia §16). Cada valor va percent-encoded
-//! (solo `[A-Za-z0-9-._~/=]` a secas); la lectura es tolerante: una línea o
-//! un archivo ilegible se descarta y se reconstruye (§45).
+//! `payload` = registros separados por `\x1e`: `h=<nivel>:<línea>:<ancla>:<texto>`
+//! (heading §27.1 con su ancla final §26 y su línea) o `l=<destino>`
+//! (referencia §16). Cada valor va percent-encoded (solo
+//! `[A-Za-z0-9-._~/=]` a secas); la lectura es tolerante: una línea o un
+//! archivo ilegible se descarta y se reconstruye (§45). Las anclas se calculan
+//! con la política única de [`minmark_document::document_anchors`], la misma
+//! que usa la Preview: índice y Preview producen los mismos destinos.
 
 use crate::ignore::IgnorePatterns;
 use crate::paths::walk_tree;
 use crate::{relative_path, write_atomic, FsError};
-use minmark_document::{find_headings, find_markdown_references, Heading};
+use minmark_document::{document_anchors, find_heading_nodes, find_markdown_references};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 /// Firma del formato de índice.
-const SIGNATURE: &str = "minmark-index 1";
+const SIGNATURE: &str = "minmark-index 2";
+
+/// Heading del índice con su ancla final y posición (§26, §45).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndexHeading {
+    pub level: u8,
+    /// Texto del heading (sin `#`, cierre ni atributos, como en el AST).
+    pub text: String,
+    /// Ancla final (§26): ID explícito o automático con sufijo de unicidad.
+    pub anchor: String,
+    /// Línea (1-based) del heading en el fuente indexado.
+    pub line: u32,
+}
 
 /// Entrada del índice para un archivo del proyecto.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,8 +60,8 @@ pub struct IndexEntry {
     /// [`crate::FileStamp`], ISSUE-013).
     pub mtime_secs: u64,
     pub size: u64,
-    /// Headings del documento (§27.1), en orden.
-    pub headings: Vec<Heading>,
+    /// Headings del documento (§27.1), en orden, con ancla y línea.
+    pub headings: Vec<IndexHeading>,
     /// Destinos referenciados (§16), en orden.
     pub links: Vec<String>,
 }
@@ -146,7 +161,7 @@ impl ProjectIndex {
         })
     }
 
-    /// Serializa en el formato `minmark-index 1` (ver módulo).
+    /// Serializa en el formato `minmark-index 2` (ver módulo).
     pub fn serialize(&self) -> String {
         let mut out = String::new();
         out.push_str(SIGNATURE);
@@ -156,8 +171,10 @@ impl ProjectIndex {
             let mut payload: Vec<String> = Vec::new();
             for heading in &entry.headings {
                 payload.push(format!(
-                    "h={}:{}",
+                    "h={}:{}:{}:{}",
                     heading.level,
+                    heading.line,
+                    pct_encode(&heading.anchor),
                     pct_encode(&heading.text)
                 ));
             }
@@ -175,7 +192,7 @@ impl ProjectIndex {
         out
     }
 
-    /// Parsea el formato `minmark-index 1`; `None` si no es un índice de
+    /// Parsea el formato `minmark-index 2`; `None` si no es un índice de
     /// `root` (tolerante con líneas individuales corruptas).
     pub fn parse(text: &str, root: &Path) -> Option<Self> {
         let mut lines = text.lines();
@@ -214,11 +231,12 @@ impl ProjectIndex {
             let (key, value) = record.split_once('=')?;
             match key {
                 "h" => {
-                    let (level, text) = value.split_once(':')?;
-                    headings.push(Heading {
-                        level: level.parse().ok()?,
-                        text: pct_decode(text),
-                    });
+                    let mut parts = value.splitn(4, ':');
+                    let level = parts.next()?.parse().ok()?;
+                    let line = parts.next()?.parse().ok()?;
+                    let anchor = pct_decode(parts.next()?);
+                    let text = pct_decode(parts.next()?);
+                    headings.push(IndexHeading { level, text, anchor, line });
                 }
                 "l" => links.push(pct_decode(value)),
                 _ => return None,
@@ -281,7 +299,17 @@ impl ProjectIndex {
             let Ok(source) = std::fs::read_to_string(&entry.path) else {
                 continue;
             };
-            let headings = find_headings(&source);
+            let nodes = find_heading_nodes(&source);
+            let headings = nodes
+                .iter()
+                .zip(document_anchors(&nodes))
+                .map(|(node, anchor)| IndexHeading {
+                    level: node.level,
+                    text: node.text.clone(),
+                    anchor: anchor.id,
+                    line: node.line,
+                })
+                .collect();
             let links = find_markdown_references(&source)
                 .iter()
                 .map(|reference| reference.dest.clone())
@@ -409,8 +437,18 @@ mod tests {
         assert_eq!(
             a.headings,
             [
-                Heading { level: 1, text: "Cap A".to_owned() },
-                Heading { level: 2, text: "Detalle".to_owned() },
+                IndexHeading {
+                    level: 1,
+                    text: "Cap A".to_owned(),
+                    anchor: "cap-a".to_owned(),
+                    line: 1,
+                },
+                IndexHeading {
+                    level: 2,
+                    text: "Detalle".to_owned(),
+                    anchor: "detalle".to_owned(),
+                    line: 3,
+                },
             ]
         );
         assert_eq!(a.links, ["i.png"]);
@@ -478,7 +516,12 @@ mod tests {
             rel_path: "con espacio/tab\t#raro.md".to_owned(),
             mtime_secs: 42,
             size: 7,
-            headings: vec![Heading { level: 3, text: "Con \ttab y %".to_owned() }],
+            headings: vec![IndexHeading {
+                level: 3,
+                text: "Con \ttab y %".to_owned(),
+                anchor: "con-3".to_owned(),
+                line: 5,
+            }],
             links: vec!["a b.md#frag".to_owned()],
         };
         index.entries.insert(entry.rel_path.clone(), entry.clone());

@@ -6,7 +6,7 @@
 //! - Atributos (§7.4.3) solo en sus tres posiciones: tras imagen inline, en
 //!   línea propia tras tabla o ecuación de bloque, y al final de un heading.
 
-use crate::attrs::parse_attributes;
+use minmark_document::parse_attributes;
 use crate::events;
 use crate::highlight::{block_highlights, Highlight, HighlightKind};
 use crate::inlines::BUILTIN_CALLOUTS;
@@ -346,22 +346,16 @@ fn decorate(block: &mut Block, source: &str, base: usize) {
     }
 }
 
-/// Posición 3: `## Título {#id}` (§26.1).
+/// Posición 3: `## Título {#id}` (§26.1). La regla de extracción vive en
+/// [`minmark_document::strip_trailing_attrs`] (compartida con el escáner de
+/// anclas del índice).
 fn trailing_attrs(content: &mut Vec<Inline>) -> Option<Attributes> {
     let last = content.last_mut()?;
     let Inline::Text(text) = last else {
         return None;
     };
-    let open = text.rfind('{')?;
-    if !text.ends_with('}') || open + 1 >= text.len() - 1 {
-        return None;
-    }
-    let attrs = parse_attributes(&text[open + 1..text.len() - 1])?;
-    if attrs.is_empty() {
-        return None;
-    }
-    let before = text[..open].trim_end().to_string();
-    *text = before;
+    let (rest, attrs) = minmark_document::strip_trailing_attrs(text)?;
+    *text = rest.to_string();
     if text.is_empty() {
         content.pop();
     }
