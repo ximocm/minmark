@@ -19,13 +19,13 @@
 //! por orden del índice. El resultado se corta en [`MAX_RESULTS`] para no
 //! bloquear la UI con miles de entradas (§47.5).
 //!
-//! Los headings del índice §45 no guardan número de línea (el índice solo
-//! documenta el *qué*, ISSUE-025); la línea de un heading se resuelve al
-//! abrir con [`find_heading_line`] / [`resolve_heading_line`], de modo que la
-//! consulta es pura y no hace E/S por pulsación (§47.5).
+//! Los headings del índice §45 guardan su línea y su ancla (§26); al abrir,
+//! la línea del heading elegido se re-resuelve sobre el fuente actual con
+//! [`find_heading_line`] / [`resolve_heading_line`], de modo que la consulta
+//! es pura y no hace E/S por pulsación (§47.5).
 
 use crate::index::ProjectIndex;
-use minmark_document::{find_headings, Heading};
+use minmark_document::{find_heading_nodes, Heading};
 use std::path::Path;
 
 /// Techo de resultados por consulta (§47.5: miles de entradas no deben
@@ -216,7 +216,7 @@ pub struct Entry {
     /// Path relativo a la raíz del proyecto (§17, forma posix).
     pub rel_path: String,
     /// Línea objetivo (1-based) para `:N`; los headings la resuelven al
-    /// abrir con [`resolve_heading_line`] (el índice §45 no guarda líneas).
+    /// abrir con [`resolve_heading_line`] sobre el fuente actual.
     pub line: Option<u32>,
     /// Puntuación del ranking documentado en [`quickopen_query`].
     pub score: i64,
@@ -403,7 +403,7 @@ fn doc_headings_mode(
             line: None,
             score: hit.score + recency_bonus(recent, &indexed.rel_path)
                 - depth_penalty(&indexed.rel_path),
-            heading: Some(heading.clone()),
+            heading: Some(Heading { level: heading.level, text: heading.text.clone() }),
         });
     }
     finish(results)
@@ -430,7 +430,7 @@ fn project_headings_mode(
                 line: None,
                 score: hit.score + recency_bonus(recent, &indexed.rel_path)
                     - depth_penalty(&indexed.rel_path),
-                heading: Some(heading.clone()),
+                heading: Some(Heading { level: heading.level, text: heading.text.clone() }),
             });
         }
     }
@@ -449,75 +449,15 @@ fn finish(mut results: Vec<Entry>) -> Vec<Entry> {
 /// en el documento. Resolución perezosa al abrir (§41: posiciona el cursor
 /// §8.6 en el heading elegido).
 ///
-/// El índice §45 guarda el *qué* headings hay, no en qué línea; aquí se
-/// localiza el heading `idx`-ésimo de [`find_headings`] (única fuente de
-/// verdad de la gramática ATX §27.1) buscando la transición de conteo
-/// `idx → idx+1` entre líneas:
-///
-/// ```text
-/// count_before(i) = nº de headings de las primeras i líneas
-/// ```
-///
-/// `count_before` se evalúa sobre prefijos con front matter §21 sintético
-/// (`\n---\n`) para que sea monótona aunque el front matter real quede
-/// abierto; si eso suprimiera headings reales se usan conteos planos. El
-/// resultado solo se devuelve si la transición es exacta y la línea extrae
-/// el heading buscado: nunca se salta a ciegas.
+/// Localiza el primer heading de [`find_heading_nodes`] (única fuente de
+/// verdad de la gramática §27.1, compartida con las anclas §26) con el mismo
+/// nivel y texto que `target`: nunca se salta a ciegas y los duplicados
+/// resuelven al primero, como el índice.
 pub fn find_heading_line(source: &str, target: &Heading) -> Option<u32> {
-    let truth = find_headings(source);
-    let idx = truth.iter().position(|heading| heading == target)?;
-
-    let synth = "\n---\n";
-    let plain = {
-        let mut closed = String::with_capacity(source.len() + synth.len());
-        closed.push_str(source);
-        closed.push_str(synth);
-        find_headings(&closed).len() < truth.len()
-    };
-    let count_before = |lines: usize, starts: &[usize]| -> usize {
-        let end = starts.get(lines).copied().unwrap_or(source.len());
-        if plain {
-            find_headings(&source[..end]).len()
-        } else {
-            let mut probe = String::with_capacity(end + synth.len());
-            probe.push_str(&source[..end]);
-            probe.push_str(synth);
-            find_headings(&probe).len()
-        }
-    };
-
-    let starts: Vec<usize> = std::iter::once(0)
-        .chain(source.match_indices('\n').map(|(offset, _)| offset + 1))
-        .collect();
-    let total = starts.len();
-
-    // Búsqueda binaria del primer prefijo con el heading `idx` incluido.
-    let mut lo = 0;
-    let mut hi = total;
-    while lo < hi {
-        let mid = (lo + hi) / 2;
-        if count_before(mid, &starts) >= idx + 1 {
-            hi = mid;
-        } else {
-            lo = mid + 1;
-        }
-    }
-    let at = lo;
-    // Verificación: transición exacta idx → idx+1 y extracción de la línea
-    // igual al heading buscado (p. ej. mismo texto dentro de un fence).
-    if at == 0
-        || count_before(at - 1, &starts) != idx
-        || count_before(at, &starts) != idx + 1
-    {
-        return None;
-    }
-    let line_start = starts[at - 1];
-    let line_end = starts.get(at).copied().unwrap_or(source.len());
-    let line = source[line_start..line_end].trim_end_matches(['\n', '\r']);
-    match find_headings(line).first() {
-        Some(found) if found == target => Some(at as u32),
-        _ => None,
-    }
+    find_heading_nodes(source)
+        .into_iter()
+        .find(|node| node.level == target.level && node.text == target.text)
+        .map(|node| node.line)
 }
 
 /// Línea (1-based) del heading `target` dentro de `root/rel_path` (§41): lee
@@ -535,12 +475,13 @@ mod tests {
     /// Índice sintético sobre el formato `minmark-index 1` (§45): evita
     /// tocar el filesystem y construye N entradas al instante (rendimiento).
     fn synth_index(root: &str, docs: &[(&str, &[(u8, &str)])]) -> ProjectIndex {
-        let mut text = String::from("minmark-index 1\n");
+        let mut text = String::from("minmark-index 2\n");
         text.push_str(&format!("root {root}\n"));
         for (rel_path, headings) in docs {
             let payload: Vec<String> = headings
                 .iter()
-                .map(|(level, text)| format!("h={level}:{text}"))
+                .enumerate()
+                .map(|(i, (level, text))| format!("h={level}:{}:ancla-{i}:{text}", i + 1))
                 .collect();
             text.push_str(&format!("{rel_path}\t1\t1\t{}\n", payload.join("\u{1e}")));
         }

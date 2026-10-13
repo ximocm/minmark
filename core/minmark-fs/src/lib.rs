@@ -22,6 +22,7 @@ mod index;
 mod local;
 mod ops;
 mod paths;
+pub mod resolve;
 pub mod search;
 mod snapshots;
 #[cfg(target_os = "linux")]
@@ -29,13 +30,14 @@ mod watch;
 
 pub use atomic::{stage_write, write_atomic, StagedWrite};
 pub use ignore::IgnorePatterns;
-pub use index::{IndexEntry, ProjectIndex, RefreshStats};
+pub use index::{IndexEntry, IndexHeading, ProjectIndex, RefreshStats};
 pub use local::{FileStamp, LocalFs};
 pub use ops::{
     apply_path_change, create_folder, create_markdown, duplicate, import_markdown, move_entry,
     plan_path_change, relative_path, trash, trash_to, wiki_links_active, ChangeOptions, PathChange,
 };
 pub use paths::{read_dir_entries, resolve_in_project, walk_tree, TreeEntry};
+pub use resolve::{LinkTarget, OpenBuffers, Resolver, TargetKind};
 pub use snapshots::{default_dir, SnapshotStore};
 #[cfg(target_os = "linux")]
 pub use watch::{ChangeEvent, ChangeKind, InotifyWatcher, Watcher};

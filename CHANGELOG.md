@@ -11,6 +11,18 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 
 ### Añadido
 
+- Anclas automáticas para los headings (ATX y setext) y resolución de destinos
+  de enlaces unificada en el índice, base de Markdown Intelligence (Fase 4):
+  `#fragmento` y `archivo.md#fragmento` resuelven a la misma posición que
+  ancla el Preview, con IDs explícitos `{#id}`, política documentada para
+  duplicados (sufijos `-1`, `-2`, …) y soporte de enlaces por referencia,
+  destinos externos, wiki links por nombre y buffers abiertos sin guardar
+  (que priorizan sobre el disco). El índice guarda además la línea de cada
+  heading y pasa al formato v2 (los índices antiguos se reconstruyen solos).
+  Los archivos binarios sin fragmento también resuelven como destinos locales;
+  buffers y anclas indexadas respetan los límites del proyecto y `.gitignore`.
+  Decisiones en [ADR-004](docs/adr/004-anclas-y-resolucion-de-enlaces.md).
+
 - CI del core en Linux, Windows y macOS; pruebas y compilación de la UI en
   Linux. Paquetes Linux x86_64 con licencias y checksums; los tags de versión
   generan borradores de release tras superar la matriz de pruebas.

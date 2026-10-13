@@ -40,9 +40,10 @@ fn abrir_parsear_y_renderizar() {
     let mut store = LocalFs::new();
     let document = store.open(&path).unwrap();
     let ast = parse(document.content());
-    let html = render_preview(&ast, &minmark_config::Settings::default());
+    let html = render_preview(&ast, document.content(), &minmark_config::Settings::default());
 
     assert!(html.contains("<h1 data-mm-span="));
+    assert!(html.contains("id=\"hola\""), "el heading recibe su ancla (§26)");
     assert!(html.contains(">Hola</h1>"));
     assert!(html.contains("<em>cuerpo</em>"));
     assert!(html.contains("<code>código</code>"));

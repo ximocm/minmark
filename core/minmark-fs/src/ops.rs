@@ -22,6 +22,7 @@
 
 use crate::ignore::IgnorePatterns;
 use crate::paths::{resolve_in_project, walk_tree};
+use crate::resolve::{has_scheme, split_fragment, wiki_name_matches};
 use crate::{write_atomic, FsError};
 use minmark_document::{
     apply_replacements, find_markdown_references, find_toml_references, DestForm, RefKind,
@@ -482,7 +483,7 @@ fn plan_reference(
     scan: &[PathBuf],
 ) -> Result<Option<(Span, String)>, FsError> {
     if reference.kind == RefKind::WikiLink {
-        return plan_wiki_reference(reference, from, to, options, scan);
+        return plan_wiki_reference(reference, root, from, to, options, scan);
     }
 
     let (path_part, suffix) = split_fragment(&reference.dest);
@@ -521,6 +522,7 @@ fn plan_reference(
 /// [`FsError::UnsafeReference`] (§16: sin garantías → abortar).
 fn plan_wiki_reference(
     reference: &Reference,
+    root: &Path,
     from: &Path,
     to: &Path,
     options: ChangeOptions,
@@ -533,9 +535,12 @@ fn plan_wiki_reference(
     if name.is_empty() || has_scheme(name) {
         return Ok(None);
     }
+    // La regla de nombre vive en [`crate::resolve::wiki_name_matches`] y opera
+    // sobre rutas relativas a la raíz (§17): una única respuesta para la
+    // resolución (§19.3) y para esta reescritura (§16).
     let mut matches: Vec<&PathBuf> = scan
         .iter()
-        .filter(|path| wiki_name_matches(path, name))
+        .filter(|path| wiki_name_matches(Path::new(&relative_path(root, path)), name))
         .collect();
     if matches.is_empty() {
         return Ok(None);
@@ -551,10 +556,10 @@ fn plan_wiki_reference(
         return Ok(None);
     }
     let new_path = to.join(relative_path(from, matched));
-    let new_name = if Path::new(name).components().count() > 1 || name.contains('/') {
-        relative_path(Path::new("/"), &strip_md_extension(&new_path))
-            .trim_start_matches('/')
-            .to_owned()
+    let new_name = if name.contains('/') {
+        strip_md_extension(Path::new(&relative_path(root, &new_path)))
+            .to_string_lossy()
+            .into_owned()
     } else {
         stem_str(&file_name_str(&new_path))
     };
@@ -563,29 +568,6 @@ fn plan_wiki_reference(
         return Ok(None);
     }
     Ok(Some((reference.span, replacement)))
-}
-
-/// ¿El wiki dest `name` resuelve a `path` (por tallo o por ruta sin `.md`)?
-fn wiki_name_matches(path: &Path, name: &str) -> bool {
-    let file_name = file_name_str(path);
-    let stem = stem_str(&file_name);
-    if name == stem {
-        return true;
-    }
-    let without_ext = strip_md_extension(path);
-    let as_rel = relative_path(Path::new("/"), &without_ext);
-    name == as_rel.trim_start_matches('/')
-}
-
-fn strip_md_extension(path: &Path) -> PathBuf {
-    let mut text = path.to_string_lossy().into_owned();
-    for ext in [".markdown", ".md"] {
-        if text.ends_with(ext) {
-            text.truncate(text.len() - ext.len());
-            break;
-        }
-    }
-    PathBuf::from(text)
 }
 
 /// ¿Están los wiki links activos (§19.3) en este proyecto?
@@ -662,6 +644,17 @@ fn stem_str(name: &str) -> String {
     }
 }
 
+fn strip_md_extension(path: &Path) -> PathBuf {
+    let mut text = path.to_string_lossy().into_owned();
+    for ext in [".markdown", ".md"] {
+        if text.ends_with(ext) {
+            text.truncate(text.len() - ext.len());
+            break;
+        }
+    }
+    PathBuf::from(text)
+}
+
 fn split_name(name: &str) -> (String, Option<String>) {
     match name.rsplit_once('.') {
         Some((stem, ext)) if !stem.is_empty() && !ext.is_empty() && !ext.contains('.') => {
@@ -689,27 +682,6 @@ fn numbered_path(dir: &Path, stem: &str, ext: Option<&str>) -> PathBuf {
         n += 1;
     }
     render(n)
-}
-
-/// Separa destino y fragmento `#…` (el `#` literal en nombre no se admite en
-/// destinos planos: con fragmento el primer `#` siempre separa).
-fn split_fragment(dest: &str) -> (&str, &str) {
-    match dest.find('#') {
-        Some(pos) => (&dest[..pos], &dest[pos..]),
-        None => (dest, ""),
-    }
-}
-
-/// ¿Tiene esquema de URL (`https:`, `mailto:`…)? No es ruta interna.
-fn has_scheme(dest: &str) -> bool {
-    let Some((prefix, _)) = dest.split_once(':') else {
-        return false;
-    };
-    !prefix.is_empty()
-        && prefix.starts_with(|c: char| c.is_ascii_alphabetic())
-        && prefix
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
 }
 
 /// ¿El valor de configuración parece ruta documental (§14.4)?

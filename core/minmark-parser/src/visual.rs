@@ -594,7 +594,7 @@ fn image_attrs_end(source: &str, from: usize) -> Option<usize> {
     let spaces = line.len() - trimmed.len();
     trimmed.strip_prefix('{')?;
     let close = trimmed.find('}')?;
-    let attrs = crate::attrs::parse_attributes(&trimmed[1..close])?;
+    let attrs = minmark_document::parse_attributes(&trimmed[1..close])?;
     if attrs.is_empty() {
         return None;
     }
@@ -913,7 +913,7 @@ fn attr_line_after(source: &str, from: usize) -> Option<u32> {
         let line = rest[offset..line_end].trim();
         if !line.is_empty() {
             let inner = line.strip_prefix('{')?.strip_suffix('}')?;
-            let attrs = crate::attrs::parse_attributes(inner)?;
+            let attrs = minmark_document::parse_attributes(inner)?;
             if attrs.is_empty() {
                 return None;
             }
@@ -1022,7 +1022,7 @@ fn trailing_attrs_start(content: &[char]) -> Option<usize> {
             continue;
         }
         let inner: String = content[index + 1..end - 1].iter().collect();
-        if crate::attrs::parse_attributes(&inner).is_some() {
+        if minmark_document::parse_attributes(&inner).is_some() {
             let mut start = index;
             while start > 0 && content[start - 1] == ' ' {
                 start -= 1;
