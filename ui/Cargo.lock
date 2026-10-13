@@ -1444,6 +1444,7 @@ name = "minmark-fs"
 version = "0.1.1"
 dependencies = [
  "minmark-document",
+ "minmark-parser",
 ]
 
 [[package]]

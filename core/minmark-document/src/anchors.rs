@@ -77,7 +77,10 @@ pub struct Anchor {
 pub fn find_headings(source: &str) -> Vec<Heading> {
     find_heading_nodes(source)
         .into_iter()
-        .map(|node| Heading { level: node.level, text: node.text })
+        .map(|node| Heading {
+            level: node.level,
+            text: node.text,
+        })
         .collect()
 }
 
@@ -111,24 +114,44 @@ pub fn find_heading_nodes(source: &str) -> Vec<HeadingNode> {
         line_start(i) + lines[i].len() // incluye el salto, como la AST
     };
     // Línea absoluta (1-based) de un offset del fuente completo.
-    let line_no = |offset: usize| -> u32 {
-        (source[..offset].matches('\n').count() + 1) as u32
-    };
+    let line_no = |offset: usize| -> u32 { (source[..offset].matches('\n').count() + 1) as u32 };
 
-    let mut fence: Option<u8> = None;
+    let mut fence: Option<(u8, usize)> = None;
+    let mut comment = false;
     let mut i = 0;
     while i < lines.len() {
         let content = line_content(i);
         let trimmed = content.trim_start();
         let indent = content.len() - trimmed.len();
-        let marker = trimmed.as_bytes().first().copied().filter(|b| *b == b'`' || *b == b'~');
+        if fence.is_none()
+            && (comment
+                || strip_quote_prefix(content)
+                    .1
+                    .trim_start()
+                    .starts_with("<!--"))
+        {
+            comment = !content.contains("-->");
+            i += 1;
+            continue;
+        }
+        let marker = trimmed
+            .as_bytes()
+            .first()
+            .copied()
+            .filter(|b| *b == b'`' || *b == b'~');
         if indent <= 3 {
             if let Some(marker) = marker {
                 if run_len(trimmed, marker) >= 3 {
                     fence = match fence {
-                        Some(open) if open == marker => None,
+                        Some((open, length))
+                            if open == marker
+                                && run_len(trimmed, marker) >= length
+                                && trimmed[run_len(trimmed, marker)..].trim().is_empty() =>
+                        {
+                            None
+                        }
                         Some(open) => Some(open),
-                        None => Some(marker),
+                        None => Some((marker, run_len(trimmed, marker))),
                     };
                     i += 1;
                     continue;
@@ -143,8 +166,12 @@ pub fn find_heading_nodes(source: &str) -> Vec<HeadingNode> {
         // Heading ATX (§27.1), también tras marcas de cita.
         if indent <= 3 {
             let (col, text) = strip_quote_prefix(content);
-            if let Some(node) = atx_heading(text, line_start(i) + col, line_end(i), line_no(line_start(i)))
-            {
+            if let Some(node) = atx_heading(
+                text,
+                line_start(i) + col,
+                line_end(i),
+                line_no(line_start(i)),
+            ) {
                 nodes.push(node);
                 i += 1;
                 continue;
@@ -349,12 +376,7 @@ fn heading_text_id(raw: &str) -> (String, Option<String>) {
 
 /// Heading ATX de la línea `text` (sin marcas de cita), si lo es: 1–6 `#`
 /// seguidos de espacio, tabulador o fin de línea (§27.1; `#hashtag` no vale).
-fn atx_heading(
-    text: &str,
-    marker_start: usize,
-    end: usize,
-    line: u32,
-) -> Option<HeadingNode> {
+fn atx_heading(text: &str, marker_start: usize, end: usize, line: u32) -> Option<HeadingNode> {
     let hashes = run_len(text, b'#');
     if !(1..=6).contains(&hashes) {
         return None;
@@ -368,7 +390,10 @@ fn atx_heading(
         level: hashes as u8,
         text,
         id,
-        span: Span { start: marker_start as u32, end: end as u32 },
+        span: Span {
+            start: marker_start as u32,
+            end: end as u32,
+        },
         line,
     })
 }
@@ -478,7 +503,10 @@ mod tests {
     }
 
     fn lines(source: &str) -> Vec<u32> {
-        find_heading_nodes(source).into_iter().map(|node| node.line).collect()
+        find_heading_nodes(source)
+            .into_iter()
+            .map(|node| node.line)
+            .collect()
     }
 
     #[test]
@@ -488,9 +516,18 @@ mod tests {
         assert_eq!(
             find_headings(source),
             [
-                Heading { level: 1, text: "Uno".to_owned() },
-                Heading { level: 2, text: "Dos con `code`".to_owned() },
-                Heading { level: 4, text: String::new().to_owned() },
+                Heading {
+                    level: 1,
+                    text: "Uno".to_owned()
+                },
+                Heading {
+                    level: 2,
+                    text: "Dos con `code`".to_owned()
+                },
+                Heading {
+                    level: 4,
+                    text: String::new().to_owned()
+                },
             ]
         );
     }
@@ -502,7 +539,10 @@ mod tests {
             ["introducción", "introducción-1", "introducción-2"]
         );
         assert_eq!(anchors("# Dos con `code`\n"), ["dos-con-code"]);
-        assert_eq!(anchors("# **Importante** y [enlace](x.md)\n"), ["importante-y-enlace"]);
+        assert_eq!(
+            anchors("# **Importante** y [enlace](x.md)\n"),
+            ["importante-y-enlace"]
+        );
         assert_eq!(anchors("### !!!\n"), ["seccion"]);
         assert_eq!(anchors("# Ñandú 見出し\n"), ["ñandú-見出し"]);
     }
@@ -515,7 +555,10 @@ mod tests {
             ["architecture", "architecture-1"]
         );
         // Los automáticos no pisan a un explícito ya usado.
-        assert_eq!(anchors("# Architecture\n\n# Otra {#architecture}\n"), ["architecture", "architecture-1"]);
+        assert_eq!(
+            anchors("# Architecture\n\n# Otra {#architecture}\n"),
+            ["architecture", "architecture-1"]
+        );
     }
 
     #[test]
@@ -523,7 +566,10 @@ mod tests {
         let source = "Título\n=====\n\npárrafo\ncontinuación\n---\n";
         let nodes = find_heading_nodes(source);
         assert_eq!(
-            nodes.iter().map(|n| (n.level, n.text.as_str())).collect::<Vec<_>>(),
+            nodes
+                .iter()
+                .map(|n| (n.level, n.text.as_str()))
+                .collect::<Vec<_>>(),
             [(1, "Título"), (2, "párrafo continuación")]
         );
         assert_eq!(lines(source), [1, 4]);
@@ -553,9 +599,19 @@ mod tests {
     fn busqueda_exacta_de_ancla() {
         let source = "# Introducción\n\n# Introducción\n";
         let anchors = document_anchors(&find_heading_nodes(source));
-        assert_eq!(find_anchor(&anchors, "introducción").map(|a| a.line), Some(1));
-        assert_eq!(find_anchor(&anchors, "introducción-1").map(|a| a.line), Some(3));
-        assert_eq!(find_anchor(&anchors, "Introducción"), None, "coincidencia exacta");
+        assert_eq!(
+            find_anchor(&anchors, "introducción").map(|a| a.line),
+            Some(1)
+        );
+        assert_eq!(
+            find_anchor(&anchors, "introducción-1").map(|a| a.line),
+            Some(3)
+        );
+        assert_eq!(
+            find_anchor(&anchors, "Introducción"),
+            None,
+            "coincidencia exacta"
+        );
         assert_eq!(find_anchor(&anchors, "no-esta"), None);
     }
 }

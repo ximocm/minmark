@@ -11,6 +11,25 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 
 ### Añadido
 
+- Navegación de enlaces con Ctrl+Click/Ctrl+Enter en Markdown y Visual y desde
+  Preview; sugerencias de archivos y headings, diagnósticos de enlaces rotos,
+  wiki links opcionales y vistas temporales de outline/backlinks (#5–#10).
+- Referencias cruzadas a IDs de headings, figuras, tablas y ecuaciones con
+  etiquetas comunes en Preview/PDF, idiomas español/inglés y numeración
+  derivada del documento (#11). El PDF recibe imágenes locales en memoria.
+- Pies de figura debajo de imágenes con ID `fig:`, a partir del texto alternativo,
+  con numeración e idioma comunes en Preview y PDF.
+- Preview actualiza su contenido sin recargar la página y sigue el bloque
+  donde se escribe, sin desplazarlo si ya está visible; los refrescos generales
+  conservan el scroll y los saltos explícitos a destinos siguen funcionando.
+- Las flechas desplazan la lista para mantener visible la selección en Quick
+  Open, outline, backlinks y autocompletado, conservando el foco de escritura.
+- Prueba de integración GTK/WebKit y regresiones de Markdown Intelligence;
+  comportamiento y comprobaciones pendientes en
+  [la guía de fase 4](docs/MARKDOWN_INTELLIGENCE.md).
+- Índice v3: IDs de objetos y timestamps con nanosegundos. Reconstrucción
+  automática de cachés previas; sin nuevas dependencias externas.
+
 - Anclas automáticas para los headings (ATX y setext) y resolución de destinos
   de enlaces unificada en el índice, base de Markdown Intelligence (Fase 4):
   `#fragmento` y `archivo.md#fragmento` resuelven a la misma posición que
@@ -34,8 +53,10 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
   incluidos el diálogo, la escritura a disco y los errores de exportación.
   La composición de varios documentos sigue prevista para la Fase 6.
 
-Las fases 0–3 están completadas. Markdown Intelligence, funciones académicas,
-composición, controles contextuales y Windows siguen en el plan de desarrollo.
+Las fases 0–3 están completadas. Markdown Intelligence tiene su implementación
+y pruebas automatizadas; su cierre requiere la revisión manual indicada en la
+guía de fase 4. Funciones académicas, composición, controles contextuales y
+Windows siguen en el plan de desarrollo.
 
 ## [0.1.1] — 2026-10-13
 

@@ -48,6 +48,8 @@ pub enum DestForm {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Reference {
     pub kind: RefKind,
+    /// Rango del constructo completo para activación y diagnósticos.
+    pub full_span: Span,
     /// Rango de bytes del **destino** en el fuente (sin `<`/`>`, sin comillas,
     /// sin título y sin el `#frag`, que viaja dentro de [`Reference::dest`]).
     pub span: Span,
@@ -64,7 +66,15 @@ pub struct Reference {
 impl Reference {
     fn new(kind: RefKind, span: Span, dest: String, form: DestForm) -> Self {
         let encoded = dest.contains('%') || dest.contains('\\');
-        Self { kind, span, dest, form, quote: '"', encoded }
+        Self {
+            kind,
+            full_span: span,
+            span,
+            dest,
+            form,
+            quote: '"',
+            encoded,
+        }
     }
 }
 
@@ -172,11 +182,19 @@ pub fn apply_replacements(source: &str, edits: &[(Span, String)]) -> String {
 /// Devuelve el front matter inicial `(contenido, offset)` y el offset del
 /// cuerpo. El front matter es un bloque `---` al principio del fichero.
 pub(crate) fn split_front_matter(source: &str) -> Option<(Span, usize)> {
-    let rest = source.strip_prefix("---\n").or_else(|| source.strip_prefix("---\r\n"))?;
+    let rest = source
+        .strip_prefix("---\n")
+        .or_else(|| source.strip_prefix("---\r\n"))?;
     let offset = source.len() - rest.len();
     for end in ["\n---\n", "\n---\r\n", "\n---"] {
         if let Some(pos) = rest.find(end) {
-            return Some((Span { start: offset as u32, end: (offset + pos) as u32 }, offset + pos));
+            return Some((
+                Span {
+                    start: offset as u32,
+                    end: (offset + pos) as u32,
+                },
+                offset + pos,
+            ));
         }
     }
     None
@@ -222,7 +240,10 @@ fn push_config_value(value: &str, start: usize, refs: &mut Vec<Reference>) {
         let inner = &value[1..];
         if let Some(end) = inner.find(q) {
             let dest = inner[..end].to_owned();
-            let span = Span { start: (start + 1) as u32, end: (start + 1 + end) as u32 };
+            let span = Span {
+                start: (start + 1) as u32,
+                end: (start + 1 + end) as u32,
+            };
             let mut reference = Reference::new(RefKind::ConfigPath, span, dest, DestForm::Quoted);
             reference.quote = q;
             refs.push(reference);
@@ -230,13 +251,19 @@ fn push_config_value(value: &str, start: usize, refs: &mut Vec<Reference>) {
         return;
     }
     // Token bare YAML: hasta espacio + comentario o fin de línea.
-    let end = value
-        .find(" #")
-        .unwrap_or_else(|| value.trim_end().len());
+    let end = value.find(" #").unwrap_or_else(|| value.trim_end().len());
     let dest = value[..end].trim_end().to_owned();
     if !dest.is_empty() {
-        let span = Span { start: start as u32, end: (start + dest.len()) as u32 };
-        refs.push(Reference::new(RefKind::ConfigPath, span, dest, DestForm::Plain));
+        let span = Span {
+            start: start as u32,
+            end: (start + dest.len()) as u32,
+        };
+        refs.push(Reference::new(
+            RefKind::ConfigPath,
+            span,
+            dest,
+            DestForm::Plain,
+        ));
     }
 }
 
@@ -267,7 +294,10 @@ fn find_toml_strings(source: &str, base: usize, refs: &mut Vec<Reference>) {
                 if source[i..].starts_with(&format!("{quote}{quote}{quote}")) {
                     // Cadena multilínea: se ignora hasta su cierre.
                     let close = format!("{quote}{quote}{quote}");
-                    let skip = source[i + 3..].find(&close).map(|p| i + 3 + p + 3).unwrap_or(bytes.len());
+                    let skip = source[i + 3..]
+                        .find(&close)
+                        .map(|p| i + 3 + p + 3)
+                        .unwrap_or(bytes.len());
                     i = skip;
                     continue;
                 }
@@ -283,8 +313,12 @@ fn find_toml_strings(source: &str, base: usize, refs: &mut Vec<Reference>) {
                     j += 1;
                 }
                 let dest = source[i + 1..j.min(bytes.len())].to_owned();
-                let span = Span { start: (base + i + 1) as u32, end: (base + j.min(bytes.len())) as u32 };
-                let mut reference = Reference::new(RefKind::ConfigPath, span, dest, DestForm::Quoted);
+                let span = Span {
+                    start: (base + i + 1) as u32,
+                    end: (base + j.min(bytes.len())) as u32,
+                };
+                let mut reference =
+                    Reference::new(RefKind::ConfigPath, span, dest, DestForm::Quoted);
                 reference.quote = quote;
                 refs.push(reference);
                 i = j + 1;
@@ -304,7 +338,12 @@ fn find_markdown_body(source: &str, base: usize, scan: &mut LinkScan) {
     while i < bytes.len() {
         // Valla de código al inicio de línea.
         if i == 0 || bytes[i - 1] == b'\n' {
-            if let Some((marker, _)) = fence_len(&source[i..]) {
+            let line = &source[i..];
+            if line.starts_with("    ") || line.starts_with('\t') {
+                i += line.find('\n').map(|p| p + 1).unwrap_or(line.len());
+                continue;
+            }
+            if let Some((marker, length)) = fence_len(source[i..].trim_start_matches(' ')) {
                 // Se salta hasta el final de la línea de cierre (o EOF).
                 let mut j = i + 1;
                 let mut resume = bytes.len();
@@ -312,7 +351,12 @@ fn find_markdown_body(source: &str, base: usize, scan: &mut LinkScan) {
                     if bytes[j - 1] == b'\n' {
                         let line = &source[j..];
                         let trimmed = line.trim_start();
-                        if trimmed.as_bytes().first() == Some(&marker) && run_len(trimmed, marker) >= 3
+                        if trimmed.as_bytes().first() == Some(&marker)
+                            && run_len(trimmed, marker) >= length
+                            && trimmed.lines().next().unwrap_or("").trim_end_matches('\r')
+                                [run_len(trimmed, marker)..]
+                                .trim()
+                                .is_empty()
                         {
                             resume = line.find('\n').map(|p| j + p + 1).unwrap_or(bytes.len());
                             break;
@@ -325,6 +369,12 @@ fn find_markdown_body(source: &str, base: usize, scan: &mut LinkScan) {
             }
         }
         match bytes[i] {
+            b'\\' => {
+                i += 1;
+                if i < bytes.len() {
+                    i += source[i..].chars().next().unwrap().len_utf8();
+                }
+            }
             // Código inline: salto de la secuencia de backticks equivalente.
             b'`' => {
                 let run = run_len(&source[i..], b'`');
@@ -346,8 +396,17 @@ fn find_markdown_body(source: &str, base: usize, scan: &mut LinkScan) {
             b'[' if source[i..].starts_with("[[") => {
                 if let Some(pos) = source[i + 2..].find("]]") {
                     let dest = source[i + 2..i + 2 + pos].to_owned();
-                    let span = Span { start: (base + i + 2) as u32, end: (base + i + 2 + pos) as u32 };
-                    scan.references.push(Reference::new(RefKind::WikiLink, span, dest, DestForm::Plain));
+                    let span = Span {
+                        start: (base + i + 2) as u32,
+                        end: (base + i + 2 + pos) as u32,
+                    };
+                    let mut reference =
+                        Reference::new(RefKind::WikiLink, span, dest, DestForm::Plain);
+                    reference.full_span = Span {
+                        start: (base + i) as u32,
+                        end: (base + i + pos + 4) as u32,
+                    };
+                    scan.references.push(reference);
                     i = i + 2 + pos + 2;
                     continue;
                 }
@@ -367,17 +426,33 @@ fn find_markdown_body(source: &str, base: usize, scan: &mut LinkScan) {
                 if bytes.get(i) == Some(&b'(') {
                     // `[t](dest "title")` / `![a](dest)`.
                     if let Some((dest, form, span, next)) = parse_inline_dest(source, i + 1, base) {
-                        let kind = if image { RefKind::MarkdownImage } else { RefKind::MarkdownLink };
-                        scan.references.push(Reference::new(kind, span, dest, form));
+                        let kind = if image {
+                            RefKind::MarkdownImage
+                        } else {
+                            RefKind::MarkdownLink
+                        };
+                        let mut reference = Reference::new(kind, span, dest, form);
+                        reference.full_span = Span {
+                            start: (base + if image { open - 1 } else { open }) as u32,
+                            end: (base + next) as u32,
+                        };
+                        scan.references.push(reference);
                         i = next;
                     }
                 } else if bytes.get(i) == Some(&b':') && is_line_start(source, open) {
                     // Definición `[id]: dest`.
                     if let Some((dest, form, span, next)) = parse_inline_dest(source, i + 1, base) {
-                        scan
-                            .definitions
-                            .push(LinkDefinition { label, dest: dest.clone(), span });
-                        scan.references.push(Reference::new(RefKind::MarkdownLink, span, dest, form));
+                        scan.definitions.push(LinkDefinition {
+                            label,
+                            dest: dest.clone(),
+                            span,
+                        });
+                        scan.references.push(Reference::new(
+                            RefKind::MarkdownLink,
+                            span,
+                            dest,
+                            form,
+                        ));
                         i = next;
                     }
                 } else if bytes.get(i) == Some(&b'[') && !source[i..].starts_with("[[") {
@@ -385,9 +460,17 @@ fn find_markdown_body(source: &str, base: usize, scan: &mut LinkScan) {
                     if let Some(pos) = source[i + 1..].find(']') {
                         let close = i + 1 + pos;
                         let inner = &source[i + 1..close];
-                        let label = if inner.is_empty() { label } else { normalize_label(inner) };
+                        let label = if inner.is_empty() {
+                            label
+                        } else {
+                            normalize_label(inner)
+                        };
                         scan.usages.push(ReferenceUsage {
-                            kind: if image { RefKind::MarkdownImage } else { RefKind::MarkdownLink },
+                            kind: if image {
+                                RefKind::MarkdownImage
+                            } else {
+                                RefKind::MarkdownLink
+                            },
                             label,
                             span: Span {
                                 start: (base + if image { open - 1 } else { open }) as u32,
@@ -405,7 +488,10 @@ fn find_markdown_body(source: &str, base: usize, scan: &mut LinkScan) {
 
 /// ¿`pos` está al inicio de una línea con solo espacios antes?
 fn is_line_start(source: &str, pos: usize) -> bool {
-    source[..pos].rsplit('\n').next().is_some_and(|prefix| prefix.trim().is_empty())
+    source[..pos]
+        .rsplit('\n')
+        .next()
+        .is_some_and(|prefix| prefix.trim().is_empty())
 }
 
 /// Longitud de la valla ``` / ~~~ al inicio de `source` (si la hay).
@@ -426,7 +512,11 @@ fn run_len(source: &str, byte: u8) -> usize {
 ///
 /// El offset siguiente queda justo tras el destino (antes de título y del
 /// `)` de cierre); la reescritura solo toca [`Reference::span`].
-fn parse_inline_dest(source: &str, after: usize, base: usize) -> Option<(String, DestForm, Span, usize)> {
+fn parse_inline_dest(
+    source: &str,
+    after: usize,
+    base: usize,
+) -> Option<(String, DestForm, Span, usize)> {
     let bytes = source.as_bytes();
     let mut i = after;
     while i < bytes.len() && (bytes[i] as char).is_whitespace() {
@@ -438,7 +528,10 @@ fn parse_inline_dest(source: &str, after: usize, base: usize) -> Option<(String,
     if bytes[i] == b'<' {
         let end = source[i + 1..].find('>')? + i + 1;
         let dest = source[i + 1..end].to_owned();
-        let span = Span { start: (base + i + 1) as u32, end: (base + end) as u32 };
+        let span = Span {
+            start: (base + i + 1) as u32,
+            end: (base + end) as u32,
+        };
         Some((dest, DestForm::Angle, span, end + 1))
     } else {
         let mut j = i;
@@ -457,7 +550,10 @@ fn parse_inline_dest(source: &str, after: usize, base: usize) -> Option<(String,
             return None;
         }
         let dest = source[i..j].to_owned();
-        let span = Span { start: (base + i) as u32, end: (base + j) as u32 };
+        let span = Span {
+            start: (base + i) as u32,
+            end: (base + j) as u32,
+        };
         Some((dest, DestForm::Plain, span, j))
     }
 }
@@ -484,24 +580,37 @@ mod tests {
                 LinkDefinition {
                     label: "id".to_owned(),
                     dest: "cap1/doc.md#frag".to_owned(),
-                    span: Span { start: source.find("cap1").unwrap() as u32, end: source.find("cap1").unwrap() as u32 + "cap1/doc.md#frag".len() as u32 },
+                    span: Span {
+                        start: source.find("cap1").unwrap() as u32,
+                        end: source.find("cap1").unwrap() as u32 + "cap1/doc.md#frag".len() as u32
+                    },
                 },
                 LinkDefinition {
                     label: "colapsado".to_owned(),
                     dest: "otro.md".to_owned(),
-                    span: Span { start: source.find("otro.md").unwrap() as u32, end: source.find("otro.md").unwrap() as u32 + "otro.md".len() as u32 },
+                    span: Span {
+                        start: source.find("otro.md").unwrap() as u32,
+                        end: source.find("otro.md").unwrap() as u32 + "otro.md".len() as u32
+                    },
                 },
                 LinkDefinition {
                     label: "id".to_owned(),
                     dest: "duplicado.md".to_owned(),
-                    span: Span { start: source.find("duplicado.md").unwrap() as u32, end: source.find("duplicado.md").unwrap() as u32 + "duplicado.md".len() as u32 },
+                    span: Span {
+                        start: source.find("duplicado.md").unwrap() as u32,
+                        end: source.find("duplicado.md").unwrap() as u32
+                            + "duplicado.md".len() as u32
+                    },
                 },
             ],
             "las definiciones se conservan todas, en orden"
         );
         let usage_span = |text: &str| -> Span {
             let start = source.find(text).unwrap() as u32;
-            Span { start, end: start + text.len() as u32 }
+            Span {
+                start,
+                end: start + text.len() as u32,
+            }
         };
         assert_eq!(
             scan.usages,
@@ -534,7 +643,8 @@ mod tests {
 
     #[test]
     fn definiciones_y_usos_respetan_codigo_y_comentarios() {
-        let scan = scan_markdown_links("```\n[a][b]\n[b]: c.md\n```\n`[x][y]` <!-- [m][n] -->\n[o][p]\n");
+        let scan =
+            scan_markdown_links("```\n[a][b]\n[b]: c.md\n```\n`[x][y]` <!-- [m][n] -->\n[o][p]\n");
         assert!(scan.definitions.is_empty());
         assert_eq!(scan.usages.len(), 1);
         assert_eq!(scan.usages[0].label, "p");
@@ -555,7 +665,10 @@ mod tests {
     #[test]
     fn definiciones_de_enlace_por_referencia() {
         let source = "[texto][id]\n\n[id]: cap1/doc.md \"Título\"\n";
-        assert_eq!(dests(source), [(RefKind::MarkdownLink, "cap1/doc.md".to_owned())]);
+        assert_eq!(
+            dests(source),
+            [(RefKind::MarkdownLink, "cap1/doc.md".to_owned())]
+        );
     }
 
     #[test]
@@ -601,7 +714,10 @@ mod tests {
             .filter(|r| r.kind == RefKind::ConfigPath)
             .map(|r| r.dest.as_str())
             .collect();
-        assert_eq!(config, ["refs.bib", "otros.bib", "img/foto.png", "Mi documento"]);
+        assert_eq!(
+            config,
+            ["refs.bib", "otros.bib", "img/foto.png", "Mi documento"]
+        );
     }
 
     #[test]
@@ -624,7 +740,10 @@ mod tests {
             edits.push((r.span, replacement));
         }
         let out = apply_replacements(source, &edits);
-        assert_eq!(out, "[a](sub/x.md#frag \"T\") y ![b](<sub/y.png>) y [[nuevo-z]]\n");
+        assert_eq!(
+            out,
+            "[a](sub/x.md#frag \"T\") y ![b](<sub/y.png>) y [[nuevo-z]]\n"
+        );
     }
 
     #[test]

@@ -98,24 +98,44 @@ pub struct ParsedQuery<'a> {
 /// - el resto → [`QuickOpenMode::Files`].
 pub fn parse_query(query: &str) -> ParsedQuery<'_> {
     if let Some(filter) = query.strip_prefix('@') {
-        return ParsedQuery { mode: QuickOpenMode::DocHeadings, filter, line: None };
+        return ParsedQuery {
+            mode: QuickOpenMode::DocHeadings,
+            filter,
+            line: None,
+        };
     }
     if let Some(filter) = query.strip_prefix('#') {
-        return ParsedQuery { mode: QuickOpenMode::ProjectHeadings, filter, line: None };
+        return ParsedQuery {
+            mode: QuickOpenMode::ProjectHeadings,
+            filter,
+            line: None,
+        };
     }
     if query.starts_with(':') {
         let (filter, line) = match split_line_query(query) {
             Some((filter, line)) => (filter, Some(line)),
             None => ("", None),
         };
-        return ParsedQuery { mode: QuickOpenMode::Line, filter, line };
+        return ParsedQuery {
+            mode: QuickOpenMode::Line,
+            filter,
+            line,
+        };
     }
     if query.contains(':') {
         if let Some((filter, line)) = split_line_query(query) {
-            return ParsedQuery { mode: QuickOpenMode::Line, filter, line: Some(line) };
+            return ParsedQuery {
+                mode: QuickOpenMode::Line,
+                filter,
+                line: Some(line),
+            };
         }
     }
-    ParsedQuery { mode: QuickOpenMode::Files, filter: query, line: None }
+    ParsedQuery {
+        mode: QuickOpenMode::Files,
+        filter: query,
+        line: None,
+    }
 }
 
 /// Divide una consulta de línea §41 en `(filtro de archivo, línea)`; `None`
@@ -238,7 +258,10 @@ pub fn is_document_type(name: &str) -> bool {
 
 /// Nombre del archivo dentro de un path posix (§17).
 fn basename(rel_path: &str) -> &str {
-    rel_path.rsplit_once('/').map(|(_, name)| name).unwrap_or(rel_path)
+    rel_path
+        .rsplit_once('/')
+        .map(|(_, name)| name)
+        .unwrap_or(rel_path)
 }
 
 /// Recencia de apertura (§41): `recent[0]` es el más reciente.
@@ -340,7 +363,9 @@ fn files_mode(
         if !show_all_files && !is_document_type(&indexed.rel_path) {
             continue;
         }
-        let Some(hit) = fuzzy_match(&indexed.rel_path, filter) else { continue };
+        let Some(hit) = fuzzy_match(&indexed.rel_path, filter) else {
+            continue;
+        };
         results.push(Entry {
             label: indexed.rel_path.clone(),
             rel_path: indexed.rel_path.clone(),
@@ -360,10 +385,14 @@ fn line_mode(
     recent: &[String],
     show_all_files: bool,
 ) -> Vec<Entry> {
-    let Some((filter, line)) = split_line_query(query) else { return Vec::new() };
+    let Some((filter, line)) = split_line_query(query) else {
+        return Vec::new();
+    };
     if filter.is_empty() {
         // Sin filtro, la línea es del archivo activo (§41).
-        let Some(rel_path) = current_rel_path else { return Vec::new() };
+        let Some(rel_path) = current_rel_path else {
+            return Vec::new();
+        };
         return vec![Entry {
             label: format!("{rel_path}:{line}"),
             rel_path: rel_path.to_owned(),
@@ -395,30 +424,33 @@ fn doc_headings_mode(
         return Vec::new();
     };
     let mut results: Vec<Entry> = Vec::new();
-    for heading in &indexed.headings {
-        let Some(hit) = fuzzy_match(&heading.text, filter) else { continue };
+    for heading in indexed.headings.iter().filter(|h| h.level > 0) {
+        let Some(hit) = fuzzy_match(&heading.text, filter) else {
+            continue;
+        };
         results.push(Entry {
             label: format!("{} {}", "#".repeat(heading.level as usize), heading.text),
             rel_path: indexed.rel_path.clone(),
             line: None,
             score: hit.score + recency_bonus(recent, &indexed.rel_path)
                 - depth_penalty(&indexed.rel_path),
-            heading: Some(Heading { level: heading.level, text: heading.text.clone() }),
+            heading: Some(Heading {
+                level: heading.level,
+                text: heading.text.clone(),
+            }),
         });
     }
     finish(results)
 }
 
 /// Modo `#heading` §41: fuzzy sobre los headings de todo el proyecto.
-fn project_headings_mode(
-    filter: &str,
-    index: &ProjectIndex,
-    recent: &[String],
-) -> Vec<Entry> {
+fn project_headings_mode(filter: &str, index: &ProjectIndex, recent: &[String]) -> Vec<Entry> {
     let mut results: Vec<Entry> = Vec::new();
     for indexed in index.entries() {
-        for heading in &indexed.headings {
-            let Some(hit) = fuzzy_match(&heading.text, filter) else { continue };
+        for heading in indexed.headings.iter().filter(|h| h.level > 0) {
+            let Some(hit) = fuzzy_match(&heading.text, filter) else {
+                continue;
+            };
             results.push(Entry {
                 label: format!(
                     "{} {} — {}",
@@ -430,7 +462,10 @@ fn project_headings_mode(
                 line: None,
                 score: hit.score + recency_bonus(recent, &indexed.rel_path)
                     - depth_penalty(&indexed.rel_path),
-                heading: Some(Heading { level: heading.level, text: heading.text.clone() }),
+                heading: Some(Heading {
+                    level: heading.level,
+                    text: heading.text.clone(),
+                }),
             });
         }
     }
@@ -475,7 +510,7 @@ mod tests {
     /// Índice sintético sobre el formato `minmark-index 1` (§45): evita
     /// tocar el filesystem y construye N entradas al instante (rendimiento).
     fn synth_index(root: &str, docs: &[(&str, &[(u8, &str)])]) -> ProjectIndex {
-        let mut text = String::from("minmark-index 2\n");
+        let mut text = String::from("minmark-index 3\n");
         text.push_str(&format!("root {root}\n"));
         for (rel_path, headings) in docs {
             let payload: Vec<String> = headings
@@ -489,7 +524,10 @@ mod tests {
     }
 
     fn heading(level: u8, text: &str) -> Heading {
-        Heading { level, text: text.to_owned() }
+        Heading {
+            level,
+            text: text.to_owned(),
+        }
     }
 
     // --- Matcher fuzzy ------------------------------------------------------
@@ -526,7 +564,9 @@ mod tests {
         assert!(contiguous > spread, "{contiguous} !> {spread}");
 
         // La penalización por huecos está topada: no hunde el score sin límite.
-        let long_gap = fuzzy_match(&format!("a{}b", "x".repeat(500)), "ab").unwrap().score;
+        let long_gap = fuzzy_match(&format!("a{}b", "x".repeat(500)), "ab")
+            .unwrap()
+            .score;
         assert_eq!(long_gap, 10 + BONUS_BOUNDARY + 10 + PENALTY_GAP_CAP);
     }
 
@@ -534,14 +574,7 @@ mod tests {
     fn sin_resultados_cuando_no_es_subsecuencia() {
         let index = synth_index("/proy", &[("docs/a.md", &[]), ("docs/b.md", &[])]);
         assert!(fuzzy_match("docs/a.md", "zzz").is_none());
-        let results = quickopen_query(
-            QuickOpenMode::Files,
-            "zzz",
-            &index,
-            None,
-            &[],
-            true,
-        );
+        let results = quickopen_query(QuickOpenMode::Files, "zzz", &index, None, &[], true);
         assert!(results.is_empty());
     }
 
@@ -557,23 +590,21 @@ mod tests {
                 ("docs/b/otro.md", &[]),
             ],
         );
-        let results =
-            quickopen_query(QuickOpenMode::Files, "readme", &index, None, &[], true);
+        let results = quickopen_query(QuickOpenMode::Files, "readme", &index, None, &[], true);
         assert_eq!(
-            results.iter().map(|entry| entry.rel_path.as_str()).collect::<Vec<_>>(),
+            results
+                .iter()
+                .map(|entry| entry.rel_path.as_str())
+                .collect::<Vec<_>>(),
             ["readme.md", "docs/a/readme.md"],
         );
     }
 
     #[test]
     fn ranking_recencia_supera_a_profundidad() {
-        let index = synth_index(
-            "/proy",
-            &[("a/b/c/ficha.md", &[]), ("ficha.md", &[])],
-        );
+        let index = synth_index("/proy", &[("a/b/c/ficha.md", &[]), ("ficha.md", &[])]);
         let recent = vec!["a/b/c/ficha.md".to_owned()];
-        let results =
-            quickopen_query(QuickOpenMode::Files, "ficha", &index, None, &recent, true);
+        let results = quickopen_query(QuickOpenMode::Files, "ficha", &index, None, &recent, true);
         // +40 de recencia (aunque −15 de profundidad) deja al más reciente
         // por delante del más plano.
         assert_eq!(results[0].rel_path, "a/b/c/ficha.md");
@@ -586,7 +617,10 @@ mod tests {
         let results = quickopen_query(QuickOpenMode::Files, "", &index, None, &[], true);
         // Mismo score (sin filtro, sin recencia): orden del índice (§45).
         assert_eq!(
-            results.iter().map(|entry| entry.rel_path.as_str()).collect::<Vec<_>>(),
+            results
+                .iter()
+                .map(|entry| entry.rel_path.as_str())
+                .collect::<Vec<_>>(),
             ["a.md", "b.md", "c.md"],
         );
     }
@@ -595,8 +629,10 @@ mod tests {
     fn techo_de_resultados_100_47_5() {
         let paths: Vec<String> = (0..250).map(|i| format!("f{i:03}/doc.md")).collect();
         let sin_headings: &[(u8, &str)] = &[];
-        let borrowed: Vec<(&str, &[(u8, &str)])> =
-            paths.iter().map(|path| (path.as_str(), sin_headings)).collect();
+        let borrowed: Vec<(&str, &[(u8, &str)])> = paths
+            .iter()
+            .map(|path| (path.as_str(), sin_headings))
+            .collect();
         let index = synth_index("/proy", &borrowed);
         let results = quickopen_query(QuickOpenMode::Files, "doc", &index, None, &[], true);
         assert_eq!(results.len(), MAX_RESULTS);
@@ -604,11 +640,14 @@ mod tests {
 
     #[test]
     fn rendimiento_con_10k_entradas_47_5() {
-        let paths: Vec<String> =
-            (0..10_000).map(|i| format!("d{i:04}/doc_{i:04}.md")).collect();
+        let paths: Vec<String> = (0..10_000)
+            .map(|i| format!("d{i:04}/doc_{i:04}.md"))
+            .collect();
         let sin_headings: &[(u8, &str)] = &[];
-        let borrowed: Vec<(&str, &[(u8, &str)])> =
-            paths.iter().map(|path| (path.as_str(), sin_headings)).collect();
+        let borrowed: Vec<(&str, &[(u8, &str)])> = paths
+            .iter()
+            .map(|path| (path.as_str(), sin_headings))
+            .collect();
         let index = synth_index("/proy", &borrowed);
 
         let started = std::time::Instant::now();
@@ -617,7 +656,10 @@ mod tests {
         assert_eq!(results.len(), MAX_RESULTS);
         // Atado generoso: el matcher greedy es lineal y no hace E/S; el
         // objetivo es que la pulsación nunca bloquee (§47.5).
-        assert!(elapsed < std::time::Duration::from_millis(500), "{elapsed:?}");
+        assert!(
+            elapsed < std::time::Duration::from_millis(500),
+            "{elapsed:?}"
+        );
     }
 
     #[test]
@@ -626,15 +668,20 @@ mod tests {
             "/proy",
             &[("doc.md", &[]), ("figura.png", &[]), ("datos.bin", &[])],
         );
-        let por_defecto =
-            quickopen_query(QuickOpenMode::Files, "", &index, None, &[], false);
+        let por_defecto = quickopen_query(QuickOpenMode::Files, "", &index, None, &[], false);
         assert_eq!(
-            por_defecto.iter().map(|entry| entry.rel_path.as_str()).collect::<Vec<_>>(),
+            por_defecto
+                .iter()
+                .map(|entry| entry.rel_path.as_str())
+                .collect::<Vec<_>>(),
             ["doc.md", "figura.png"], // tipos documentales §14.4
         );
         let todos = quickopen_query(QuickOpenMode::Files, "", &index, None, &[], true);
         assert_eq!(
-            todos.iter().map(|entry| entry.rel_path.as_str()).collect::<Vec<_>>(),
+            todos
+                .iter()
+                .map(|entry| entry.rel_path.as_str())
+                .collect::<Vec<_>>(),
             ["datos.bin", "doc.md", "figura.png"],
         );
     }
@@ -673,10 +720,24 @@ mod tests {
 
         // Líneas inválidas o sin archivo activo: sin resultados (§41 `:42` es
         // 1-based).
-        assert!(quickopen_query(QuickOpenMode::Line, ":0", &index, Some("docs/gui.md"), &[], true)
-            .is_empty());
-        assert!(quickopen_query(QuickOpenMode::Line, ":x", &index, Some("docs/gui.md"), &[], true)
-            .is_empty());
+        assert!(quickopen_query(
+            QuickOpenMode::Line,
+            ":0",
+            &index,
+            Some("docs/gui.md"),
+            &[],
+            true
+        )
+        .is_empty());
+        assert!(quickopen_query(
+            QuickOpenMode::Line,
+            ":x",
+            &index,
+            Some("docs/gui.md"),
+            &[],
+            true
+        )
+        .is_empty());
         assert!(quickopen_query(QuickOpenMode::Line, ":42", &index, None, &[], true).is_empty());
     }
 
@@ -685,7 +746,10 @@ mod tests {
         let index = synth_index(
             "/proy",
             &[
-                ("docs/gui.md", &[(1, "Guia"), (2, "Instalacion"), (2, "Uso")]),
+                (
+                    "docs/gui.md",
+                    &[(1, "Guia"), (2, "Instalacion"), (2, "Uso")],
+                ),
                 ("docs/otro.md", &[(1, "Otra guia")]),
             ],
         );
@@ -711,20 +775,17 @@ mod tests {
             true,
         );
         assert_eq!(
-            todos.iter().map(|entry| entry.label.as_str()).collect::<Vec<_>>(),
+            todos
+                .iter()
+                .map(|entry| entry.label.as_str())
+                .collect::<Vec<_>>(),
             ["# Guia", "## Instalacion", "## Uso"],
         );
 
         // Sin documento actual: sin resultados.
-        assert!(quickopen_query(
-            QuickOpenMode::DocHeadings,
-            "@g",
-            &index,
-            None,
-            &[],
-            true
-        )
-        .is_empty());
+        assert!(
+            quickopen_query(QuickOpenMode::DocHeadings, "@g", &index, None, &[], true).is_empty()
+        );
     }
 
     #[test]
@@ -745,7 +806,10 @@ mod tests {
             &[],
             true,
         );
-        let paths: Vec<&str> = results.iter().map(|entry| entry.rel_path.as_str()).collect();
+        let paths: Vec<&str> = results
+            .iter()
+            .map(|entry| entry.rel_path.as_str())
+            .collect();
         assert_eq!(paths, ["cap/a.md", "cap/b.md"]);
         assert_eq!(results[0].heading, Some(heading(2, "Detalle")));
         assert_eq!(results[1].heading, Some(heading(2, "Detalle final")));
@@ -753,14 +817,7 @@ mod tests {
         // pulsación); se resuelve al abrir.
         assert!(results.iter().all(|entry| entry.line.is_none()));
 
-        let todos = quickopen_query(
-            QuickOpenMode::ProjectHeadings,
-            "#",
-            &index,
-            None,
-            &[],
-            true,
-        );
+        let todos = quickopen_query(QuickOpenMode::ProjectHeadings, "#", &index, None, &[], true);
         assert_eq!(todos.len(), 4);
     }
 
@@ -768,33 +825,61 @@ mod tests {
     fn parse_query_detecta_modos_y_linea_41() {
         assert_eq!(
             parse_query("gui"),
-            ParsedQuery { mode: QuickOpenMode::Files, filter: "gui", line: None }
+            ParsedQuery {
+                mode: QuickOpenMode::Files,
+                filter: "gui",
+                line: None
+            }
         );
         assert_eq!(
             parse_query(":42"),
-            ParsedQuery { mode: QuickOpenMode::Line, filter: "", line: Some(42) }
+            ParsedQuery {
+                mode: QuickOpenMode::Line,
+                filter: "",
+                line: Some(42)
+            }
         );
         assert_eq!(
             parse_query("docs/gui:7"),
-            ParsedQuery { mode: QuickOpenMode::Line, filter: "docs/gui", line: Some(7) }
+            ParsedQuery {
+                mode: QuickOpenMode::Line,
+                filter: "docs/gui",
+                line: Some(7)
+            }
         );
         // Sin línea válida el prefijo `:` sigue siendo modo línea (sin salto).
         assert_eq!(
             parse_query(":x"),
-            ParsedQuery { mode: QuickOpenMode::Line, filter: "", line: None }
+            ParsedQuery {
+                mode: QuickOpenMode::Line,
+                filter: "",
+                line: None
+            }
         );
         // Dos puntos internos sin dígitos: búsqueda de archivos normal.
         assert_eq!(
             parse_query("a:b"),
-            ParsedQuery { mode: QuickOpenMode::Files, filter: "a:b", line: None }
+            ParsedQuery {
+                mode: QuickOpenMode::Files,
+                filter: "a:b",
+                line: None
+            }
         );
         assert_eq!(
             parse_query("@inst"),
-            ParsedQuery { mode: QuickOpenMode::DocHeadings, filter: "inst", line: None }
+            ParsedQuery {
+                mode: QuickOpenMode::DocHeadings,
+                filter: "inst",
+                line: None
+            }
         );
         assert_eq!(
             parse_query("#det"),
-            ParsedQuery { mode: QuickOpenMode::ProjectHeadings, filter: "det", line: None }
+            ParsedQuery {
+                mode: QuickOpenMode::ProjectHeadings,
+                filter: "det",
+                line: None
+            }
         );
     }
 
@@ -819,7 +904,10 @@ mod tests {
         assert_eq!(find_heading_line(source, &heading(1, "Real")), Some(5));
         assert_eq!(find_heading_line(source, &heading(2, "Dos")), Some(13));
         // Ni el comentario YAML ni la del fence existen como headings.
-        assert_eq!(find_heading_line(source, &heading(1, "comentario yaml")), None);
+        assert_eq!(
+            find_heading_line(source, &heading(1, "comentario yaml")),
+            None
+        );
         assert_eq!(find_heading_line(source, &heading(1, "Falsa")), None);
     }
 
@@ -846,7 +934,10 @@ mod tests {
             resolve_heading_line(&root, "cap/a.md", &heading(2, "Detalle")),
             Some(3)
         );
-        assert_eq!(resolve_heading_line(&root, "cap/nope.md", &heading(1, "X")), None);
+        assert_eq!(
+            resolve_heading_line(&root, "cap/nope.md", &heading(1, "X")),
+            None
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 }

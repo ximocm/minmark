@@ -61,8 +61,21 @@ pub struct TypstEngine;
 
 impl PdfEngine for TypstEngine {
     fn export(&self, ast: &Ast, settings: &Settings) -> Result<Vec<u8>, PdfError> {
+        self.export_with_assets(ast, settings, std::collections::BTreeMap::new())
+    }
+}
+
+impl TypstEngine {
+    /// Recursos autorizados por el host, con rutas virtuales relativas.
+    /// Typst sigue sin acceso libre al filesystem ni a la red.
+    pub fn export_with_assets(
+        &self,
+        ast: &Ast,
+        settings: &Settings,
+        assets: std::collections::BTreeMap<std::path::PathBuf, Vec<u8>>,
+    ) -> Result<Vec<u8>, PdfError> {
         let source = generate(ast, settings);
-        let world = world::MiniWorld::new(source);
+        let world = world::MiniWorld::new(source, assets);
         let warned = typst::compile(&world);
         let document = warned.output.map_err(|errors| {
             PdfError::Compose(
@@ -99,7 +112,10 @@ pub fn page_size_mm(size: PageSize) -> (f32, f32) {
         PageSize::Letter => (215.9, 279.4),
         PageSize::Legal => (215.9, 355.6),
         PageSize::Executive => (184.2, 266.7),
-        PageSize::Custom { width_mm, height_mm } => (width_mm, height_mm),
+        PageSize::Custom {
+            width_mm,
+            height_mm,
+        } => (width_mm, height_mm),
     }
 }
 
@@ -148,7 +164,10 @@ mod tests {
         assert!(pdf.contains("841"), "MediaBox no es A4 (alto)");
         // Texto seleccionable: fuentes con mapa de caracteres, no imagen.
         assert!(pdf.contains("/Font"), "sin fuentes incrustadas");
-        assert!(pdf.contains("/ToUnicode"), "sin mapa de texto seleccionable");
+        assert!(
+            pdf.contains("/ToUnicode"),
+            "sin mapa de texto seleccionable"
+        );
     }
 
     #[test]

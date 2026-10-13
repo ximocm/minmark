@@ -22,11 +22,11 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use gtk4 as gtk;
 use gtk::glib::translate::IntoGlib;
-use gtk::prelude::*;
 use gtk::pango;
+use gtk::prelude::*;
 use gtk::{ScrolledWindow, TextBuffer, TextIter, TextTag, TextTagTable, TextView, Widget};
+use gtk4 as gtk;
 use minmark_config::VisualSyntax;
 use minmark_document::{Editor, Position, Range, Selection};
 use minmark_parser::VisualStyle;
@@ -71,10 +71,7 @@ impl RevealState {
         {
             return;
         }
-        let cursor = self
-            .buffer
-            .iter_at_mark(&self.buffer.get_insert())
-            .offset() as usize;
+        let cursor = self.buffer.iter_at_mark(&self.buffer.get_insert()).offset() as usize;
         let elements = self.elements.borrow();
         let new = innermost(&elements, cursor);
         let old = self.revealed.get();
@@ -157,6 +154,9 @@ pub struct EditorPane {
     /// Marcado discreto de coincidencias y resaltado de la activa (§40.1).
     find_match: TextTag,
     find_active: TextTag,
+    broken_link: TextTag,
+    wiki_links: Cell<bool>,
+    completion: RefCell<Option<super::completion::CompletionPopup>>,
     /// Guardia de reentrancia: las reescrituras programáticas del buffer
     /// (`load`) no invocan al [`EditSink`] ni a `on_edited`.
     guard: Rc<Cell<bool>>,
@@ -165,6 +165,103 @@ pub struct EditorPane {
 }
 
 impl EditorPane {
+    pub fn scroll_to_cursor(&self) {
+        self.text_view
+            .scroll_to_mark(&self.buffer.get_insert(), 0.15, false, 0.0, 0.0);
+    }
+    #[cfg(test)]
+    pub fn emit_test_key(&self, key: gtk::gdk::Key, modifiers: gtk::gdk::ModifierType) -> bool {
+        let controllers = self.text_view.observe_controllers();
+        for i in 0..controllers.n_items() {
+            if let Some(controller) = controllers
+                .item(i)
+                .and_then(|c| c.downcast::<gtk::EventControllerKey>().ok())
+            {
+                if controller.emit_by_name::<bool>("key-pressed", &[&key, &0u32, &modifiers]) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+    pub fn connect_completion(&self, accept: Rc<dyn Fn(crate::intelligence::Completion)>) {
+        *self.completion.borrow_mut() = Some(super::completion::CompletionPopup::new(
+            &self.text_view,
+            accept,
+        ));
+    }
+    pub fn show_completions(&self, items: Vec<crate::intelligence::Completion>) {
+        if let Some(popup) = self.completion.borrow().as_ref() {
+            popup.show(items, &self.text_view);
+        }
+    }
+    #[cfg(test)]
+    pub fn test_completion_selected_visible(&self, index: i32) -> bool {
+        self.completion
+            .borrow()
+            .as_ref()
+            .is_some_and(|p| p.test_selected_visible(index))
+    }
+    pub fn set_wiki_links(&self, enabled: bool) {
+        self.wiki_links.set(enabled);
+    }
+
+    pub fn set_link_diagnostics(&self, source: &str, links: &[crate::intelligence::Link]) {
+        let (start, end) = self.buffer.bounds();
+        if self.buffer.text(&start, &end, true).as_str() != source {
+            return;
+        }
+        self.buffer.remove_tag(&self.broken_link, &start, &end);
+        for link in links {
+            if crate::intelligence::problem(&link.target).is_none() {
+                continue;
+            }
+            let a = source[..link.span.start as usize].chars().count() as i32;
+            let b = source[..link.span.end as usize].chars().count() as i32;
+            self.buffer.apply_tag(
+                &self.broken_link,
+                &self.buffer.iter_at_offset(a),
+                &self.buffer.iter_at_offset(b),
+            );
+        }
+    }
+    /// Ctrl+Click conserva la edición normal; Ctrl+Enter ofrece el mismo
+    /// recorrido desde el teclado en ambos modos del buffer único.
+    pub fn connect_link_activation(&self, activate: Rc<dyn Fn(Position)>) {
+        let click = gtk::GestureClick::new();
+        click.set_button(1);
+        click.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let view = self.text_view.clone();
+        let callback = activate.clone();
+        click.connect_pressed(move |gesture, _, x, y| {
+            if !gesture
+                .current_event_state()
+                .contains(gtk::gdk::ModifierType::CONTROL_MASK)
+            {
+                return;
+            }
+            let (x, y) =
+                view.window_to_buffer_coords(gtk::TextWindowType::Widget, x as i32, y as i32);
+            if let Some(iter) = view.iter_at_location(x, y) {
+                gesture.set_state(gtk::EventSequenceState::Claimed);
+                callback(Position::new(iter.line() as u32, iter.line_offset() as u32));
+            }
+        });
+        self.text_view.add_controller(click);
+        let key = gtk::EventControllerKey::new();
+        let buffer = self.buffer.clone();
+        key.connect_key_pressed(move |_, key, _, modifiers| {
+            if key == gtk::gdk::Key::Return
+                && modifiers.contains(gtk::gdk::ModifierType::CONTROL_MASK)
+            {
+                let iter = buffer.iter_at_mark(&buffer.get_insert());
+                activate(Position::new(iter.line() as u32, iter.line_offset() as u32));
+                return gtk::glib::Propagation::Stop;
+            }
+            gtk::glib::Propagation::Proceed
+        });
+        self.text_view.add_controller(key);
+    }
     /// Crea el pane con su `TextTagTable` completa (un tag por tipo de token
     /// de Markdown y por estilo de Visual, estilizados con [`tags::tag_style`]
     /// / [`visual::tag_style`] sobre la [`Palette`] del tema resuelto por el
@@ -200,15 +297,16 @@ impl EditorPane {
         // Marcado de búsqueda (§40.1): discreto para todas las coincidencias
         // y distinto para la activa; colores de la [`Palette`] (§23).
         let find_match = TextTag::new(Some("mm-find-match"));
-        find_match.set_background(Some(
-            palette.color("highlight").unwrap_or(palette.code_bg),
-        ));
+        find_match.set_background(Some(palette.color("highlight").unwrap_or(palette.code_bg)));
         let find_active = TextTag::new(Some("mm-find-active"));
         find_active.set_background(Some(palette.color("orange").unwrap_or("#ef6c00")));
         find_active.set_foreground(Some(palette.bg));
         find_active.set_weight(pango::Weight::Bold.into_glib());
         table.add(&find_match);
         table.add(&find_active);
+        let broken_link = TextTag::new(Some("mm-broken-link"));
+        broken_link.set_underline(pango::Underline::Error);
+        table.add(&broken_link);
 
         // Estado §8.3 del modo Visual.
         let reveal = Rc::new(RevealState {
@@ -287,6 +385,9 @@ impl EditorPane {
             vis_syntax,
             find_match,
             find_active,
+            broken_link,
+            wiki_links: Cell::new(false),
+            completion: RefCell::new(None),
             guard,
             reveal,
         }
@@ -306,6 +407,9 @@ impl EditorPane {
     /// restaura como posición semántica (§8.6), idéntica en ambos modos
     /// porque ambos son el mismo buffer.
     pub fn load(&self, editor: &Editor, mode: EditMode) {
+        if let Some(popup) = self.completion.borrow().as_ref() {
+            popup.hide();
+        }
         let text = editor.document().content();
         self.guard.set(true);
         self.buffer.set_text(text);
@@ -342,7 +446,16 @@ impl EditorPane {
     /// [`tags::tag_plan`]. Tolera ediciones concurrentes: si el texto del
     /// buffer cambió entre parseo y aplicación, se descarta el plan entero.
     pub fn refresh_highlight(&self, text: &str) {
-        let plan = tags::tag_plan(text, &minmark_parser::highlight(text));
+        let plan = tags::tag_plan(
+            text,
+            &minmark_parser::highlight_with(
+                text,
+                &minmark_parser::ParseOptions {
+                    wiki_links: self.wiki_links.get(),
+                    ..Default::default()
+                },
+            ),
+        );
         let styled = plan
             .into_iter()
             .map(|range| (range.start_char, range.end_char, range.kind))
@@ -355,7 +468,13 @@ impl EditorPane {
     /// oculta con el tag invisible (§8.3) y el contenido recibe su estilo
     /// semántico (§8.2).
     pub fn refresh_visual(&self, text: &str) {
-        let plan = minmark_parser::visual(text);
+        let plan = minmark_parser::visual_with(
+            text,
+            &minmark_parser::ParseOptions {
+                wiki_links: self.wiki_links.get(),
+                ..Default::default()
+            },
+        );
         let ranges = visual::visual_tag_plan(text, &plan);
         let elements = visual::element_ranges(text, &plan);
         let styled: Vec<StyledRange> = ranges
@@ -459,8 +578,7 @@ impl EditorPane {
         let from = self.iter_at(range.start);
         let mut to = self.iter_at(range.end);
         self.buffer.select_range(&to, &from);
-        self.text_view
-            .scroll_to_iter(&mut to, 0.2, false, 0.0, 0.0);
+        self.text_view.scroll_to_iter(&mut to, 0.2, false, 0.0, 0.0);
     }
 
     /// Reubica las marcas `insert` y `selection_bound` a la selección del
@@ -549,6 +667,9 @@ mod tests {
             vec![(1, 3), (24, 26)]
         );
         // Sin elemento nuevo, todo lo del antiguo vuelve a ocultarse.
-        assert_eq!(rehide_ranges(&hide, (0, 30), None), vec![(1, 3), (6, 8), (24, 26)]);
+        assert_eq!(
+            rehide_ranges(&hide, (0, 30), None),
+            vec![(1, 3), (6, 8), (24, 26)]
+        );
     }
 }

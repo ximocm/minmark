@@ -7,8 +7,8 @@ description = "Filesystem de minmark: file I/O, guardado atómico y snapshots (I
 
 [dependencies]
 minmark-document = { workspace = true }
+minmark-parser = { path = "../minmark-parser" }
 
 [dev-dependencies]
 minmark-config = { path = "../minmark-config" }
-minmark-parser = { path = "../minmark-parser" }
 minmark-renderer = { path = "../minmark-renderer" }

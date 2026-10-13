@@ -6,11 +6,11 @@
 //! - Atributos (§7.4.3) solo en sus tres posiciones: tras imagen inline, en
 //!   línea propia tras tabla o ecuación de bloque, y al final de un heading.
 
-use minmark_document::parse_attributes;
 use crate::events;
 use crate::highlight::{block_highlights, Highlight, HighlightKind};
 use crate::inlines::BUILTIN_CALLOUTS;
 use crate::ParseOptions;
+use minmark_document::parse_attributes;
 use minmark_document::{Ast, Attributes, Block, BlockKind, Inline, Span};
 
 /// Parsea un documento completo: segmentación + eventos + atributos.
@@ -207,7 +207,14 @@ fn segment<'s>(text: &'s str, base: usize, options: &ParseOptions) -> Vec<Segmen
         }
         idx += 1;
     }
-    flush_raw(&mut raw_start, &mut segments, &lines, text, base, lines.len());
+    flush_raw(
+        &mut raw_start,
+        &mut segments,
+        &lines,
+        text,
+        base,
+        lines.len(),
+    );
     segments
 }
 
@@ -326,7 +333,25 @@ fn decorate(block: &mut Block, source: &str, base: usize) {
             attach_image_attrs(content);
         }
         BlockKind::Paragraph { content } => attach_image_attrs(content),
-        BlockKind::Table { header, rows, .. } => {
+        BlockKind::Table {
+            header,
+            rows,
+            attrs,
+            ..
+        } => {
+            // CommonMark admite una fila sin barras y consume la línea de
+            // atributos normativa como última fila. Recuperarla desde el
+            // fuente evita perder el ID de tabla sin reescribir Markdown.
+            if attrs.is_none() && !rows.is_empty() {
+                let start = block.span.start as usize - base;
+                let end = block.span.end as usize - base;
+                if let Some(line) = source.get(start..end).and_then(|s| s.lines().last()) {
+                    if let Some(value) = parse_attr_line(line.trim()) {
+                        rows.pop();
+                        *attrs = Some(value);
+                    }
+                }
+            }
             for cell in header.iter_mut() {
                 attach_image_attrs(cell);
             }
@@ -478,7 +503,9 @@ mod tests {
             BlockKind::Paragraph { content }
                 if content.contains(&Inline::Strong(vec![Inline::Text("fuerte".into())]))
         ));
-        assert!(matches!(&blocks[1].kind, BlockKind::Callout { callout_type, .. } if callout_type == "tip"));
+        assert!(
+            matches!(&blocks[1].kind, BlockKind::Callout { callout_type, .. } if callout_type == "tip")
+        );
     }
 
     #[test]
@@ -531,7 +558,10 @@ mod tests {
         let BlockKind::Table { attrs, .. } = &ast.blocks[0].kind else {
             panic!("esperaba tabla: {:?}", ast.blocks[0]);
         };
-        assert_eq!(attrs.as_ref().and_then(|a| a.id.as_deref()), Some("tbl:results"));
+        assert_eq!(
+            attrs.as_ref().and_then(|a| a.id.as_deref()),
+            Some("tbl:results")
+        );
         assert_eq!(ast.blocks.len(), 1);
 
         // §26.4: ecuación con línea de atributos propia.
@@ -539,7 +569,10 @@ mod tests {
         let BlockKind::MathBlock { attrs, .. } = &ast.blocks[0].kind else {
             panic!("esperaba ecuación: {:?}", ast.blocks[0]);
         };
-        assert_eq!(attrs.as_ref().and_then(|a| a.id.as_deref()), Some("eq:energy"));
+        assert_eq!(
+            attrs.as_ref().and_then(|a| a.id.as_deref()),
+            Some("eq:energy")
+        );
 
         // §18.5 / §26.2: imagen con atributos inline.
         let ast = parse("![x](y.png) {#fig:a width=50%}\n");
@@ -581,16 +614,20 @@ mod tests {
         let BlockKind::Paragraph { content } = &ast.blocks[0].kind else {
             panic!("esperaba párrafo: {:?}", ast.blocks[0]);
         };
-        assert!(content.contains(&Inline::Substitution(Substitution::CrossRef {
-            id: "fig:arq".into()
-        })));
+        assert!(
+            content.contains(&Inline::Substitution(Substitution::CrossRef {
+                id: "fig:arq".into()
+            }))
+        );
 
         let options = ParseOptions {
             custom_callout_types: &["quiz".to_string()],
             ..Default::default()
         };
         let (ast, _) = parse_document("::: quiz\nx\n:::\n", 0, &options, true);
-        assert!(matches!(&ast.blocks[0].kind, BlockKind::Callout { callout_type, .. } if callout_type == "quiz"));
+        assert!(
+            matches!(&ast.blocks[0].kind, BlockKind::Callout { callout_type, .. } if callout_type == "quiz")
+        );
     }
 
     #[test]

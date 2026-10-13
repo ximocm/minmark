@@ -6,6 +6,7 @@
 //! `TextBuffer`. Ver [`pane`] para el puente TextView ↔ modelo y la
 //! semántica §8.5/§8.6.
 
+mod completion;
 pub mod mode;
 pub mod pane;
 pub mod tags;

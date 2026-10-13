@@ -23,10 +23,7 @@ const ALL_LEVELS: &[Level] = &[
 pub const KEYS: &[(&str, &[Level])] = &[
     ("preview_max_width_px", ALL_LEVELS),
     ("pagination", ALL_LEVELS),
-    (
-        "theme",
-        &[Level::Document, Level::Project, Level::Global],
-    ),
+    ("theme", &[Level::Document, Level::Project, Level::Global]),
     ("snapshot_limit", &[Level::Global]),
     ("visual_syntax", &[Level::Global]),
     ("wiki_links", &[Level::Project, Level::Global]),
@@ -38,6 +35,10 @@ pub const KEYS: &[(&str, &[Level])] = &[
         &[Level::Document, Level::Project, Level::Global],
     ),
     ("heading_numbering", ALL_LEVELS),
+    (
+        "language",
+        &[Level::Document, Level::Project, Level::Global],
+    ),
     ("heading_number_format", ALL_LEVELS),
     ("counter_numbering", ALL_LEVELS),
     ("toc_max_level", ALL_LEVELS),
@@ -194,6 +195,8 @@ pub enum TextAlignment {
 /// Ajustes de la aplicación con sus valores por defecto (§58.2).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Settings {
+    /// Idioma de las etiquetas derivadas (§26.6).
+    pub language: String,
     /// §10.2: ancho máximo del Preview continuo.
     pub preview_max_width_px: u32,
     /// §10.3: paginación activada.
@@ -265,6 +268,7 @@ impl Default for Settings {
             custom_callout_types: Vec::new(),
             bibliography_style: "IEEE".to_string(),
             heading_numbering: false,
+            language: "es".into(),
             heading_number_format: HeadingNumberFormat::Hierarchical,
             counter_numbering: NumberingScope::Continuous,
             toc_max_level: 3,
@@ -312,6 +316,12 @@ impl Settings {
                 self.bibliography_style = style;
             }
             "heading_numbering" => self.heading_numbering = as_bool(value)?,
+            "language" => {
+                self.language = match value {
+                    Value::Text(language) if !language.trim().is_empty() => language.clone(),
+                    _ => return Err(WarningReason::InvalidValue),
+                }
+            }
             "heading_number_format" => self.heading_number_format = parse_heading_format(value)?,
             "counter_numbering" => self.counter_numbering = parse_counter_numbering(value)?,
             "toc_max_level" => self.toc_max_level = as_u32_in(value, 1..=6)? as u8,
@@ -614,7 +624,8 @@ mod tests {
         s.apply("body_font", &text("monospace")).unwrap();
         assert_eq!(s.body_font, FontFamily::Monospace);
 
-        s.apply("pdf_page_number_position", &text("header-center")).unwrap();
+        s.apply("pdf_page_number_position", &text("header-center"))
+            .unwrap();
         assert_eq!(s.pdf_page_number_position, PageNumberPosition::HeaderCenter);
     }
 
@@ -625,10 +636,7 @@ mod tests {
         assert_eq!(s.apply("visual_syntax", &text("a-medias")), Err(INVALID));
         assert_eq!(s.apply("toc_max_level", &Value::Integer(0)), Err(INVALID));
         assert_eq!(s.apply("toc_max_level", &Value::Integer(7)), Err(INVALID));
-        assert_eq!(
-            s.apply("font_size_pt", &Value::Number(0.0)),
-            Err(INVALID)
-        );
+        assert_eq!(s.apply("font_size_pt", &Value::Number(0.0)), Err(INVALID));
         assert_eq!(
             s.apply("preview_max_width_px", &Value::Integer(-1)),
             Err(INVALID)
