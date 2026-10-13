@@ -144,7 +144,9 @@ con títulos sin guardar, y cierre con Escape sin modificar el documento.
 El paso 7 está parcialmente validado: el usuario ha confirmado la exportación
 con Ctrl+E del documento activo con cambios sin guardar, pies de figura y
 referencias resueltas, sin incluir el contenido de la otra pestaña abierta.
-La revisión restante de idiomas, renumeración y diagnósticos sigue pendiente.
+El usuario también ha confirmado el cambio de español a inglés en las
+referencias y pies de figura de Preview/PDF, conservando los tokens del editor.
+La revisión restante de renumeración y diagnósticos sigue pendiente.
 En esa revisión se detectó la ausencia de pies de figura; se corrigió su salida
 en Preview/PDF y se añadieron regresiones de posición, idioma y numeración.
 Verificación de la corrección: 33 pruebas de renderer/PDF y una exportación
