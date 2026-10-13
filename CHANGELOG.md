@@ -9,54 +9,46 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 
 ## [Unreleased]
 
+Sin cambios pendientes de publicación.
+
+## [0.2.0] — 2026-10-13
+
 ### Añadido
 
 - Navegación de enlaces con Ctrl+Click/Ctrl+Enter en Markdown y Visual y desde
-  Preview; sugerencias de archivos y headings, diagnósticos de enlaces rotos,
-  wiki links opcionales y vistas temporales de outline/backlinks (#5–#10).
-- Referencias cruzadas a IDs de headings, figuras, tablas y ecuaciones con
-  etiquetas comunes en Preview/PDF, idiomas español/inglés y numeración
-  derivada del documento (#11). El PDF recibe imágenes locales en memoria.
-- Pies de figura debajo de imágenes con ID `fig:`, a partir del texto alternativo,
-  con numeración e idioma comunes en Preview y PDF.
-- Preview actualiza su contenido sin recargar la página y sigue el bloque
-  donde se escribe, sin desplazarlo si ya está visible; los refrescos generales
-  conservan el scroll y los saltos explícitos a destinos siguen funcionando.
-- Las flechas desplazan la lista para mantener visible la selección en Quick
-  Open, outline, backlinks y autocompletado, conservando el foco de escritura.
-- Prueba de integración GTK/WebKit y regresiones de Markdown Intelligence;
-  comportamiento y comprobaciones pendientes en
+  Preview; autocompletado de archivos y headings, diagnósticos de enlaces rotos,
+  wiki links opcionales y vistas temporales de outline y backlinks.
+- Referencias cruzadas a IDs de headings, figuras, tablas y ecuaciones,
+  coherentes en Preview/PDF, con idioma español/inglés y numeración configurable.
+- Pies de figura numerados a partir del texto alternativo. El PDF incorpora
+  las imágenes locales mediante recursos en memoria.
+- Resolución compartida de destinos y anclas, con buffers sin guardar,
+  archivos ignorados, Unicode y límites del proyecto. Índice reconstruible v3
+  con IDs de objetos y timestamps con nanosegundos.
+- CI del core en Linux, Windows y macOS; compilación y paquete de la app Linux
+  x86_64 con licencias y checksums.
+
+### Corregido
+
+- Preview se actualiza sin recargar la página y sigue el bloque editado cuando
+  queda fuera de vista, conservando el scroll en otros refrescos.
+- Las flechas mantienen visible la selección en Quick Open, outline, backlinks
+  y autocompletado, sin quitar el foco al campo de escritura.
+
+### Verificación y limitaciones
+
+- 335 pruebas del core, 89 de UI y una integración gráfica GTK pasan. Revisión
+  manual de los siete pasos de Markdown Intelligence y proyecto de 1000 notas.
+- Exportación PDF revisada con buffer sin guardar, menú/atajo, cancelación,
+  sobrescritura, destino no escribible y recuperación tras un error del motor.
+- Pendientes las comprobaciones con lector de pantalla, Wayland y confirmación
+  manual específica del seguimiento de Preview al escribir; este último tiene
+  cobertura gráfica automatizada. Detalles en
   [la guía de fase 4](docs/MARKDOWN_INTELLIGENCE.md).
-- Índice v3: IDs de objetos y timestamps con nanosegundos. Reconstrucción
-  automática de cachés previas; sin nuevas dependencias externas.
-
-- Anclas automáticas para los headings (ATX y setext) y resolución de destinos
-  de enlaces unificada en el índice, base de Markdown Intelligence (Fase 4):
-  `#fragmento` y `archivo.md#fragmento` resuelven a la misma posición que
-  ancla el Preview, con IDs explícitos `{#id}`, política documentada para
-  duplicados (sufijos `-1`, `-2`, …) y soporte de enlaces por referencia,
-  destinos externos, wiki links por nombre y buffers abiertos sin guardar
-  (que priorizan sobre el disco). El índice guarda además la línea de cada
-  heading y pasa al formato v2 (los índices antiguos se reconstruyen solos).
-  Los archivos binarios sin fragmento también resuelven como destinos locales;
-  buffers y anclas indexadas respetan los límites del proyecto y `.gitignore`.
-  Decisiones en [ADR-004](docs/adr/004-anclas-y-resolucion-de-enlaces.md).
-
-- CI del core en Linux, Windows y macOS; pruebas y compilación de la UI en
-  Linux. Paquetes Linux x86_64 con licencias y checksums; los tags de versión
-  generan borradores de release tras superar la matriz de pruebas.
-
-### Trabajo en curso
-
-- Integración de exportación PDF en la interfaz: documento activo desde el
-  menú File y `Ctrl+E`. Sigue pendiente de completar su verificación,
-  incluidos el diálogo, la escritura a disco y los errores de exportación.
-  La composición de varios documentos sigue prevista para la Fase 6.
-
-Las fases 0–3 están completadas. Markdown Intelligence tiene su implementación
-y pruebas automatizadas; su cierre requiere la revisión manual indicada en la
-guía de fase 4. Funciones académicas, composición, controles contextuales y
-Windows siguen en el plan de desarrollo.
+- La aplicación distribuida es para Linux x86_64 (Ubuntu 24.04 y compatibles),
+  con GTK ≥ 4.10 y WebKitGTK 6.0. Windows/macOS tienen pruebas de core, no binarios
+  de escritorio. Funciones académicas ampliadas, composición y controles
+  contextuales siguen en desarrollo.
 
 ## [0.1.1] — 2026-10-13
 
