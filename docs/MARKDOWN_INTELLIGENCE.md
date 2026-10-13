@@ -141,14 +141,16 @@ cierre con Escape y estado vacío.
 El usuario ha confirmado el paso 6 (outline): orden y jerarquía de headings,
 inclusión de Setext, exclusión de código/comentarios, navegación y actualización
 con títulos sin guardar, y cierre con Escape sin modificar el documento.
-El paso 7 está parcialmente validado: el usuario ha confirmado la exportación
+El paso 7 está validado en los casos revisados: el usuario ha confirmado la exportación
 con Ctrl+E del documento activo con cambios sin guardar, pies de figura y
 referencias resueltas, sin incluir el contenido de la otra pestaña abierta.
 El usuario también ha confirmado el cambio de español a inglés en las
 referencias y pies de figura de Preview/PDF, conservando los tokens del editor.
 El usuario ha confirmado la renumeración al reordenar figuras: pies y
 referencias coinciden en Preview/PDF, los tokens se conservan y deshacer
-restaura la numeración original. Queda pendiente la revisión de diagnósticos.
+restaura la numeración original. Ha confirmado también los diagnósticos de
+referencia inexistente e ID duplicado en Preview/PDF y su desaparición al
+corregir el destino y desambiguar el ID, incluida una nueva exportación.
 En esa revisión se detectó la ausencia de pies de figura; se corrigió su salida
 en Preview/PDF y se añadieron regresiones de posición, idioma y numeración.
 Verificación de la corrección: 33 pruebas de renderer/PDF y una exportación
