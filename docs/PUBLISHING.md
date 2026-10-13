@@ -37,6 +37,9 @@ git rev-list --objects --all |
 
 ## Preparar una release
 
+El [workflow de releases](CI.md#crear-una-release) valida el tag, ejecuta CI y
+crea un borrador con el paquete Linux y sus checksums.
+
 1. Elegir una versión y mantener coherentes los manifiestos del core, UI y
    referencias internas entre crates; actualizar los lockfiles afectados.
 2. Pasar las entradas terminadas de `Unreleased` a una sección con versión y

@@ -21,6 +21,10 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
   heading y pasa al formato v2 (los índices antiguos se reconstruyen solos).
   Decisiones en [ADR-004](docs/adr/004-anclas-y-resolucion-de-enlaces.md).
 
+- CI del core en Linux, Windows y macOS; pruebas y compilación de la UI en
+  Linux. Paquetes Linux x86_64 con licencias y checksums; los tags de versión
+  generan borradores de release tras superar la matriz de pruebas.
+
 ### Trabajo en curso
 
 - Integración de exportación PDF en la interfaz: documento activo desde el
