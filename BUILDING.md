@@ -92,6 +92,10 @@ instalado. La siguiente compilación será completa.
 
 ## Tests y comprobaciones
 
+La matriz automatizada y la generación de paquetes se explican en
+[CI y releases](docs/CI.md). Windows y macOS prueban los seis crates portables;
+la aplicación de escritorio se compila y empaqueta para Linux.
+
 ```sh
 cargo test --locked --manifest-path core/Cargo.toml --workspace
 cargo test --locked --manifest-path ui/Cargo.toml

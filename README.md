@@ -87,6 +87,7 @@ atajos disponibles en la aplicación.
 - [Compilación, tests e instalación local](BUILDING.md).
 - [Cómo contribuir y comunicar errores](CONTRIBUTING.md).
 - [Changelog](CHANGELOG.md).
+- [CI y releases](docs/CI.md): pruebas del core en Linux, Windows y macOS; paquetes Linux.
 - [Índice de documentación](docs/README.md): especificación y decisiones.
 - [Arquitectura del core](core/README.md).
 - [Preparación para publicar en GitHub](docs/PUBLISHING.md).

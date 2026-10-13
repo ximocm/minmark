@@ -17,3 +17,6 @@ target/
 
 # Datos locales de la aplicación (índices, cachés, snapshots)
 .minmark/
+
+# Python release tooling
+__pycache__/
