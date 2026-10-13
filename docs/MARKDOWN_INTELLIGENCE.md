@@ -146,7 +146,9 @@ con Ctrl+E del documento activo con cambios sin guardar, pies de figura y
 referencias resueltas, sin incluir el contenido de la otra pestaña abierta.
 El usuario también ha confirmado el cambio de español a inglés en las
 referencias y pies de figura de Preview/PDF, conservando los tokens del editor.
-La revisión restante de renumeración y diagnósticos sigue pendiente.
+El usuario ha confirmado la renumeración al reordenar figuras: pies y
+referencias coinciden en Preview/PDF, los tokens se conservan y deshacer
+restaura la numeración original. Queda pendiente la revisión de diagnósticos.
 En esa revisión se detectó la ausencia de pies de figura; se corrigió su salida
 en Preview/PDF y se añadieron regresiones de posición, idioma y numeración.
 Verificación de la corrección: 33 pruebas de renderer/PDF y una exportación
