@@ -20,8 +20,34 @@ impl CompletionPopup {
         popover.set_parent(view);
         popover.set_autohide(false);
         popover.set_has_arrow(false);
+        popover.set_can_focus(false);
         let list = gtk::ListBox::new();
         list.set_selection_mode(gtk::SelectionMode::Single);
+        let editor = view.downgrade();
+        list.connect_row_selected(move |_, row| {
+            if let Some(editor) = editor.upgrade() {
+                if let Some(row) = row {
+                    if let Some(label) = row.child().and_downcast::<gtk::Label>() {
+                        editor.update_property(&[gtk::accessible::Property::Label(&format!(
+                            "Sugerencia: {}",
+                            label.text()
+                        ))]);
+                    }
+                    editor.update_relation(&[gtk::accessible::Relation::ActiveDescendant(
+                        row.upcast_ref(),
+                    )]);
+                } else {
+                    editor.reset_relation(gtk::AccessibleRelation::ActiveDescendant);
+                }
+            }
+        });
+        let editor = view.downgrade();
+        popover.connect_closed(move |_| {
+            if let Some(editor) = editor.upgrade() {
+                editor.reset_property(gtk::AccessibleProperty::Label);
+                editor.reset_relation(gtk::AccessibleRelation::ActiveDescendant);
+            }
+        });
         let scroll = gtk::ScrolledWindow::new();
         scroll.set_min_content_width(280);
         scroll.set_max_content_height(240);
@@ -108,10 +134,14 @@ impl CompletionPopup {
         while let Some(row) = self.list.row_at_index(0) {
             self.list.remove(&row);
         }
-        for item in &items {
+        for (index, item) in items.iter().enumerate() {
             let label = gtk::Label::new(Some(&item.label));
             label.set_xalign(0.0);
             self.list.append(&label);
+            self.list
+                .row_at_index(index as i32)
+                .unwrap()
+                .update_property(&[gtk::accessible::Property::Label(&item.label)]);
         }
         let empty = items.is_empty();
         *self.items.borrow_mut() = items;
