@@ -9,10 +9,27 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 
 ## [Unreleased]
 
+### Añadido
+
+- Fase 5: ecuaciones LaTeX compuestas, bibliografía BibTeX/CSL local, citas y
+  autocompletado, notas al pie, numeración académica y TOC.
+- Preview paginado comparte la composición de páginas, notas y TOC del PDF.
+- Fixtures, suite y [registro de QA académica](docs/qa/registro-ejecucion.md).
+
 ### Corregido
 
 - El autocompletado expone la sugerencia seleccionada al lector de pantalla,
   conserva el foco del editor y restaura su nombre accesible al cerrar el popup.
+- Tabla PDF de varias columnas, composición de fracciones y aislamiento de
+  glifos SVG; exportación con los ajustes vigentes del buffer sin guardar.
+
+### Verificación y limitaciones
+
+- 349 pruebas del core, 93 de UI e integración gráfica en X11/Wayland pasan.
+  Capturas y PDF multipágina inspeccionados; Orca anuncia sugerencias de citas.
+- Pendientes la lectura del contenido de Preview con Orca y las fuentes CJK
+  de paginado/PDF. Clippy de los paquetes modificados pasa con warnings;
+  el workspace conserva un error previo en `minmark-fs`.
 
 ## [0.2.0] — 2026-10-13
 

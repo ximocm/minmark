@@ -85,7 +85,9 @@ motor PDF). Dentro del core hay una sola implementación por responsabilidad
 
 Typst (§4.3, ADR-003) es la única dependencia estratégica del core. GTK4/WebKit6
 (ADR-001) son del binario de UI (ISSUE-020), no del core. hayagriva (ADR-003)
-se añadirá en Fase 5 con las citas reales.
+0.10.1 con `biblatex` resuelve las citas CSL en `minmark-renderer` (Fase 5).
+El mismo resultado derivado alimenta HTML y PDF. Typst también compone las
+ecuaciones SVG y el Preview paginado; comparten el World local y las fuentes.
 
 ## Build y tests
 

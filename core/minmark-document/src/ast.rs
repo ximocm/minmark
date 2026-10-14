@@ -62,6 +62,14 @@ pub struct Block {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum BlockKind {
+    /// Bibliografía derivada por CSL, con sus reglas de layout.
+    Bibliography {
+        entries: Vec<(Vec<Inline>, Vec<Inline>)>,
+        hanging_indent: bool,
+        second_field_align: bool,
+        line_spacing: f32,
+        entry_spacing: f32,
+    },
     /// Encabezado H1–H6; `level` está en 1..=6 (§27.1). `attrs` cubre
     /// `## Título {#id}` (§26.1).
     Heading {
@@ -100,6 +108,11 @@ pub enum BlockKind {
         latex: String,
         attrs: Option<Attributes>,
     },
+    /// Definición de nota estándar (§30), conservada como nodo derivado.
+    FootnoteDefinition {
+        label: String,
+        blocks: Vec<Block>,
+    },
     /// Bloque destacado `::: tipo "título"` (§22).
     Callout {
         callout_type: String,
@@ -118,6 +131,10 @@ pub struct ListItem {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Inline {
+    /// Formato derivado del motor CSL; nunca sintaxis ni HTML del usuario.
+    Styled { content: Vec<Inline>, style: InlineStyle },
+    /// Referencia a una nota estándar (§30).
+    FootnoteReference(String),
     Text(String),
     /// Code span (§7.4.1: dentro de código no se interpreta ninguna extensión).
     Code(String),
@@ -161,6 +178,17 @@ pub enum Inline {
     TaskListMarker(bool),
     SoftBreak,
     HardBreak,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct InlineStyle {
+    pub italic: bool,
+    pub bold: bool,
+    pub light: bool,
+    pub small_caps: bool,
+    pub underline: bool,
+    /// -1 = subíndice, 0 = baseline, 1 = superíndice.
+    pub vertical: i8,
 }
 
 /// Item de cita (§25.2): clave `@key` con localizador opcional (`, p. 42`).

@@ -61,7 +61,7 @@ impl Context {
                     let level = (*level).clamp(1, 6) as usize - 1;
                     self.headings[level] += 1;
                     self.headings[level + 1..].fill(0);
-                    if level == 0 && settings.counter_numbering == NumberingScope::ByChapter {
+                    if level == 0 && settings.counter_numbering != NumberingScope::Continuous {
                         self.counters.fill(0);
                     }
                     let number = self.headings[..=level]
@@ -173,12 +173,32 @@ impl Context {
                         self.expand_blocks(&mut item.blocks, settings);
                     }
                 }
-                BlockKind::Table { header, rows, .. } => {
+                BlockKind::Table {
+                    header,
+                    rows,
+                    attrs,
+                    ..
+                } => {
+                    self.expand_caption(attrs);
                     for cell in header.iter_mut().chain(rows.iter_mut().flatten()) {
                         self.expand_inlines(cell);
                     }
                 }
+                BlockKind::MathBlock { attrs, .. } => self.expand_caption(attrs),
+                BlockKind::FootnoteDefinition { blocks, .. } => {
+                    self.expand_blocks(blocks, settings)
+                }
                 _ => {}
+            }
+        }
+    }
+    fn expand_caption(&self, attrs: &mut Option<Attributes>) {
+        if let Some(attrs) = attrs {
+            if let Some(label) = attrs.id.as_ref().and_then(|id| self.labels.get(id)) {
+                attrs.caption = Some(match &attrs.caption {
+                    Some(caption) => format!("{label}. {caption}"),
+                    None => label.clone(),
+                });
             }
         }
     }

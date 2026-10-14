@@ -28,10 +28,12 @@ Windows está planificado; macOS no es una plataforma soportada actualmente.
 - Consultar outline y backlinks temporales; habilitar wiki links por proyecto.
 - Resolver referencias cruzadas en Preview y PDF, con etiquetas y numeración
   derivadas del documento. Consulta [Markdown Intelligence](docs/MARKDOWN_INTELLIGENCE.md).
+- Componer ecuaciones LaTeX, usar bibliografía `.bib` y CSL, completar citas,
+  generar TOC y notas al pie en Preview continuo/paginado y PDF.
+  Consulta [Academic](docs/ACADEMIC.md) y su [registro de QA](docs/qa/registro-ejecucion.md).
 
-El motor PDF básico está implementado en el core. Su integración en la interfaz
-sigue en curso.
-La bibliografía avanzada, las composiciones de varios documentos y otras
+La exportación PDF está disponible en **File → Export PDF** (`Ctrl+E`).
+Las composiciones de varios documentos y otras
 funciones de la especificación siguen pendientes. Consulta el
 [changelog](CHANGELOG.md) para conocer los cambios implementados y la pestaña
 [Issues de GitHub](https://github.com/ximocm/minmark/issues) para seguir el trabajo pendiente.

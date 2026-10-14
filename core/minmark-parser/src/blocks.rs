@@ -359,15 +359,15 @@ fn decorate(block: &mut Block, source: &str, base: usize) {
                 attach_image_attrs(cell);
             }
         }
-        BlockKind::Quote { blocks } | BlockKind::Callout { blocks, .. } => {
-            attach_attributes(blocks, source, base)
-        }
+        BlockKind::Quote { blocks }
+        | BlockKind::Callout { blocks, .. }
+        | BlockKind::FootnoteDefinition { blocks, .. } => attach_attributes(blocks, source, base),
         BlockKind::List { items, .. } => {
             for item in items {
                 attach_attributes(&mut item.blocks, source, base);
             }
         }
-        BlockKind::CodeBlock { .. } | BlockKind::MathBlock { .. } | BlockKind::Rule => {}
+        BlockKind::CodeBlock { .. } | BlockKind::MathBlock { .. } | BlockKind::Rule | BlockKind::Bibliography { .. } => {}
     }
 }
 

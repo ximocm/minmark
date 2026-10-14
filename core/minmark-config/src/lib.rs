@@ -272,10 +272,12 @@ mod tests {
 }
 
 /// Capa de ajustes escalares en el nivel raíz de TOML o front matter YAML.
-/// Las tablas, colecciones y claves ajenas a Settings no se reinterpretan.
+/// Las tablas, colecciones salvo `bibliography` y claves ajenas a Settings
+/// no se reinterpretan.
 pub fn parse_scalar_layer(source: &str, level: Level) -> ConfigLayer {
     let mut layer = ConfigLayer::new(level);
-    for line in source.lines() {
+    let mut lines = source.lines().peekable();
+    while let Some(line) = lines.next() {
         if level != Level::Document && line.trim_start().starts_with('[') {
             break;
         }
@@ -291,7 +293,24 @@ pub fn parse_scalar_layer(source: &str, level: Level) -> ConfigLayer {
             continue;
         }
         let raw = raw.trim();
-        let value = if let Some(quote) = raw.chars().next().filter(|c| *c == '"' || *c == '\'') {
+        let value = if key == "bibliography" && raw.is_empty() && level == Level::Document {
+            let mut items = Vec::new();
+            while let Some(line) = lines.peek().filter(|line| line.starts_with([' ', '\t']) && line.trim_start().starts_with("- ")) {
+                items.push(Value::Text(line.trim_start()[2..].trim().trim_matches(['\'', '"']).to_owned()));
+                lines.next();
+            }
+            Value::List(items)
+        } else if key == "bibliography" && raw.starts_with('[') {
+            let Some(end) = raw.rfind(']') else {
+                continue;
+            };
+            let items = raw[1..end]
+                .split(',')
+                .filter(|item| !item.trim().is_empty())
+                .map(|item| Value::Text(item.trim().trim_matches(['\'', '"']).to_owned()))
+                .collect();
+            Value::List(items)
+        } else if let Some(quote) = raw.chars().next().filter(|c| *c == '"' || *c == '\'') {
             let Some(end) = raw[1..].find(quote).map(|i| i + 1) else {
                 continue;
             };
@@ -339,5 +358,27 @@ mod scalar_layer_tests {
         assert_eq!(resolved.settings.language, "en");
         assert_eq!(resolved.warnings[0].reason, WarningReason::NotApplicable);
         assert!(!Settings::default().wiki_links);
+    }
+}
+
+#[cfg(test)]
+mod bibliography_tests {
+    use super::*;
+    #[test]
+    fn bibliography_accepts_scalar_arrays_and_yaml_lists_with_scope_precedence() {
+        for source in ["bibliography: [one.bib, two.bib]", "bibliography:\n  - one.bib\n  - 'two.bib'"] {
+            let document = parse_scalar_layer(source, Level::Document);
+            let resolved = resolve(&[document]);
+            assert_eq!(resolved.settings.bibliography, ["one.bib", "two.bib"]);
+        }
+        let resolved = resolve(&[parse_scalar_layer("bibliography: []", Level::Document)]);
+        assert!(resolved.settings.bibliography.is_empty());
+        let mut composition = ConfigLayer::new(Level::Composition);
+        composition.set("bibliography_style", Value::Text("ignored.csl".into()));
+        let project = parse_scalar_layer("bibliography_style = \"project.csl\"", Level::Project);
+        let document = parse_scalar_layer("bibliography_style: document.csl", Level::Document);
+        let resolved = resolve(&[project, composition, document]);
+        assert_eq!(resolved.settings.bibliography_style, "document.csl");
+        assert!(resolved.warnings.iter().any(|w| w.reason == WarningReason::NotApplicable));
     }
 }

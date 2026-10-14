@@ -31,6 +31,10 @@ pub const KEYS: &[(&str, &[Level])] = &[
     ("custom_colors", &[Level::Project]),
     ("custom_callout_types", &[Level::Project]),
     (
+        "bibliography",
+        &[Level::Document, Level::Project, Level::Global],
+    ),
+    (
         "bibliography_style",
         &[Level::Document, Level::Project, Level::Global],
     ),
@@ -99,6 +103,7 @@ pub enum NumberingScope {
     #[default]
     Continuous,
     ByChapter,
+    ByChapterReset,
 }
 
 /// Tamaño de página PDF (§32.3). Unidades: solo milímetros (§32.4).
@@ -216,6 +221,8 @@ pub struct Settings {
     pub custom_callout_types: Vec<String>,
     /// §25.4.
     pub bibliography_style: String,
+    /// §25.1: recursos bibliográficos locales.
+    pub bibliography: Vec<String>,
     /// §27.1.
     pub heading_numbering: bool,
     /// §27.1.
@@ -267,6 +274,7 @@ impl Default for Settings {
             custom_colors: BTreeMap::new(),
             custom_callout_types: Vec::new(),
             bibliography_style: "IEEE".to_string(),
+            bibliography: Vec::new(),
             heading_numbering: false,
             language: "es".into(),
             heading_number_format: HeadingNumberFormat::Hierarchical,
@@ -314,6 +322,12 @@ impl Settings {
                     return Err(WarningReason::InvalidValue);
                 }
                 self.bibliography_style = style;
+            }
+            "bibliography" => {
+                self.bibliography = match value {
+                    Value::Text(path) if !path.trim().is_empty() => vec![path.clone()],
+                    _ => parse_string_list(value)?,
+                }
             }
             "heading_numbering" => self.heading_numbering = as_bool(value)?,
             "language" => {
@@ -491,6 +505,7 @@ fn parse_counter_numbering(value: &Value) -> Result<NumberingScope, WarningReaso
     match as_name(value)?.as_str() {
         "continuous" | "continua" => Ok(NumberingScope::Continuous),
         "by_chapter" | "chapter" | "por_capitulo" => Ok(NumberingScope::ByChapter),
+        "by_chapter_reset" => Ok(NumberingScope::ByChapterReset),
         _ => Err(INVALID),
     }
 }

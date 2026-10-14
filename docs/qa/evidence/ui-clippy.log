@@ -1,0 +1,210 @@
+    Checking minmark-math v0.2.0 (/media/ximo/COSAS/minmark/core/minmark-math)
+    Checking minmark-renderer v0.2.0 (/media/ximo/COSAS/minmark/core/minmark-renderer)
+    Checking minmark-pdf v0.2.0 (/media/ximo/COSAS/minmark/core/minmark-pdf)
+    Checking minmark-ui v0.2.0 (/media/ximo/COSAS/minmark/ui)
+warning: method `label` is never used
+  --> src/editor/mode.rs:28:12
+   |
+18 | impl EditMode {
+   | ------------- method in this implementation
+...
+28 |     pub fn label(self) -> &'static str {
+   |            ^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `label` is never used
+  --> src/menus/actions.rs:94:12
+   |
+58 | impl Command {
+   | ------------ method in this implementation
+...
+94 |     pub fn label(&self) -> &'static str {
+   |            ^^^^^
+
+warning: method `label` is never used
+  --> src/preview/mod.rs:33:12
+   |
+31 | impl ViewMode {
+   | ------------- method in this implementation
+32 |     /// Etiqueta del modo para el menú View (§9): "Editor" / "Split" / "Preview".
+33 |     pub fn label(self) -> &'static str {
+   |            ^^^^^
+
+warning: method `set_results` is never used
+  --> src/search/model.rs:64:12
+   |
+61 | impl SearchModel {
+   | ---------------- method in this implementation
+...
+64 |     pub fn set_results(&mut self, files: Vec<FileMatches>) {
+   |            ^^^^^^^^^^^
+
+warning: very complex type used. Consider factoring parts into `type` definitions
+  --> src/explorer/mod.rs:86:26
+   |
+86 |     on_show_all_changed: Rc<RefCell<Option<Rc<dyn Fn(bool)>>>>,
+   |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#type_complexity
+   = note: `#[warn(clippy::type_complexity)]` on by default
+
+warning: this expression creates a reference which is immediately dereferenced by the compiler
+   --> src/explorer/mod.rs:175:51
+    |
+175 |                         popup_at(&popover, &host, &gesture, x, y);
+    |                                                   ^^^^^^^^ help: change this to: `gesture`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#needless_borrow
+    = note: `#[warn(clippy::needless_borrow)]` on by default
+
+warning: this expression creates a reference which is immediately dereferenced by the compiler
+   --> src/explorer/mod.rs:226:43
+    |
+226 |                 popup_at(&popover, &host, &gesture, x, y);
+    |                                           ^^^^^^^^ help: change this to: `gesture`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#needless_borrow
+
+warning: very complex type used. Consider factoring parts into `type` definitions
+   --> src/explorer/mod.rs:243:34
+    |
+243 |         let on_show_all_changed: Rc<RefCell<Option<Rc<dyn Fn(bool)>>>> =
+    |                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#type_complexity
+
+warning: methods called `new` usually take no `self`
+   --> src/menus/actions.rs:126:12
+    |
+126 |     fn new(&self);
+    |            ^^^^^
+    |
+    = help: consider choosing a less ambiguous name
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#wrong_self_convention
+    = note: `#[warn(clippy::wrong_self_convention)]` on by default
+
+warning: methods called `new` usually return `Self`
+   --> src/menus/actions.rs:126:5
+    |
+126 |     fn new(&self);
+    |     ^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#new_ret_no_self
+    = note: `#[warn(clippy::new_ret_no_self)]` on by default
+
+warning: very complex type used. Consider factoring parts into `type` definitions
+  --> src/quickopen.rs:53:14
+   |
+53 |     on_open: Option<Rc<dyn Fn(String, Option<u32>)>>,
+   |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#type_complexity
+
+warning: consider using `sort_by_key`
+  --> src/quickopen.rs:86:5
+   |
+86 |     results.sort_by(|a, b| b.score.cmp(&a.score));
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#unnecessary_sort_by
+   = note: `#[warn(clippy::unnecessary_sort_by)]` on by default
+help: try
+   |
+86 -     results.sort_by(|a, b| b.score.cmp(&a.score));
+86 +     results.sort_by_key(|a| std::cmp::Reverse(a.score));
+   |
+
+warning: very complex type used. Consider factoring parts into `type` definitions
+   --> src/search/mod.rs:116:14
+    |
+116 |     on_open: RefCell<Option<Box<dyn Fn(String, usize, usize)>>>,
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#type_complexity
+
+warning: very complex type used. Consider factoring parts into `type` definitions
+   --> src/search/mod.rs:117:18
+    |
+117 |     on_replaced: RefCell<Option<Box<dyn Fn(ReplaceSummary)>>>,
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#type_complexity
+
+warning: `minmark-ui` (bin "minmark") generated 14 warnings (run `cargo clippy --fix --bin "minmark" -p minmark-ui -- --no-deps` to apply 2 suggestions)
+warning: doc list item without indentation
+   --> src/editor/tags.rs:221:9
+    |
+221 |     /// Texto: "ñ👍日本" = 12 bytes, 4 chars.
+    |         ^
+    |
+    = help: if this is supposed to be its own paragraph, add a blank line
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#doc_lazy_continuation
+    = note: `#[warn(clippy::doc_lazy_continuation)]` on by default
+help: indent this line
+    |
+221 |     ///    Texto: "ñ👍日本" = 12 bytes, 4 chars.
+    |         +++
+
+warning: doc list item without indentation
+   --> src/editor/tags.rs:266:9
+    |
+266 |     /// (recorte a límites de char).
+    |         ^
+    |
+    = help: if this is supposed to be its own paragraph, add a blank line
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#doc_lazy_continuation
+help: indent this line
+    |
+266 |     ///    (recorte a límites de char).
+    |         +++
+
+warning: doc list item without indentation
+   --> src/editor/tags.rs:304:9
+    |
+304 |     /// orden del parser.
+    |         ^
+    |
+    = help: if this is supposed to be its own paragraph, add a blank line
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#doc_lazy_continuation
+help: indent this line
+    |
+304 |     ///    orden del parser.
+    |         +++
+
+warning: doc list item without indentation
+   --> src/editor/tags.rs:358:9
+    |
+358 |     /// Code/CodeBlock monoespaciados con `bg`; colores distintos entre
+    |         ^
+    |
+    = help: if this is supposed to be its own paragraph, add a blank line
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#doc_lazy_continuation
+help: indent this line
+    |
+358 |     ///    Code/CodeBlock monoespaciados con `bg`; colores distintos entre
+    |         +++
+
+warning: doc list item without indentation
+   --> src/editor/tags.rs:359:9
+    |
+359 |     /// `Palette::LIGHT` y `Palette::DARK`.
+    |         ^
+    |
+    = help: if this is supposed to be its own paragraph, add a blank line
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#doc_lazy_continuation
+help: indent this line
+    |
+359 |     ///    `Palette::LIGHT` y `Palette::DARK`.
+    |         +++
+
+warning: very complex type used. Consider factoring parts into `type` definitions
+   --> src/menus/actions.rs:424:23
+    |
+424 |         let esperado: &[(&str, &[&[(&str, &str)]])] = &[
+    |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#type_complexity
+
+warning: `minmark-ui` (bin "minmark" test) generated 16 warnings (10 duplicates)
+    Finished `dev` profile [unoptimized] target(s) in 1.50s

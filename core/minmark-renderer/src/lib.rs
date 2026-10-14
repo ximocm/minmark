@@ -14,7 +14,14 @@
 //!
 //! La WebView (WebKitGTK 6.0, ADR-001) carga esta página en ISSUE-020.
 
+mod academic;
+mod citations;
+mod math;
 mod references;
+pub mod world;
+pub use academic::resolve_footnotes;
+pub use citations::Bibliography;
+pub use math::{math_svg, namespace_svg, validated_math};
 mod scroll;
 pub use references::{reference_ids, resolve_cross_references};
 
@@ -38,7 +45,20 @@ use std::collections::BTreeMap;
 /// destinos, de modo que un `#fragmento` resuelto por el índice apunta al
 /// `id` emitido aquí.
 pub fn render_preview(ast: &Ast, source: &str, settings: &Settings) -> String {
-    let (ast, diagnostics) = resolve_cross_references(ast, settings);
+    render_preview_with_bibliography(ast, source, settings, &Bibliography::default())
+}
+
+pub fn render_preview_with_bibliography(
+    ast: &Ast,
+    source: &str,
+    settings: &Settings,
+    bibliography: &Bibliography,
+) -> String {
+    let (ast, mut diagnostics) = resolve_cross_references(ast, settings);
+    let (ast, citation_diagnostics) = bibliography.resolve(&ast);
+    diagnostics.extend(citation_diagnostics);
+    let (ast, note_diagnostics) = resolve_footnotes(&ast);
+    diagnostics.extend(note_diagnostics);
     let ids = HeadingIds::for_source(source);
     let mut out = String::new();
     out.push_str("<!DOCTYPE html>\n<html data-theme=\"");
@@ -55,6 +75,28 @@ pub fn render_preview(ast: &Ast, source: &str, settings: &Settings) -> String {
     out.push_str("px\">\n<div class=\"minmark-preview\">");
     for block in &ast.blocks {
         render_block(block, &ids, settings, &mut out);
+    }
+    let toc = render_toc(&ast.blocks, &ids, settings);
+    out = out.replace("<nav class=\"mm-toc\"></nav>", &toc);
+    let notes = ast
+        .blocks
+        .iter()
+        .filter_map(|block| {
+            if let BlockKind::FootnoteDefinition { label, blocks } = &block.kind {
+                Some((label, blocks))
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    if !notes.is_empty() {
+        out.push_str("<section class=\"mm-footnotes\" role=\"doc-endnotes\"><ol>");
+        for (label, blocks) in notes {
+            out.push_str(&format!("<li id=\"mm-note-{label}\">"));
+            render_blocks(blocks, &ids, settings, &mut out);
+            out.push_str(&format!("<a href=\"#mm-note-ref-{label}-1\" aria-label=\"Volver a la referencia\">↩</a></li>"));
+        }
+        out.push_str("</ol></section>");
     }
     for diagnostic in diagnostics {
         out.push_str("<p role=\"status\" class=\"mm-diagnostic\">");
@@ -94,14 +136,35 @@ const BASE_CSS: &str = r#"body { margin: 0; background: var(--mm-bg); color: var
 .mm-figure { display: inline-block; max-width: 100%; }
 .mm-figure > .mm-caption { display: block; }
 .mm-math { font-family: serif; }
+.mm-math svg { vertical-align: middle; }
+.mm-math svg, .mm-math-block svg { max-width: 100%; height: auto; fill: currentColor; }
+.mm-math svg path, .mm-math svg use, .mm-math-block svg path, .mm-math-block svg use { fill: currentColor; }
+.mm-math svg [stroke='#000000'], .mm-math-block svg [stroke='#000000'] { stroke: currentColor; }
 .mm-math-block { text-align: center; margin: 1em 0; font-family: serif; }
 .mm-ref, .mm-citation { color: var(--mm-color-accent); }
 .mm-pagebreak { border-top: 1px dashed var(--mm-rule); margin: 2em 0; }
 .mm-toc { border: 1px dashed var(--mm-rule); padding: 0.5em 1em; border-radius: 4px; }
+.mm-toc ol { list-style: none; padding: 0; margin: 0; }
 "#;
 
 fn render_block(block: &Block, ids: &HeadingIds, settings: &Settings, out: &mut String) {
     match &block.kind {
+        BlockKind::Bibliography { entries, hanging_indent, second_field_align, line_spacing, entry_spacing } => {
+            out.push_str("<section class=\"mm-bibliography\"><h2>");
+            out.push_str(if settings.language.starts_with("es") { "Bibliografía" } else { "References" });
+            out.push_str("</h2>");
+            for (label, content) in entries {
+                let layout = if *second_field_align { "display:grid;grid-template-columns:max-content 1fr;column-gap:.5em;" }
+                    else if *hanging_indent { "padding-left:1.5em;text-indent:-1.5em;" } else { "" };
+                out.push_str(&format!("<div style=\"{layout}line-height:{line_spacing};margin-bottom:{entry_spacing}em\">"));
+                if *second_field_align { out.push_str("<div>"); render_inlines(label, settings, out); out.push_str("</div><div>"); }
+                else if !label.is_empty() { render_inlines(label, settings, out); out.push(' '); }
+                render_inlines(content, settings, out);
+                if *second_field_align { out.push_str("</div>"); }
+                out.push_str("</div>");
+            }
+            out.push_str("</section>");
+        }
         BlockKind::Heading {
             level,
             content,
@@ -117,6 +180,9 @@ fn render_block(block: &Block, ids: &HeadingIds, settings: &Settings, out: &mut 
             out.push_str("</h");
             out.push(char::from(b'0' + level));
             out.push_str(">\n");
+        }
+        BlockKind::Paragraph { content } if matches!(content.as_slice(), [Inline::Substitution(Substitution::Toc)]) => {
+            out.push_str("<nav class=\"mm-toc\"></nav>");
         }
         BlockKind::Paragraph { content } => {
             out.push_str("<p");
@@ -175,7 +241,6 @@ fn render_block(block: &Block, ids: &HeadingIds, settings: &Settings, out: &mut 
             push_span(out, block.span);
             push_id(out, attrs);
             out.push_str(">\n");
-            push_caption(out, attrs);
             out.push_str("<thead><tr>");
             for (i, cell) in header.iter().enumerate() {
                 push_cell(out, "th", cell, aligns.get(i), settings);
@@ -189,6 +254,7 @@ fn render_block(block: &Block, ids: &HeadingIds, settings: &Settings, out: &mut 
                 out.push_str("</tr>\n");
             }
             out.push_str("</tbody>\n</table>\n");
+            push_caption(out, attrs);
         }
         BlockKind::MathBlock { latex, attrs } => {
             // §24: LaTeX de entrada; el motor la compone (ISSUE-018 para PDF).
@@ -224,6 +290,7 @@ fn render_block(block: &Block, ids: &HeadingIds, settings: &Settings, out: &mut 
             push_span(out, block.span);
             out.push_str(" />\n");
         }
+        BlockKind::FootnoteDefinition { .. } => {}
     }
 }
 
@@ -347,6 +414,29 @@ fn color_value(name: &str, settings: &Settings) -> String {
 fn render_inlines(inlines: &[Inline], settings: &Settings, out: &mut String) {
     for inline in inlines {
         match inline {
+            Inline::Styled { content, style } => {
+                out.push_str("<span style=\"");
+                if style.italic { out.push_str("font-style:italic;"); }
+                if style.bold { out.push_str("font-weight:bold;"); }
+                if style.light { out.push_str("font-weight:300;"); }
+                if style.small_caps { out.push_str("font-variant:small-caps;"); }
+                if style.underline { out.push_str("text-decoration:underline;"); }
+                if style.vertical == 1 { out.push_str("vertical-align:super;font-size:.8em;"); }
+                if style.vertical == -1 { out.push_str("vertical-align:sub;font-size:.8em;"); }
+                out.push_str("\">");
+                render_inlines(content, settings, out);
+                out.push_str("</span>");
+            }
+            Inline::FootnoteReference(label) => {
+                let number = label.split('-').next().unwrap_or(label);
+                out.push_str("<sup><a role=\"doc-noteref\" id=\"mm-note-ref-");
+                push_escaped(out, label);
+                out.push_str("\" href=\"#mm-note-");
+                push_escaped(out, number);
+                out.push_str("\">");
+                push_escaped(out, number);
+                out.push_str("</a></sup>");
+            }
             Inline::Text(text) => push_escaped(out, text),
             Inline::Code(code) => {
                 out.push_str("<code>");
@@ -512,8 +602,9 @@ fn plain_text(inlines: &[Inline]) -> String {
     fn walk(inlines: &[Inline], out: &mut String) {
         for inline in inlines {
             match inline {
+                Inline::FootnoteReference(label) => out.push_str(label),
                 Inline::Text(t) | Inline::Code(t) | Inline::Math(t) => out.push_str(t),
-                Inline::Emphasis(c) | Inline::Strong(c) | Inline::Strikethrough(c) => walk(c, out),
+                Inline::Emphasis(c) | Inline::Strong(c) | Inline::Strikethrough(c) | Inline::Styled { content: c, .. } => walk(c, out),
                 Inline::Link { content, .. } | Inline::Image { alt: content, .. } => {
                     walk(content, out)
                 }
@@ -538,14 +629,63 @@ fn plain_text(inlines: &[Inline]) -> String {
 /// Muestra la math o el marcador de sintaxis no soportada (ADR-002, NFR-026:
 /// nunca silenciar, omitir ni deformar).
 fn push_math(out: &mut String, latex: &str) {
-    let translation = minmark_math::translate(latex);
-    if translation.is_supported() {
-        push_escaped(out, latex);
-    } else {
-        out.push_str("<span class=\"mm-math-error\">");
-        push_escaped(out, &translation.marker());
-        out.push_str("</span>");
+    static NEXT_SVG: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    match math_svg(latex) {
+        Ok(svg) => {
+            out.push_str("<span role=\"math\" aria-label=\"");
+            push_escaped(out, latex);
+            out.push_str("\">");
+            let prefix = format!("mm-math-{}-", NEXT_SVG.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+            out.push_str(&namespace_svg(&svg, &prefix));
+            out.push_str("</span>");
+        }
+        Err(marker) => {
+            out.push_str("<span class=\"mm-math-error\" role=\"status\">");
+            push_escaped(out, &marker);
+            out.push_str("</span>");
+        }
     }
+}
+
+fn render_toc(blocks: &[Block], ids: &HeadingIds, settings: &Settings) -> String {
+    fn walk(blocks: &[Block], ids: &HeadingIds, settings: &Settings, out: &mut String) {
+        for block in blocks {
+            match &block.kind {
+                BlockKind::Heading {
+                    level,
+                    content,
+                    attrs,
+                } if *level <= settings.toc_max_level => {
+                    if let Some(id) = ids
+                        .id_for_span(block.span)
+                        .or_else(|| attrs.as_ref().and_then(|a| a.id.as_deref()))
+                    {
+                        out.push_str(&format!(
+                            "<li style=\"margin-left: {}em\"><a href=\"#",
+                            level.saturating_sub(1)
+                        ));
+                        push_escaped(out, id);
+                        out.push_str("\">");
+                        push_escaped(out, &plain_text(content));
+                        out.push_str("</a></li>");
+                    }
+                }
+                BlockKind::Quote { blocks } | BlockKind::Callout { blocks, .. } => {
+                    walk(blocks, ids, settings, out)
+                }
+                BlockKind::List { items, .. } => {
+                    for item in items {
+                        walk(&item.blocks, ids, settings, out);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut out = String::from("<nav class=\"mm-toc\" aria-label=\"Tabla de contenidos\"><ol>");
+    walk(blocks, ids, settings, &mut out);
+    out.push_str("</ol></nav>");
+    out
 }
 
 /// Escapa texto o atributos HTML (§7.2: nada del documento sale crudo).
@@ -687,7 +827,7 @@ mod tests {
 
         let out = html("Ver {{ref:fig:arq}} y {{toc}}.\n");
         assert!(out.contains("Referencia inexistente: fig:arq"));
-        assert!(out.contains("<nav class=\"mm-toc\"></nav>"));
+        assert!(out.contains("<nav class=\"mm-toc\" aria-label=\"Tabla de contenidos\"><ol></ol></nav>"));
     }
 
     #[test]

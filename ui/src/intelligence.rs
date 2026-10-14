@@ -99,6 +99,68 @@ pub struct Completion {
     pub label: String,
 }
 
+/// Reutiliza el highlighting del parser para excluir código, escapes y comentarios.
+pub fn citation_completions(
+    source: &str,
+    cursor: usize,
+    bibliography: &minmark_renderer::Bibliography,
+) -> Vec<Completion> {
+    let Some(prefix) = source.get(..cursor) else {
+        return Vec::new();
+    };
+    let Some(at) = prefix.rfind('@') else {
+        return Vec::new();
+    };
+    let Some(open) = prefix[..at].rfind('[') else {
+        return Vec::new();
+    };
+    let before = &prefix[open + 1..at];
+    if (!before.trim().is_empty() && !before.trim_end().ends_with(';'))
+        || prefix[at + 1..].contains([',', ';', '[', ']', '\n', '\r'])
+    {
+        return Vec::new();
+    }
+    let start = at + 1;
+    let mut end = cursor;
+    for (offset, ch) in source[cursor..].char_indices() {
+        if ch.is_alphanumeric() || matches!(ch, ':' | '.' | '_' | '-' | '*' | '+' | '/' | '!') {
+            end = cursor + offset + ch.len_utf8();
+        } else {
+            break;
+        }
+    }
+    let mut probe = source.to_owned();
+    probe.replace_range(start..end, "mmprobe");
+    let after = start + "mmprobe".len();
+    if !probe[after..]
+        .split('\n')
+        .next()
+        .unwrap_or("")
+        .contains(']')
+    {
+        probe.insert(after, ']');
+    }
+    if !minmark_parser::highlight(&probe).iter().any(|token| {
+        token.kind == minmark_parser::HighlightKind::Citation
+            && token.span.start as usize <= at
+            && at < token.span.end as usize
+    }) {
+        return Vec::new();
+    }
+    bibliography
+        .suggestions(&source[start..cursor])
+        .into_iter()
+        .map(|(text, label)| Completion {
+            span: Span {
+                start: start as u32,
+                end: end as u32,
+            },
+            text,
+            label,
+        })
+        .collect()
+}
+
 /// El scanner conserva el contexto (código/comentarios/escapes). El carácter
 /// provisional permite consultar también destinos vacíos e incompletos.
 pub fn completion_context(
@@ -454,5 +516,39 @@ mod tests {
         std::fs::remove_file(f.0.join("origen.md")).unwrap();
         s.index.refresh().unwrap();
         assert!(s.backlinks().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod citation_tests {
+    use super::*;
+    fn bibliography() -> minmark_renderer::Bibliography {
+        minmark_renderer::Bibliography::from_sources(&[("refs.bib".into(), include_str!("../../docs/qa/fixtures/references.bib").into())], None)
+    }
+    #[test]
+    fn citation_contexts_exclude_code_escapes_comments_and_locators() {
+        let bibliography = bibliography();
+        for source in ["`[@Sm`", "```md\n[@Sm", "\\[@Sm", "<!-- [@Sm -->", "mail@Sm", "[@smith2025, p. Sm"] {
+            let cursor = source.find("Sm").unwrap() + 2;
+            assert!(citation_completions(source, cursor, &bibliography).is_empty(), "{source}");
+        }
+        for source in ["[@Sm", "[@Sm]", "[@jones2024; @Sm]", "[@2025]", "[@Energy]"] {
+            let cursor = source.trim_end_matches(']').len();
+            assert_eq!(citation_completions(source, cursor, &bibliography)[0].text, "smith2025", "{source}");
+        }
+    }
+    #[test]
+    fn completion_preserves_unicode_crlf_locator_and_single_undo() {
+        use minmark_document::{Document, Editor, Range};
+        let source = "β [@Sm, p. 42]\r\n";
+        let cursor = source.find(", p.").unwrap();
+        let completion = citation_completions(source, cursor, &bibliography()).remove(0);
+        let mut editor = Editor::new(Document::from_text(None, source.into()));
+        editor.replace(Range::new(editor.position_of(completion.span.start as usize), editor.position_of(completion.span.end as usize)), &completion.text).unwrap();
+        assert_eq!(editor.document().content(), "β [@smith2025, p. 42]\r\n");
+        editor.undo();
+        assert_eq!(editor.document().content(), source);
+        editor.redo();
+        assert_eq!(editor.document().content(), "β [@smith2025, p. 42]\r\n");
     }
 }

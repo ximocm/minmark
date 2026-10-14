@@ -1,0 +1,44 @@
+   Compiling minmark-math v0.2.0 (/media/ximo/COSAS/minmark/core/minmark-math)
+   Compiling minmark-renderer v0.2.0 (/media/ximo/COSAS/minmark/core/minmark-renderer)
+   Compiling minmark-pdf v0.2.0 (/media/ximo/COSAS/minmark/core/minmark-pdf)
+   Compiling minmark-ui v0.2.0 (/media/ximo/COSAS/minmark/ui)
+warning: method `label` is never used
+  --> src/editor/mode.rs:28:12
+   |
+18 | impl EditMode {
+   | ------------- method in this implementation
+...
+28 |     pub fn label(self) -> &'static str {
+   |            ^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `label` is never used
+  --> src/menus/actions.rs:94:12
+   |
+58 | impl Command {
+   | ------------ method in this implementation
+...
+94 |     pub fn label(&self) -> &'static str {
+   |            ^^^^^
+
+warning: method `label` is never used
+  --> src/preview/mod.rs:33:12
+   |
+31 | impl ViewMode {
+   | ------------- method in this implementation
+32 |     /// Etiqueta del modo para el menú View (§9): "Editor" / "Split" / "Preview".
+33 |     pub fn label(self) -> &'static str {
+   |            ^^^^^
+
+warning: method `set_results` is never used
+  --> src/search/model.rs:64:12
+   |
+61 | impl SearchModel {
+   | ---------------- method in this implementation
+...
+64 |     pub fn set_results(&mut self, files: Vec<FileMatches>) {
+   |            ^^^^^^^^^^^
+
+warning: `minmark-ui` (bin "minmark") generated 4 warnings
+    Finished `dev` profile [unoptimized] target(s) in 2.91s

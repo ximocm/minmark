@@ -1,0 +1,14 @@
+   Compiling minmark-ui v0.2.0 (/media/ximo/COSAS/minmark/ui)
+    Finished `test` profile [unoptimized] target(s) in 2.52s
+     Running unittests src/main.rs (/tmp/minmark-phase5-target/debug/deps/minmark-7ff28e148699005a)
+
+running 1 test
+test gtk_integration_tests::gtk_navigation_outline_completion_and_dirty_buffers ... libEGL warning: failed to get driver name for fd -1
+
+libEGL warning: MESA-LOADER: failed to retrieve device information
+
+libEGL warning: failed to get driver name for fd -1
+
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 93 filtered out; finished in 5.11s

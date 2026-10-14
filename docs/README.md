@@ -19,6 +19,8 @@ consulta el [changelog](../CHANGELOG.md). El trabajo pendiente se sigue en
 GitHub Issues, con milestones para las fases del desarrollo.
 
 - [Markdown Intelligence](MARKDOWN_INTELLIGENCE.md): navegación, sugerencias y referencias cruzadas.
+- [Academic](ACADEMIC.md): matemáticas, bibliografía/CSL, notas, numeración y TOC.
+- [QA de fase 5](qa/README.md): fixtures, casos y registro de ejecución.
 - [Arquitectura del core](../core/README.md): crates, interfaces y dependencias.
 - [ADR-001: tecnología de UI](adr/001-tecnologia-ui.md).
 - [ADR-002: LaTeX a Typst](adr/002-latex-a-typst.md).

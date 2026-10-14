@@ -85,7 +85,7 @@ pub(crate) fn block_highlights(blocks: &[Block], out: &mut Vec<Highlight>) {
             }
             BlockKind::Rule => Some(HighlightKind::Rule),
             // Los párrafos no son sintaxis; su contenido lleva tokens propios.
-            BlockKind::Paragraph { .. } => None,
+            BlockKind::Paragraph { .. } | BlockKind::FootnoteDefinition { .. } | BlockKind::Bibliography { .. } => None,
         };
         if let Some(kind) = kind {
             out.push(Highlight {

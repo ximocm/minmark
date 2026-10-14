@@ -91,3 +91,21 @@ En `core/minmark-pdf/` o `core/minmark-math/`:
 - ISSUE-004 (identificador histórico; véase el [historial técnico](../DEVELOPMENT_HISTORY.md)).
 - SRS §24 Matemáticas
 - SRS §5.3 Motor PDF
+
+## Enmienda — 2026-10-14, fase 5
+
+Se conserva la entrada y el subconjunto aceptados. La emisión ajusta las
+fracciones a `frac(a, b)` para preservar su agrupación y usa `integral` como
+nombre del símbolo de integral en Typst 0.13. Las traducciones ilustrativas
+anteriores no describen estos dos detalles de la implementación actual.
+
+Preview compone las fórmulas con el mismo Typst y las mismas fuentes que PDF,
+en lugar de mostrar el texto de la traducción. `typst-svg` 0.13 serializa esa
+composición para WebKit; no añade otro motor matemático ni otro traductor. El
+world que recibe fuente y recursos en memoria se comparte en
+`minmark-renderer`, manteniendo PDF como consumidor. Preview paginado y PDF
+comparten el documento compuesto para notas y páginas del TOC.
+
+Los SVG reciben IDs distintos al insertarse juntos en HTML. Los fallos de
+traducción o composición producen marcadores visibles y avisos de exportación.
+Verificación y límites: [registro de QA](../qa/registro-ejecucion.md), ACA-01/05/07.

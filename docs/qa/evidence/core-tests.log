@@ -1,0 +1,463 @@
+   Compiling minmark-math v0.2.0 (/media/ximo/COSAS/minmark/core/minmark-math)
+   Compiling minmark-renderer v0.2.0 (/media/ximo/COSAS/minmark/core/minmark-renderer)
+   Compiling minmark-pdf v0.2.0 (/media/ximo/COSAS/minmark/core/minmark-pdf)
+   Compiling minmark-fs v0.2.0 (/media/ximo/COSAS/minmark/core/minmark-fs)
+    Finished `test` profile [unoptimized] target(s) in 3.48s
+     Running unittests src/lib.rs (/tmp/minmark-phase5-target/debug/deps/minmark_config-6b45c92b61a16d27)
+
+running 19 tests
+test settings::tests::apply_rechaza_valores_invalidos ... ok
+test scalar_layer_tests::idioma_y_wiki_respetan_ambitos_y_precedencia ... ok
+test bibliography_tests::bibliography_accepts_scalar_arrays_and_yaml_lists_with_scope_precedence ... ok
+test settings::tests::apply_reconoce_valores_textuales_insensible_a_mayusculas ... ok
+test settings::tests::colecciones_de_colores_y_callouts ... ok
+test settings::tests::defaults_son_los_de_58_2 ... ok
+test settings::tests::cabeceras_y_pies_vacios_son_none ... ok
+test settings::tests::margenes_por_defecto_uniformes_y_configurables ... ok
+test settings::tests::page_size_nominal_y_custom ... ok
+test tests::clave_desconocida_se_ignora_con_aviso ... ok
+test tests::nivel_no_aplicable_se_ignora_con_aviso ... ok
+test tests::precedencia_doc_sobre_proj_sobre_global_sobre_defecto ... ok
+test tests::todas_las_claves_declaradas_son_aplicables ... ok
+test tests::valor_invalido_avisa_y_pasa_al_siguiente_nivel ... ok
+test theme::tests::deteccion_gsettings ... ok
+test theme::tests::deteccion_gtk_theme ... ok
+test theme::tests::deteccion_kde ... ok
+test theme::tests::resolucion_light_dark_y_system ... ok
+test theme::tests::tema_configurable_en_los_tres_niveles ... ok
+
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/tmp/minmark-phase5-target/debug/deps/minmark_document-d5ce1373b7e151ee)
+
+running 62 tests
+test anchors::tests::busqueda_exacta_de_ancla ... ok
+test anchors::tests::citas_y_listas_reciben_ancla ... ok
+test anchors::tests::headings_atx_27_1 ... ok
+test anchors::tests::headings_setext_con_parrafo_completo ... ok
+test anchors::tests::ids_automaticos_slug_y_duplicados ... ok
+test anchors::tests::ids_explicitos_26_1_y_duplicados ... ok
+test anchors::tests::posiciones_y_spans_con_crlf ... ok
+test attrs::tests::atributos_al_final_del_texto_26_1 ... ok
+test attrs::tests::caption_con_escapes ... ok
+test attrs::tests::formas_invalidas ... ok
+test attrs::tests::formas_validas ... ok
+test document::tests::detecta_line_endings ... ok
+test document::tests::documento_nuevo_es_lf_sin_modificar ... ok
+test document::tests::from_text_detecta_crlf_y_preserva_contenido ... ok
+test document::tests::replace_content_marca_modificado_solo_si_cambia ... ok
+test document::tests::save_as_asigna_path ... ok
+test editor::tests::edicion_nueva_vacia_el_redo ... ok
+test editor::tests::historial_compartido_entre_modos ... ok
+test editor::tests::insert_delete_y_replace ... ok
+test editor::tests::operacion_vacia_no_entra_en_historial ... ok
+test editor::tests::posiciones_invalidas_son_error ... ok
+test editor::tests::posiciones_unicode_y_multilinea ... ok
+test editor::tests::replace_all_con_solape_es_error ... ok
+test editor::tests::replace_all_es_una_sola_transaccion ... ok
+test editor::tests::replace_all_multilinea_con_seleccion_8_6 ... ok
+test editor::tests::replace_all_ordena_los_rangos ... ok
+test editor::tests::undo_redo_restauran_contenido_y_cursor ... ok
+test position::tests::orden_y_normalizacion ... ok
+test references::footnote_link_tests::footnotes_are_not_link_definitions_but_links_inside_notes_remain ... ok
+test references::tests::codigo_y_comentarios_no_son_referencias ... ok
+test references::tests::definiciones_de_enlace_por_referencia ... ok
+test references::tests::definiciones_y_usos_por_referencia_16 ... ok
+test references::tests::definiciones_y_usos_respetan_codigo_y_comentarios ... ok
+test references::tests::destinos_codificados_se_marcan ... ok
+test references::tests::enlaces_anidados_y_con_paréntesis ... ok
+test references::tests::enlaces_e_imagenes_con_titulo_y_fragmento ... ok
+test references::tests::etiquetas_normalizadas_y_atajo_fuera ... ok
+test references::tests::front_matter_yaml_21 ... ok
+test references::tests::reescritura_preserva_forma_titulo_y_fragmento ... ok
+test references::tests::toml_strings_incluidas_en_listas ... ok
+test references::tests::wiki_links_19_3 ... ok
+test regex::tests::clases_rangos_y_negacion ... ok
+test regex::tests::cuantificadores_codiciosos ... ok
+test regex::tests::escapes_de_clase_y_aserciones ... ok
+test regex::tests::grupos_alternancia_y_prioridad ... ok
+test regex::tests::grupos_de_captura_se_registran ... ok
+test regex::tests::literales_y_puntuacion_escapada ... ok
+test regex::tests::patrones_invalidos_son_error_sin_panic ... ok
+test regex::tests::punto_no_cruza_saltos_de_linea ... ok
+test regex::tests::sin_distinguir_mayusculas ... ok
+test search::tests::coincidencias_vacias_se_descartan ... ok
+test search::tests::expand_replacement_expande_grupos ... ok
+test search::tests::literal_case_sensitive_e_insensible ... ok
+test search::tests::navegacion_desde_cursor_vacio ... ok
+test search::tests::navegacion_siguiente_y_anterior_con_wrap ... ok
+test search::tests::nivel_texto_respeta_case_y_palabra ... ok
+test search::tests::palabra_entera ... ok
+test search::tests::nivel_texto_y_grupos_de_captura ... ok
+test search::tests::regex_invalida_es_error_sin_panic ... ok
+test search::tests::regex_con_subconjunto_documentado ... ok
+test regex::tests::presupuesto_de_simulacion_acotado ... ok
+test editor::tests::latencia_de_edicion_en_20mb ... ok
+
+test result: ok. 62 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.40s
+
+     Running unittests src/lib.rs (/tmp/minmark-phase5-target/debug/deps/minmark_fs-61502868fbcfd8f4)
+
+running 119 tests
+test atomic::tests::hijo_muere_entre_staging_y_commit ... ok
+test fuzzy::tests::bonus_inicio_palabra_segmento_y_camel ... ok
+test fuzzy::tests::bonus_consecutivas_y_penalizacion_por_huecos ... ok
+test fuzzy::tests::desempate_estable_por_orden_del_indice ... ok
+test fuzzy::tests::filtros_14_4_con_show_all_files ... ok
+test fuzzy::tests::linea_de_heading_distingue_por_nivel ... ok
+test fuzzy::tests::modo_headings_de_todo_el_proyecto_41 ... ok
+test fuzzy::tests::parse_query_detecta_modos_y_linea_41 ... ok
+test fuzzy::tests::modo_headings_del_documento_actual_41 ... ok
+test fuzzy::tests::modo_linea_sobre_archivo_activo_y_elegido_41 ... ok
+test fuzzy::tests::linea_de_heading_con_fences_y_front_matter ... ok
+test fuzzy::tests::ranking_recencia_supera_a_profundidad ... ok
+test fuzzy::tests::ranking_prefiere_nombre_de_archivo_y_penaliza_profundidad ... ok
+test fuzzy::tests::sin_resultados_cuando_no_es_subsecuencia ... ok
+test fuzzy::tests::subsecuencia_case_insensitive_con_posiciones ... ok
+test fuzzy::tests::tipos_documentales_14_4 ... ok
+test ignore::tests::basicos_comentarios_y_negacion ... ok
+test ignore::tests::anclado_con_barra_interna ... ok
+test ignore::tests::glob_conoce_los_limites ... ok
+test ignore::tests::la_ultima_regla_decide ... ok
+test ignore::tests::comodines_por_segmento ... ok
+test ignore::tests::sin_gitignore_no_se_ignora_nada ... ok
+test ignore::tests::solo_directorios_con_barra_final ... ok
+test fuzzy::tests::resolve_heading_line_desde_disco ... ok
+test index::tests::default_path_fuera_del_proyecto_45_1 ... ok
+
+running 1 test
+test atomic::tests::hijo_muere_entre_staging_y_commit ... test index::tests::serializacion_tolerante_y_caracteres_especiales ... ok
+test index::tests::construccion_con_headings_y_links_45 ... ok
+test index::tests::los_ignorados_por_gitignore_no_se_indexan_14_6 ... ok
+test local::tests::create_new_es_lf_sin_path ... ok
+test fuzzy::tests::techo_de_resultados_100_47_5 ... ok
+test atomic::tests::write_atomic_preserva_permisos_del_destino ... ok
+test atomic::tests::drop_sin_commit_conserva_destino_y_borra_temporal ... ok
+test local::tests::open_utf8_invalido_da_error_claro ... ok
+test local::tests::open_utf8_valido_preserva_contenido ... ok
+test index::tests::incremental_solo_relee_lo_cambiado_45 ... ok
+test local::tests::guardar_recrea_archivo_borrado_externamente ... ok
+test local::tests::guardado_atomico_no_deja_temporales ... ok
+test local::tests::save_sin_path_da_missing_path ... ok
+test local::tests::save_confirmed_sobrescribe_el_cambio_externo_tras_confirmar ... ok
+test atomic::tests::write_atomic_crea_y_actualiza_sin_temporales ... ok
+test ops::tests::crear_y_no_sobrescribir_3_7 ... ok
+test local::tests::rutas_fuera_del_proyecto_se_rechazan ... ok
+test local::tests::cambio_externo_bloquea_el_guardado ... ok
+test ops::tests::duplicar_numera_y_no_sobrescribe_18_3 ... ok
+test index::tests::persistencia_entre_sesiones_y_reconstruccion_45_45_1 ... ok
+test ops::tests::fallo_a_mitad_revuelve_todo_16 ... ok
+test ops::tests::import_markdown_copia_sin_tocar_el_original_15 ... ok
+test ops::tests::move_entry_valida_48_y_no_sobrescribe ... ok
+test atomic::tests::crash_simulado_no_corrompe_el_original ... ok
+test ops::tests::ruta_relativa_17 ... ok
+test ops::tests::referencia_no_actualizable_aborta_sin_efectos_16 ... ok
+test ops::tests::wiki_links_activos_por_mdproject_toml ... ok
+test ops::tests::wiki_ambiguo_aborta_16 ... ok
+test ops::tests::destinos_con_esquema_o_ancla_no_son_rutas ... ok
+test local::tests::preserva_lf_y_crlf_al_guardar ... ok
+test local::tests::save_as_a_nuevo_path_y_save_posterior ... ok
+test ops::tests::ignorados_por_gitignore_fuera_del_analisis_14_6 ... ok
+test paths::tests::read_dir_entries_marca_symlinks_y_orden_estable ... ok
+test paths::tests::resolve_rechaza_fuera_del_proyecto ... ok
+test paths::tests::resolve_relativas_y_destino_inexistente_dentro ... ok
+test paths::tests::walk_tree_no_desciende_en_carpeta_enlazada ... ok
+test paths::tests::resolve_rechaza_symlink_que_apunta_fuera_y_acepta_el_interno ... ok
+test paths::tests::walk_tree_termina_con_ciclo_de_symlink ... ok
+test resolve::object_target_tests::objetos_indexados_y_duplicados_comparten_resolucion ... ok
+test resolve::tests::buffers_abiertos_con_cambios_sin_guardar_prioridad ... ok
+test ops::tests::rename_actualiza_enlaces_desde_subcarpetas_17 ... ok
+test resolve::tests::archivos_binarios_sin_fragmento_son_destinos_locales ... ok
+test resolve::tests::buffers_y_fragmentos_respetan_limites_e_ignorados_14_6_48 ... ok
+test resolve::tests::definiciones_de_un_buffer_sin_guardar ... ok
+test resolve::tests::destinos_externos_no_consultan_la_red_3_4 ... ok
+test resolve::tests::ids_duplicados_y_setext_26_1 ... ok
+test resolve::tests::fragmentos_y_archivo_con_fragmento_19_2 ... ok
+test resolve::tests::enlaces_por_referencia_16 ... ok
+test ops::tests::wiki_links_solo_si_activos_19_3 ... ok
+test ops::tests::front_matter_bib_y_mdproject_toml ... ok
+test resolve::tests::porcentajes_literales_junto_a_unicode_no_provocan_panic ... ok
+test resolve::tests::inexistentes_fuera_del_proyecto_e_ignorados_14_6_48 ... ok
+test resolve::tests::refleja_renombrados_y_borrados_tras_refresh ... ok
+test resolve::tests::resolver_no_modifica_documentos_6_1 ... ok
+test ops::tests::mover_a_mayor_profundidad_reescribe_los_fuera ... ok
+test ops::tests::papelera_xdg_con_info_14_9 ... ok
+test resolve::tests::rutas_relativas_desde_el_archivo_que_contiene_la_referencia_17 ... ok
+test search::tests::alcance_por_defecto_solo_markdown_y_ampliable ... ok
+test search::tests::no_utf8_se_salta_con_nota_12_5 ... ok
+test resolve::tests::unicode_espacios_y_crlf ... ok
+test resolve::tests::symlinks_externos_no_reutilizan_anclas_del_indice_48 ... ok
+test search::tests::cancelacion_detiene_la_busqueda_sin_done ... ok
+test search::tests::resultados_con_contexto_de_linea_y_offsets ... ok
+test search::tests::opciones_case_word_y_regex_usan_matcher_40_2 ... ok
+test search::tests::excluye_gitignore_por_defecto_14_6 ... ok
+test snapshots::tests::default_dir_es_absoluto_y_termina_en_minmark_snapshots ... ok
+test snapshots::tests::default_dir_logica_controlada ... ok
+test resolve::tests::wiki_por_nombre_con_candidato_unico_o_ambiguo_19_3 ... ok
+test search::tests::search_index_usa_las_entradas_del_indice ... ok
+test search::tests::apply_es_all_or_nothing_ante_error_de_escritura ... ok
+test snapshots::tests::create_y_listar_snapshots ... ok
+test snapshots::tests::document_no_utf8_es_error ... ok
+test tests::extensiones_markdown_de_12_2 ... ok
+test tests::limite_de_snapshots_en_el_borde ... ok
+test snapshots::tests::delete_permanente_idempotente_y_clear_completo ... ok
+test snapshots::tests::limite_alcanzado_detiene_la_creacion ... ok
+test snapshots::tests::list_ignora_entradas_que_no_son_snapshots ... ok
+test watch::tests::borro_de_los_ficheros_del_directorio_tras_desaparecer_el_directorio ... ok
+test snapshots::tests::reapertura_continua_los_ids_sin_sobrescribir ... ok
+test watch::tests::detecta_borrado_externo ... ok
+test snapshots::tests::restos_de_crash_no_bloquean_el_almacen ... ok
+test watch::tests::poll_sin_eventos_es_vacio_y_no_bloquea ... ok
+test search::tests::resultados_obsoletos_no_se_sobrescriben_12_7 ... ok
+test watch::tests::watch_tree_detecta_altas_bajas_y_modificaciones ... ok
+test watch::tests::watch_tree_vigila_los_subdirectorios_nuevos ... ok
+test watch::tests::watch_tree_renombrar_dentro_es_baja_mas_alta ... ok
+test watch::tests::detecta_modificacion_externa_coalescida ... ok
+test watch::tests::unwatch_deja_de_notificar ... ok
+test watch::tests::detecta_reemplazo_atomico_por_rename ... ok
+test search::tests::reemplazo_individual_por_fichero_y_global ... ok
+test search::tests::undo_masivo_revierte_todos_los_ficheros_de_una_vez ... ok
+test fuzzy::tests::rendimiento_con_10k_entradas_47_5 ... ok
+test index::tests::rendimiento_miles_de_archivos_47_5 ... ok
+test search::tests::busqueda_incremental_sobre_1000_ficheros ... ok
+
+test result: ok. 119 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running tests/pipeline.rs (/tmp/minmark-phase5-target/debug/deps/pipeline-bc3a56a2d1deeabe)
+
+running 1 test
+test abrir_parsear_y_renderizar ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/safety.rs (/tmp/minmark-phase5-target/debug/deps/safety-57400de11708a99e)
+
+running 1 test
+test cambios_externos_se_notifican_sin_recargar_el_buffer ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/tmp/minmark-phase5-target/debug/deps/minmark_math-ae98d771b6e001a6)
+
+running 7 tests
+test tests::comentarios_y_escapes ... ok
+test compound_tests::groups_fractions_and_scripts_do_not_merge_adjacent_numbers ... ok
+test tests::fracciones_raices_y_scripts ... ok
+test tests::funciones_limite_y_acentos ... ok
+test tests::matrices ... ok
+test tests::no_soportado_produce_marcador ... ok
+test tests::operadores_grandes_y_griegas ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/tmp/minmark-phase5-target/debug/deps/minmark_parser-d6c76c89aba6c636)
+
+running 79 tests
+test blocks::tests::atributos_fuera_de_posicion_son_texto_literal ... ok
+test blocks::tests::callout_tipo_desconocido_es_texto_literal ... ok
+test blocks::tests::callout_anidado_y_con_markdown ... ok
+test blocks::tests::atributos_de_heading_tabla_ecuacion_e_imagen ... ok
+test blocks::tests::callouts_tipicos ... ok
+test blocks::tests::ecuacion_de_bloque ... ok
+test blocks::tests::ecuacion_sin_cierre_es_texto_literal ... ok
+test blocks::tests::front_matter_yaml_se_extrae ... ok
+test blocks::tests::sin_cierre_no_hay_front_matter ... ok
+test blocks::tests::spans_cubren_el_fuente_global ... ok
+test blocks::tests::sustituciones_y_callouts_en_contexto ... ok
+test events::tests::codigo_no_interpreta_extensiones ... ok
+test events::tests::color_inline_en_texto ... ok
+test events::tests::enlaces_e_imagenes ... ok
+test events::tests::extensiones_fuera_de_sitio_son_texto_literal ... ok
+test events::tests::heading_y_parrafo_con_spans ... ok
+test events::tests::html_nunca_se_interpreta ... ok
+test events::tests::listas_y_citas_anidadas ... ok
+test events::tests::tabla_gfm_con_alineaciones ... ok
+test events::tests::tareas_y_strikethrough_gfm ... ok
+test highlight::tests::bloques_e_inlines_basicos ... ok
+test highlight::tests::bloques_extendidos_y_front_matter ... ok
+test highlight::tests::codigo_primero_no_produce_tokens_de_extension ... ok
+test highlight::tests::extensiones_inline_con_spans_exactos ... ok
+test inlines::tests::character_references_producen_texto_literal ... ok
+test highlight::tests::tokens_ordenados_y_no_solapados_en_inicio ... ok
+test inlines::tests::citas_pandoc ... ok
+test inlines::tests::colores_invalidos_o_con_nombre_desconocido ... ok
+test inlines::tests::colores_validos ... ok
+test inlines::tests::escapes_7_4_6 ... ok
+test inlines::tests::math_inline ... ok
+test inlines::tests::saltos_de_linea ... ok
+test inlines::tests::sustituciones_vocabulario_cerrado ... ok
+test inlines::tests::wiki_links_solo_si_estan_activados ... ok
+test visual::tests::atributos_de_tabla_ocultos ... ok
+test visual::tests::callout_con_titulo_oculta_marcadores_y_estila_linea ... ok
+test intelligence_tests::destinos_de_objetos_y_outline_excluyen_codigo_y_comentarios ... ok
+test visual::tests::bloques_sin_representacion_quedan_como_markdown ... ok
+test visual::tests::callout_no_cerrado_es_bloque_markdown_editable ... ok
+test visual::tests::callout_sin_titulo ... ok
+test visual::tests::code_block_no_interpreta_contenido ... ok
+test visual::tests::code_block_oculta_fences_e_info_string ... ok
+test visual::tests::code_span_no_interpreta_extensiones ... ok
+test visual::tests::code_span_oculta_backticks ... ok
+test visual::tests::color_nombre_desconocido_es_texto_literal ... ok
+test visual::tests::code_block_indentado_solo_contenido ... ok
+test visual::tests::color_personalizado_usa_slot_propio ... ok
+test visual::tests::heading_setext_subrayado_es_sintaxis ... ok
+test visual::tests::heading_niveles_1_a_6 ... ok
+test visual::tests::callout_tipos_integrados_y_desconocidos ... ok
+test visual::tests::heading_atx_con_atributos_7_4_3 ... ok
+test visual::tests::elementos_cubren_bloques_anidados ... ok
+test visual::tests::heading_atx_oculta_marcadores_y_estila_contenido ... ok
+test visual::tests::heading_llaves_no_atributo_no_se_ocultan ... ok
+test visual::tests::imagen_oculta_sintaxis_y_estila_alt ... ok
+test visual::tests::imagen_con_atributos_ocultos ... ok
+test visual::tests::imagenes_dentro_de_links ... ok
+test visual::tests::colores_tres_formas_7_4_4 ... ok
+test visual::tests::link_con_corchetes_y_code_span_en_el_texto ... ok
+test visual::tests::link_con_texto_anidado ... ok
+test visual::tests::lista_anidada_conserva_sangria_y_nivel ... ok
+test visual::tests::enfasis_anidado_no_solapa_marcadores ... ok
+test visual::tests::marcadores_sin_parsear_no_producen_tramos ... ok
+test visual::tests::lista_simple_oculta_marcadores ... ok
+test visual::tests::link_oculta_sintaxis_y_estila_texto ... ok
+test visual::tests::lista_con_codigo_interno_no_toca_el_codigo ... ok
+test visual::tests::marcador_suelto_es_bloque_markdown_editable ... ok
+test visual::tests::lista_numerada_desde_n ... ok
+test visual::tests::multi_byte_no_rompe_offsets ... ok
+test visual::tests::negrita_y_cursiva_ocultan_solo_marcadores ... ok
+test visual::tests::quote_anidada_oculta_ambos_marcadores ... ok
+test visual::tests::quote_oculta_marcadores ... ok
+test visual::tests::quote_con_linea_de_continuacion_y_contenido_inline ... ok
+test visual::tests::tabla_con_alineaciones_gfm ... ok
+test visual::tests::tabla_malformada_es_bloque_markdown_editable ... ok
+test visual::tests::tabla_oculta_barras_y_estila_cabecera ... ok
+test visual::tests::tareas_visibles_con_estilo_propio ... ok
+test visual::tests::sintaxis_rota_es_bloque_markdown_editable ... ok
+test visual::tests::tabla_desalineada_oculta_igual_las_barras ... ok
+
+test result: ok. 79 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/anclas.rs (/tmp/minmark-phase5-target/debug/deps/anclas-fd09fad0b03b3857)
+
+running 1 test
+test cada_heading_del_ast_tiene_su_nodo_escaneado_26 ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/dialecto.rs (/tmp/minmark-phase5-target/debug/deps/dialecto-6dcb25f604fd9db8)
+
+running 16 tests
+test atributos_completos_con_caption ... ok
+test atributos_de_imagen ... ok
+test atributos_fuera_de_posicion_son_literales ... ok
+test citas_estilo_pandoc ... ok
+test code_primero_sobre_todo ... ok
+test callouts_integrados ... ok
+test colores_invalidos_son_literales ... ok
+test colores_semanticos ... ok
+test cross_refs_y_sustituciones ... ok
+test el_parseo_no_modifica_el_fuente ... ok
+test escapes_7_4_6 ... ok
+test llamadas_validas_con_opciones_de_proyecto ... ok
+test math_latex_inline_y_bloque ... ok
+test sustituciones_fuera_de_vocabulario_son_literales ... ok
+test tablas_gfm_y_code_fences ... ok
+test wiki_links_desactivados_por_defecto ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/tmp/minmark-phase5-target/debug/deps/minmark_pdf-ea61912bba8019e0)
+
+running 15 tests
+test tests::custom_usa_sus_dimensiones ... ok
+test tests::el_defecto_es_a4 ... ok
+test generate::tests::sustituciones ... ok
+test tests::tamaños_nominales_en_milimetros ... ok
+test generate::tests::preambulo_con_config_basica_58_2 ... ok
+test generate::tests::configuracion_pdf_por_ajustes ... ok
+test generate::tests::bloques_basicos ... ok
+test generate::tests::pie_de_figura_numerado_debajo_de_imagen_en_ambos_idiomas ... ok
+test generate::tests::codigo_tabla_y_callout ... ok
+test generate::tests::texto_escapado_y_colores ... ok
+test tests::exporta_documento_simple_a_pdf ... ok
+test generate::tests::math_traducida_y_marcador ... ok
+test tests::exporta_con_paginacion_y_tamano_custom ... ok
+test tests::exporta_math_y_marcadores ... ok
+test footnote_layout_tests::long_notes_repeat_reorder_and_paginate ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s
+
+     Running unittests src/lib.rs (/tmp/minmark-phase5-target/debug/deps/minmark_renderer-4b8806cd45d8755f)
+
+running 29 tests
+test palette::tests::paletas_completas_23 ... ok
+test palette::tests::css_generado_con_ambos_temas ... ok
+test citations::note_style_tests::note_class_csl_uses_linked_notes ... ok
+test citations::tests::author_year_csl_and_all_four_search_fields ... ok
+test academic::normalized_note_tests::note_labels_share_standard_reference_normalization ... ok
+test academic::tests::first_use_order_repeated_missing_duplicate_and_literal_notes ... ok
+test citations::tests::malformed_files_unknown_keys_and_conflicts_are_visible ... ok
+test scroll::tests::documento_vacio ... ok
+test scroll::tests::mapeo_bidireccional_por_elemento ... ok
+test citations::tests::ieee_groups_locators_and_bibliography_share_a_driver ... ok
+test references::tests::front_matter_prevalece_y_duplicados_y_faltantes_son_visibles ... ok
+test citations::formatting_tests::ieee_keeps_italics_and_unused_notes_do_not_add_citations ... ok
+test tests::codigo_con_lenguaje_y_escape ... ok
+test tests::data_mm_span_cubre_el_fuente ... ok
+test tests::colores_personalizados_del_proyecto ... ok
+test references::tests::pie_de_figura_debajo_con_alt_escapado_e_idioma_sin_mutar_ast ... ok
+test tests::sync_bidireccional_con_scroll_map ... ok
+test references::tests::renumerar_por_capitulo_y_headings_sin_tocar_fuente ... ok
+test tests::escapa_todo_el_contenido_del_documento ... ok
+test tests::headings_parrafos_y_listas ... ok
+test tests::tabla_gfm ... ok
+test references::tests::etiquetas_destinos_e_idioma_compartidos ... ok
+test tests::callouts_math_colores_y_sustituciones ... ok
+test tests::pagina_completa_con_tema_y_ancho ... ok
+test academic::toc_numbering_tests::toc_depth_defaults_to_three_accepts_six_and_respects_literals ... ok
+test tests::math_no_soportada_muestra_marcador ... ok
+test academic::toc_numbering_tests::chapter_reset_and_continuous_share_caption_and_reference_numbers ... ok
+test tests::preview_e_indice_producen_los_mismos_destinos_26 ... ok
+test math::tests::standard_subset_composes_and_invalid_math_stays_visible ... ok
+
+test result: ok. 29 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.36s
+
+   Doc-tests minmark_config
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests minmark_document
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests minmark_fs
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests minmark_math
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests minmark_parser
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests minmark_pdf
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests minmark_renderer
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

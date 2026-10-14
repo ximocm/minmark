@@ -1,0 +1,57 @@
+1 Energía . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 1
+   1.1 Resultados . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 1
+      1.1.1 Detalle . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 1
+2 Segundo capítulo . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 2
+
+
+1 Energía
+Cita simple [1], múltiple [1], [2] y locator [1, p. 42].
+                                             √
+La energía es 𝐸 = 𝑚𝑐2 . Fracción 12 y raíz 3 𝑥.
+
+                                                                                         ∞
+                                                                                  ∫          𝑒−𝑥 𝑑𝑥
+                                                                                     0
+
+                                                              Ecuación 1.1. Integral impropia
+Ver Ecuación 1.1. Una nota.¹ La misma nota otra vez.¹
+
+
+1.1 Resultados
+
+  Caso Valor
+  A       10
+
+                                                                            Tabla 1.1. Valores
+Ver Tabla 1.1.
+
+1.1.1 Detalle
+Texto con énfasis y Unicode: áéíóú, β, 東東.
+
+1.1.1.1 Fuera del TOC por defecto
+Esta sección aparece con toc_max_level: 6.
+
+
+
+
+    ¹Nota de energía con negrita y cita [2].
+2 Segundo capítulo
+                                              1 2
+                                            (     )
+                                              3 4
+
+                                     Ecuación 2.1. Matriz
+Ver Ecuación 2.1.
+Otra nota.²
+[@smith2025] $\frac{1}{2}$ {{toc}} [^literal]
+
+{{toc}} y [@smith2025] se conservan literalmente.
+Bibliografía
+[1] A. Smith, Energy Research. Madrid: QA Press, 2025.
+[2] B. Jones and A. García, “Local Scientific Editing,” QA Journal, vol. 2, pp. 10–20, 2024.
+
+
+
+
+  ²Nota del segundo capítulo.
+

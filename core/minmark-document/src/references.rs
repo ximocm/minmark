@@ -439,7 +439,7 @@ fn find_markdown_body(source: &str, base: usize, scan: &mut LinkScan) {
                         scan.references.push(reference);
                         i = next;
                     }
-                } else if bytes.get(i) == Some(&b':') && is_line_start(source, open) {
+                } else if bytes.get(i) == Some(&b':') && is_line_start(source, open) && !label.starts_with('^') {
                     // Definición `[id]: dest`.
                     if let Some((dest, form, span, next)) = parse_inline_dest(source, i + 1, base) {
                         scan.definitions.push(LinkDefinition {
@@ -465,6 +465,7 @@ fn find_markdown_body(source: &str, base: usize, scan: &mut LinkScan) {
                         } else {
                             normalize_label(inner)
                         };
+                        if label.starts_with('^') { i = close + 1; continue; }
                         scan.usages.push(ReferenceUsage {
                             kind: if image {
                                 RefKind::MarkdownImage
@@ -765,5 +766,20 @@ mod tests {
                 (RefKind::MarkdownLink, "dir/con_(paréntesis).md".to_owned()),
             ]
         );
+    }
+}
+
+#[cfg(test)]
+mod footnote_link_tests {
+    use super::*;
+    #[test]
+    fn footnotes_are_not_link_definitions_but_links_inside_notes_remain() {
+        let scan = scan_markdown_links("Texto[^1].\n\n[^1]: Nota.\n");
+        assert!(scan.references.is_empty());
+        assert!(scan.definitions.is_empty());
+        let scan = scan_markdown_links("Texto[^n] y [texto][^n].\n\n[^n]: [fuente](actual.md)\n");
+        assert_eq!(scan.references.len(), 1);
+        assert_eq!(scan.references[0].dest, "actual.md");
+        assert!(scan.usages.is_empty());
     }
 }

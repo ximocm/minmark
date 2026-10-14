@@ -5,10 +5,13 @@
 //! exportación, para poder verificar el pipeline completo sin display.
 
 use minmark_config::Settings;
-use minmark_pdf::{PdfEngine, PdfError, TypstEngine};
+use minmark_pdf::{PdfError, TypstEngine};
+#[cfg(test)]
+use minmark_pdf::PdfEngine;
 
 /// Exporta el texto Markdown a bytes PDF con los ajustes `pdf_*` de
 /// [`Settings`] (§32.3–§32.6: tamaño, márgenes y orientación).
+#[cfg(test)]
 pub fn export_document(source: &str, settings: &Settings) -> Result<Vec<u8>, PdfError> {
     let ast = minmark_parser::parse_with(
         source,
@@ -17,7 +20,7 @@ pub fn export_document(source: &str, settings: &Settings) -> Result<Vec<u8>, Pdf
             ..Default::default()
         },
     );
-    TypstEngine.export(&ast, settings)
+    TypstEngine.export(&crate::academic::prepare_pdf(&ast, settings), settings)
 }
 
 #[cfg(test)]
@@ -66,6 +69,32 @@ pub fn export_document_at(
     document: Option<&std::path::Path>,
     root: Option<&std::path::Path>,
 ) -> Result<Vec<u8>, PdfError> {
+    let (ast, assets) = document_assets(source, settings, document, root)?;
+    TypstEngine.export_with_assets(&ast, settings, assets)
+}
+
+pub fn paginated_preview_at(
+    source: &str,
+    settings: &Settings,
+    document: Option<&std::path::Path>,
+    root: Option<&std::path::Path>,
+) -> Result<String, PdfError> {
+    let (ast, assets) = document_assets(source, settings, document, root)?;
+    TypstEngine.preview_with_assets(&ast, settings, assets)
+}
+
+fn document_assets(
+    source: &str,
+    settings: &Settings,
+    document: Option<&std::path::Path>,
+    root: Option<&std::path::Path>,
+) -> Result<
+    (
+        minmark_document::Ast,
+        std::collections::BTreeMap<std::path::PathBuf, Vec<u8>>,
+    ),
+    PdfError,
+> {
     use minmark_document::{Block, BlockKind, Inline};
     use std::{
         collections::BTreeMap,
@@ -124,9 +153,9 @@ pub fn export_document_at(
                     BlockKind::Heading { content, .. } | BlockKind::Paragraph { content } => {
                         self.inlines(content)?
                     }
-                    BlockKind::Quote { blocks } | BlockKind::Callout { blocks, .. } => {
-                        self.blocks(blocks)?
-                    }
+                    BlockKind::Quote { blocks }
+                    | BlockKind::Callout { blocks, .. }
+                    | BlockKind::FootnoteDefinition { blocks, .. } => self.blocks(blocks)?,
                     BlockKind::List { items, .. } => {
                         for item in items {
                             self.blocks(&mut item.blocks)?;
@@ -144,7 +173,10 @@ pub fn export_document_at(
         }
     }
     let Some(base) = document.and_then(Path::parent) else {
-        return export_document(source, settings);
+        return Ok((
+            crate::academic::prepare_pdf(&minmark_parser::parse(source), settings),
+            BTreeMap::new(),
+        ));
     };
     let base = std::fs::canonicalize(if base.as_os_str().is_empty() {
         Path::new(".")
@@ -166,7 +198,7 @@ pub fn export_document_at(
         files: BTreeMap::new(),
     };
     assets.blocks(&mut ast.blocks)?;
-    TypstEngine.export_with_assets(&ast, settings, assets.files)
+    Ok((crate::academic::prepare_pdf(&ast, settings), assets.files))
 }
 
 #[cfg(test)]

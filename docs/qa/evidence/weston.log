@@ -1,0 +1,38 @@
+Date: 2026-10-14 CEST
+[12:05:20.185] weston 13.0.0
+               https://wayland.freedesktop.org
+               Bug reports to: https://gitlab.freedesktop.org/wayland/weston/issues/
+               Build: 13.0.0
+[12:05:20.185] Command line: /tmp/minmark-fase4-qa/runtime/usr/bin/weston --no-config --backend=x11 --shell=kiosk --renderer=pixman --width=1450 --height=930 --socket=qa-wayland --idle-time=0
+[12:05:20.185] OS: Linux, 7.0.0-34-generic, #34~24.04.1-Ubuntu SMP PREEMPT_DYNAMIC Fri Sep  4 15:38:29 UTC 2, x86_64
+[12:05:20.185] Flight recorder: enabled
+[12:05:20.185] Starting with no config file.
+[12:05:20.185] Output repaint window is 7 ms maximum.
+[12:05:20.185] Loading module '/tmp/minmark-fase4-qa/runtime/usr/lib/x86_64-linux-gnu/libweston-13/x11-backend.so'
+[12:05:20.187] Using Pixman renderer
+[12:05:20.189] Registered plugin API 'weston_windowed_output_api_v2' of size 16
+[12:05:20.189] Color manager: no-op
+[12:05:20.189] Output 'screen0' attempts EOTF mode: SDR
+[12:05:20.189] Output 'screen0' using color profile: stock sRGB color profile
+/usr/share/weston/wayland.png: No such file or directory
+[12:05:20.189] Found visual, bits per value: 8, red_mask: 00ff0000, green_mask: 0000ff00, blue_mask: 000000ff
+[12:05:20.189] Visual depth is 24
+[12:05:20.189] Found format for depth 24, bpp: 32
+[12:05:20.189] Will use x8r8g8b8 format for SHM surfaces
+[12:05:20.189] x11 output 1450x930, window id 2097157
+[12:05:20.189] Output 'screen0' enabled with head(s) screen0
+[12:05:20.189] Compositor capabilities:
+               arbitrary surface rotation: yes
+               screen capture uses y-flip: no
+               cursor planes: no
+               arbitrary resolutions: no
+               view mask clipping: yes
+               explicit sync: no
+               color operations: no
+               presentation clock: CLOCK_MONOTONIC_RAW, id 4
+               presentation clock resolution: 0.000000001 s
+[12:05:20.189] Loading module '/tmp/minmark-fase4-qa/runtime/usr/lib/x86_64-linux-gnu/weston/kiosk-shell.so'
+[12:05:50.258] Detected an unmapped surface or view in the layer list, which should not occur.
+               Warning: the above message will not be printed again.
+[12:06:56.372] caught signal 15
+X connection to :0 broken (explicit kill or server shutdown).
