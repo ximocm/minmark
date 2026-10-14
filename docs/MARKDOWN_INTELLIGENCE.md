@@ -173,10 +173,11 @@ una imagen SVG dañada: pudo continuar editando y, al sustituirla por una imagen
 válida, exportar correctamente. Estos escenarios del diálogo están validados
 en la versión de desarrollo indicada; no constituyen una prueba de v0.1.1.
 
-Para el cierre definitivo del milestone queda la revisión con
-lector de pantalla y una sesión Wayland. La prueba gráfica automatizada no
-sustituye esas comprobaciones. No se
-ha cerrado ninguna issue automáticamente ni se ha publicado una release.
+La revisión de cierre con lector de pantalla, Wayland y scroll de Preview
+se registra en [QA del 14 de octubre de 2026](qa/fase4-cierre-2026-10-14.md).
+Se detectó y corrigió localmente la ausencia de anuncios de selección en el
+autocompletado. La publicación v0.2.0 conserva ese fallo hasta integrar la
+corrección; el estado de cierre se mantiene en el plan #3.
 
 La prueba manual con 1000 notas y 20 secciones por nota detectó que las flechas
 seleccionaban resultados fuera de vista sin desplazar la lista. Se corrigió

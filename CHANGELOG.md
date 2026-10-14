@@ -9,7 +9,10 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 
 ## [Unreleased]
 
-Sin cambios pendientes de publicación.
+### Corregido
+
+- El autocompletado expone la sugerencia seleccionada al lector de pantalla,
+  conserva el foco del editor y restaura su nombre accesible al cerrar el popup.
 
 ## [0.2.0] — 2026-10-13
 
