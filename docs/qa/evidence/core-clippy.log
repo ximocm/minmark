@@ -1,0 +1,181 @@
+warning: empty line after doc comment
+   --> minmark-document/src/references.rs:166:1
+    |
+166 | / /// [`crate::anchors::find_heading_nodes`] (§27.1, §26.1).
+167 | |
+    | |_^
+...
+170 |   pub fn apply_replacements(source: &str, edits: &[(Span, String)]) -> String {
+    |   ------------------------- the comment documents this function
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#empty_line_after_doc_comments
+    = note: `#[warn(clippy::empty_line_after_doc_comments)]` on by default
+    = help: if the empty line is unintentional, remove it
+help: if the documentation should include the empty line include it in the comment
+    |
+167 | ///
+    |
+
+warning: this `match` expression can be replaced with `?`
+  --> minmark-document/src/attrs.rs:60:39
+   |
+60 |                           Some('\\') => match cur.next() {
+   |  _______________________________________^
+61 | |                             Some(c) => caption.push(c),
+62 | |                             None => return None,
+63 | |                         },
+   | |_________________________^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#question_mark
+   = note: `#[warn(clippy::question_mark)]` on by default
+help: try instead
+   |
+60 ~                         Some('\\') => {
+61 +                             let c = cur.next()?;
+62 +                             caption.push(c)
+63 ~                         },
+   |
+
+warning: consider using `sort_by_key`
+   --> minmark-document/src/editor.rs:165:9
+    |
+165 |         plan.sort_by(|x, y| (x.0, x.1).cmp(&(y.0, y.1)));
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#unnecessary_sort_by
+    = note: `#[warn(clippy::unnecessary_sort_by)]` on by default
+help: try
+    |
+165 -         plan.sort_by(|x, y| (x.0, x.1).cmp(&(y.0, y.1)));
+165 +         plan.sort_by_key(|x| (x.0, x.1));
+    |
+
+warning: `minmark-document` (lib) generated 3 warnings (run `cargo clippy --fix --lib -p minmark-document -- --no-deps` to apply 2 suggestions)
+warning: the following explicit lifetimes could be elided: 'a
+   --> minmark-parser/src/blocks.rs:274:10
+    |
+274 | fn slice<'a>(source: &'a str, base: usize, span: Span) -> &'a str {
+    |          ^^           ^^                                   ^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#needless_lifetimes
+    = note: `#[warn(clippy::needless_lifetimes)]` on by default
+help: elide the lifetimes
+    |
+274 - fn slice<'a>(source: &'a str, base: usize, span: Span) -> &'a str {
+274 + fn slice(source: &str, base: usize, span: Span) -> &str {
+    |
+
+warning: this `map_or` can be simplified
+   --> minmark-parser/src/inlines.rs:392:9
+    |
+392 | /         name.as_ref()
+393 | |             .map_or(true, |n| color_exists(n, options))
+    | |_______________________________________________________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#unnecessary_map_or
+    = note: `#[warn(clippy::unnecessary_map_or)]` on by default
+help: use `is_none_or` instead
+    |
+393 -             .map_or(true, |n| color_exists(n, options))
+393 +             .is_none_or(|n| color_exists(n, options))
+    |
+
+warning: very complex type used. Consider factoring parts into `type` definitions
+   --> minmark-parser/src/visual.rs:937:59
+    |
+937 | fn row_cells(chars: &[char], start: usize, end: usize) -> (Vec<(usize, usize)>, Vec<(usize, usize)>) {
+    |                                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#type_complexity
+    = note: `#[warn(clippy::type_complexity)]` on by default
+
+warning: `minmark-parser` (lib) generated 3 warnings (run `cargo clippy --fix --lib -p minmark-parser -- --no-deps` to apply 2 suggestions)
+warning: this `impl` can be derived
+   --> minmark-config/src/settings.rs:122:1
+    |
+122 | / impl Default for PageSize {
+123 | |     fn default() -> Self {
+124 | |         Self::A4
+125 | |     }
+126 | | }
+    | |_^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#derivable_impls
+    = note: `#[warn(clippy::derivable_impls)]` on by default
+help: replace the manual implementation with a derive attribute and mark the default variant
+    |
+111 + #[derive(Default)]
+112 | pub enum PageSize {
+113 |     A3,
+114 ~     #[default]
+115 ~     A4,
+    |
+
+warning: `minmark-config` (lib) generated 1 warning (run `cargo clippy --fix --lib -p minmark-config -- --no-deps` to apply 1 suggestion)
+    Checking minmark-math v0.2.0 (/media/ximo/COSAS/minmark/core/minmark-math)
+warning: `minmark-parser` (lib test) generated 3 warnings (3 duplicates)
+warning: `minmark-document` (lib test) generated 3 warnings (3 duplicates)
+warning: `minmark-config` (lib test) generated 1 warning (1 duplicate)
+warning: this loop could be written as a `while let` loop
+   --> minmark-math/src/lib.rs:373:13
+    |
+373 | /             loop {
+374 | |                 match self.next() {
+375 | |                     Some(Tok::Char(c)) => name.push(c),
+376 | |                     _ => break,
+377 | |                 }
+378 | |             }
+    | |_____________^ help: try: `while let Some(Tok::Char(c)) = self.next() { .. }`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#while_let_loop
+    = note: `#[warn(clippy::while_let_loop)]` on by default
+
+warning: `minmark-math` (lib) generated 1 warning
+    Checking minmark-renderer v0.2.0 (/media/ximo/COSAS/minmark/core/minmark-renderer)
+warning: `minmark-math` (lib test) generated 1 warning (1 duplicate)
+warning: this `if` can be collapsed into the outer `match`
+   --> minmark-renderer/src/references.rs:105:21
+    |
+105 | /                     if attrs.as_ref().and_then(|a| a.id.as_ref()).is_some() {
+106 | |                         let label = self.caption(2, settings);
+107 | |                         self.register(attrs, label);
+108 | |                     }
+    | |_____________________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#collapsible_match
+    = note: `#[warn(clippy::collapsible_match)]` on by default
+help: collapse nested if block
+    |
+104 ~                 BlockKind::MathBlock { attrs, .. }
+105 ~                     if attrs.as_ref().and_then(|a| a.id.as_ref()).is_some() => {
+106 |                         let label = self.caption(2, settings);
+107 |                         self.register(attrs, label);
+108 ~                     }
+    |
+
+warning: `minmark-renderer` (lib) generated 1 warning (run `cargo clippy --fix --lib -p minmark-renderer -- --no-deps` to apply 1 suggestion)
+    Checking minmark-pdf v0.2.0 (/media/ximo/COSAS/minmark/core/minmark-pdf)
+warning: `minmark-renderer` (lib test) generated 1 warning (1 duplicate)
+warning: using `write!()` with a format string that ends in a single newline
+  --> minmark-pdf/src/generate.rs:72:13
+   |
+72 |       let _ = write!(
+   |  _____________^
+73 | |         out,
+74 | |         "#set text(font: ({fonts}), size: {}pt)\n",
+75 | |         settings.font_size_pt
+76 | |     );
+   | |_____^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#write_with_newline
+   = note: `#[warn(clippy::write_with_newline)]` on by default
+help: use `writeln!` instead
+   |
+72 ~     let _ = writeln!(
+73 |         out,
+74 ~         "#set text(font: ({fonts}), size: {}pt)",
+   |
+
+warning: `minmark-pdf` (lib test) generated 1 warning (run `cargo clippy --fix --lib -p minmark-pdf --tests -- --no-deps` to apply 1 suggestion)
+warning: `minmark-pdf` (lib) generated 1 warning (1 duplicate)
+    Finished `dev` profile [unoptimized] target(s) in 0.73s

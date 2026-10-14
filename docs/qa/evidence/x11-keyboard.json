@@ -1,0 +1,7 @@
+{
+  "tab_accepts_key": true,
+  "undo_restores_one_acceptance": true,
+  "original_prefix_preserved": true,
+  "accepted_tail": "}} [^literal]`\n\n\\{{toc}} y \\[@smith2025] se conservan literalmente.\n\n[@smith2025",
+  "undone_tail": "$ {{toc}} [^literal]`\n\n\\{{toc}} y \\[@smith2025] se conservan literalmente.\n\n[@Sm"
+}

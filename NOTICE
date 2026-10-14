@@ -3,3 +3,9 @@ Copyright 2026 Ximo
 
 Licensed under the Apache License, Version 2.0.
 See LICENSE for the full license text.
+
+Embedded CSL resources (unmodified): ieee.csl and locales-en-US.xml.
+Copyright their authors and contributors, credited in each resource's <info>.
+Source: https://github.com/citation-style-language/styles/blob/master/ieee.csl
+Source: https://github.com/citation-style-language/locales/blob/master/locales-en-US.xml
+Licensed under CC BY-SA 3.0: https://creativecommons.org/licenses/by-sa/3.0/

@@ -23,7 +23,7 @@ pub use anchors::{
     document_anchors, find_anchor, find_heading_nodes, find_headings, Anchor, Heading, HeadingNode,
 };
 pub use ast::{
-    Align, Ast, Attributes, Block, BlockKind, CitationItem, Inline, ListItem, Span, Substitution,
+    Align, Ast, Attributes, Block, BlockKind, CitationItem, Inline, InlineStyle, ListItem, Span, Substitution,
 };
 pub use attrs::{parse_attributes, strip_trailing_attrs};
 pub use document::{Document, LineEnding};

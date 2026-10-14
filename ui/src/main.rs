@@ -23,6 +23,7 @@
 //! `TabManager`; el `TextBuffer` del TextView es el espejo sincronizado del
 //! mismo documento en los dos modos §8 (Markdown y Visual, ISSUE-030).
 
+mod academic;
 mod editor;
 mod explorer;
 mod export;
@@ -40,7 +41,7 @@ use editor::{EditSink, EditorPane};
 use explorer::{load_state, save_state, ExplorerAction, ExplorerPane, ExplorerState};
 use find::{FindAction, FindBar};
 use menus::{dialogs, install_actions, Commands};
-use preview::{render_document, PreviewPane, ViewMode};
+use preview::{PreviewPane, ViewMode};
 use quickopen::QuickOpen;
 use search::{ReplaceSummary, SearchPanel};
 use tabs::{OpenTarget, TabBar, TabManager, WindowScope};
@@ -296,6 +297,8 @@ struct AppCmds {
     /// Operaciones propias §14.8 (ISSUE-026 criterio 3).
     self_ops: Rc<SelfOps>,
     settings: RefCell<Settings>,
+    academic_monitors: RefCell<Vec<gtk4::gio::FileMonitor>>,
+    academic_paths: RefCell<Vec<String>>,
     view: Rc<Cell<ViewMode>>,
     refresh_scheduled: Rc<Cell<bool>>,
     slot: Rc<CmdSlot>,
@@ -353,21 +356,47 @@ impl AppCmds {
         let path = self.tabs.borrow().active().path.clone();
         let source = snapshot.source.clone();
         let backlinks = self.navigation_list.is_visible() && self.navigation_kind.get();
+        let settings = self.settings.borrow().clone();
+        let root = self.scope.project_root();
         let (tx, rx) = channel();
         std::thread::spawn(move || {
+            let html =
+                preview::render_document_at(&source, &settings, path.as_deref(), root.as_deref());
             let links = snapshot.links();
             let completions = if suggest {
-                offset.map(|o| snapshot.completions(o)).unwrap_or_default()
+                offset
+                    .map(|o| {
+                        let citations = intelligence::citation_completions(
+                            &source,
+                            o,
+                            &academic::load(&settings),
+                        );
+                        if citations.is_empty() {
+                            snapshot.completions(o)
+                        } else {
+                            citations
+                        }
+                    })
+                    .unwrap_or_default()
             } else {
                 Vec::new()
             };
             let back = backlinks.then(|| snapshot.backlinks());
-            let _ = tx.send((generation, path, source, cursor, links, completions, back));
+            let _ = tx.send((
+                generation,
+                path,
+                source,
+                cursor,
+                html,
+                links,
+                completions,
+                back,
+            ));
         });
         deliver_to_quickopen(
             rx,
             self.slot.clone(),
-            |me, (generation, path, source, cursor, links, completions, back)| {
+            |me, (generation, path, source, cursor, html, links, completions, back)| {
                 me.intelligence_busy.set(false);
                 if me.intelligence_pending.replace(false) {
                     me.refresh_intelligence(false);
@@ -382,7 +411,18 @@ impl AppCmds {
                     return;
                 }
                 let same_cursor = tabs.active().editor.selection() == Selection::collapsed(cursor);
+                let document_key = (tabs.active().path.clone(), tabs.active().untitled_number);
                 drop(tabs);
+                let base_uri = path.as_deref().and_then(Path::parent).map(|directory| {
+                    format!(
+                        "{}/",
+                        gtk4::gio::File::for_path(ruta_comparable(directory))
+                            .uri()
+                            .trim_end_matches('/')
+                    )
+                });
+                me.preview
+                    .update_html(&html, base_uri.as_deref(), document_key);
                 me.editor_pane.set_link_diagnostics(&source, &links);
                 me.preview.set_link_diagnostics(&links);
                 if same_cursor && !completions.is_empty() {
@@ -708,7 +748,9 @@ impl AppCmds {
             .content()
             .to_owned();
         let root = self.scope.project_root();
-        let effective = settings::load(root.as_deref(), &text);
+        let document = self.tabs.borrow().active().path.clone();
+        let effective = settings::load_at(root.as_deref(), &text, document.as_deref());
+        self.watch_academic_resources(&effective);
         self.editor_pane.set_wiki_links(effective.wiki_links);
         {
             let mut settings = self.settings.borrow_mut();
@@ -716,29 +758,12 @@ impl AppCmds {
             settings.language = effective.language;
             settings.heading_numbering = effective.heading_numbering;
             settings.counter_numbering = effective.counter_numbering;
+            settings.toc_max_level = effective.toc_max_level;
+            settings.bibliography = effective.bibliography;
+            settings.bibliography_style = effective.bibliography_style;
+            settings.pagination_enabled = effective.pagination_enabled;
         }
-        let html = render_document(&text, &self.settings.borrow());
         self.editor_pane.refresh(&text);
-        let directory = self
-            .tabs
-            .borrow()
-            .active()
-            .path
-            .as_deref()
-            .and_then(Path::parent)
-            .map(ruta_comparable);
-        let base_uri = directory.map(|dir| {
-            format!(
-                "{}/",
-                gtk4::gio::File::for_path(dir).uri().trim_end_matches('/')
-            )
-        });
-        let document_key = {
-            let tabs = self.tabs.borrow();
-            (tabs.active().path.clone(), tabs.active().untitled_number)
-        };
-        self.preview
-            .update_html(&html, base_uri.as_deref(), document_key);
         {
             let tabs = self.tabs.borrow();
             self.tab_bar.sync(&tabs);
@@ -749,6 +774,35 @@ impl AppCmds {
         let cursor = self.tabs.borrow().active().editor.selection().head;
         self.find_refresh(Some(cursor), false);
         self.refresh_intelligence(false);
+    }
+
+    fn watch_academic_resources(&self, settings: &Settings) {
+        let mut paths = settings.bibliography.clone();
+        if !settings.bibliography_style.eq_ignore_ascii_case("IEEE") {
+            paths.push(settings.bibliography_style.clone());
+        }
+        if *self.academic_paths.borrow() == paths {
+            return;
+        }
+        for monitor in self.academic_monitors.borrow_mut().drain(..) {
+            monitor.cancel();
+        }
+        let mut monitors = self.academic_monitors.borrow_mut();
+        for path in &paths {
+            if let Ok(monitor) = gtk4::gio::File::for_path(path).monitor_file(
+                gtk4::gio::FileMonitorFlags::NONE,
+                None::<&gtk4::gio::Cancellable>,
+            ) {
+                let slot = self.slot.clone();
+                monitor.connect_changed(move |_, _, _, _| {
+                    if let Some(me) = slot.borrow().as_ref().and_then(Weak::upgrade) {
+                        me.schedule_refresh();
+                    }
+                });
+                monitors.push(monitor);
+            }
+        }
+        *self.academic_paths.borrow_mut() = paths;
     }
 
     /// Pinta el marcado de búsqueda y la barra desde [`find::FindState`]
@@ -1420,6 +1474,8 @@ impl Commands for AppCmds {
         // buffer (§6.1), con los ajustes `pdf_*` vigentes. El motor ya está
         // probado en `minmark-pdf` (ISSUE-018).
         let Some(_me) = self.slot() else { return };
+        // El front matter del snapshot puede preceder al refresco diferido.
+        self.refresh_now();
         let window = self.window.clone();
         let root = self.scope.project_root();
         let (text, settings, suggested, document_path) = {
@@ -2047,6 +2103,8 @@ fn build_window(app: &Application, scope: WindowScope, open_paths: &[PathBuf]) -
         watcher,
         self_ops: Rc::new(SelfOps::default()),
         settings: RefCell::new(settings),
+        academic_monitors: RefCell::new(Vec::new()),
+        academic_paths: RefCell::new(Vec::new()),
         view: Rc::new(Cell::new(ViewMode::Split)),
         refresh_scheduled: Rc::new(Cell::new(false)),
         slot: slot.clone(),
@@ -2296,6 +2354,16 @@ mod gtk_integration_tests {
             std::thread::sleep(Duration::from_millis(10));
         }
     }
+    fn settle_preview(cmds: &AppCmds) {
+        pump_until(|| !cmds.intelligence_busy.get() && !cmds.intelligence_pending.get() && !cmds.refresh_scheduled.get() && !cmds.preview.test_is_loading());
+    }
+    fn preview_number(cmds: &AppCmds, script: &str) -> f64 {
+        settle_preview(cmds);
+        let result = Rc::new(Cell::new(None));
+        cmds.preview.test_eval_number(script, result.clone());
+        pump_until(|| result.get().is_some());
+        result.get().unwrap()
+    }
     #[test]
     #[ignore = "requiere sesión gráfica GTK/WebKit"]
     fn gtk_navigation_outline_completion_and_dirty_buffers() {
@@ -2351,7 +2419,7 @@ mod gtk_integration_tests {
         ));
         pump_until(|| cmds.tabs.borrow().active().path.as_ref() == Some(&b));
         cmds.select_tab(1);
-        pump_until(|| !cmds.preview.test_is_loading());
+        settle_preview(&cmds);
         let clicked = Rc::new(Cell::new(false));
         cmds.preview.test_click_first_link(clicked.clone());
         pump_until(|| clicked.get() && cmds.tabs.borrow().active().path.as_ref() == Some(&b));
@@ -2418,7 +2486,7 @@ mod gtk_integration_tests {
             .borrow_mut()
             .insert_active(Position::new(0, 0), &long_source);
         cmds.reload_active();
-        pump_until(|| !cmds.preview.test_is_loading());
+        settle_preview(&cmds);
         let scroll = Rc::new(Cell::new(None));
         cmds.preview
             .test_eval_number("window.scrollTo(0, 900); window.scrollY", scroll.clone());
@@ -2438,6 +2506,7 @@ mod gtk_integration_tests {
                 "editing must not reload Preview"
             );
         }
+        settle_preview(&cmds);
         scroll.set(None);
         cmds.preview.test_eval_number(
             "document.body.textContent.includes('xxxPárrafo') ? window.scrollY : -1",
@@ -2460,7 +2529,7 @@ mod gtk_integration_tests {
             .borrow_mut()
             .set_selection_active(Selection::collapsed(Position::new(160, 9)));
         cmds.schedule_refresh();
-        pump_until(|| !cmds.refresh_scheduled.get());
+        settle_preview(&cmds);
         scroll.set(None);
         cmds.preview.test_eval_number(
             "(() => { const e = [...document.querySelectorAll('p')].find(e => e.textContent.startsWith('editando Párrafo 80')); if (!e) return -1; const r = e.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight ? scrollY : -1; })()",
@@ -2480,7 +2549,7 @@ mod gtk_integration_tests {
             .borrow_mut()
             .set_selection_active(Selection::collapsed(Position::new(160, 10)));
         cmds.schedule_refresh();
-        pump_until(|| !cmds.refresh_scheduled.get());
+        settle_preview(&cmds);
         scroll.set(None);
         cmds.preview
             .test_eval_number("window.scrollY", scroll.clone());
@@ -2488,7 +2557,7 @@ mod gtk_integration_tests {
         assert!((scroll.get().unwrap() - edit_scroll).abs() < 2.0);
         // Otro documento no hereda el scroll de este.
         cmds.select_tab(2);
-        pump_until(|| !cmds.preview.test_is_loading());
+        settle_preview(&cmds);
         scroll.set(None);
         cmds.preview
             .test_eval_number("window.scrollY", scroll.clone());
@@ -2579,6 +2648,87 @@ mod gtk_integration_tests {
             Some(&root.join("nota-0999.md"))
         );
         cmds.window.destroy();
+        academic_workflow(&app, &root.join("academic"));
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    fn academic_workflow(app: &Application, root: &Path) {
+        std::fs::create_dir_all(root).unwrap();
+        let paper = root.join("academic.md");
+        let source = include_str!("../../docs/qa/fixtures/academic.md");
+        std::fs::write(&paper, source).unwrap();
+        std::fs::write(root.join("references.bib"), include_str!("../../docs/qa/fixtures/references.bib")).unwrap();
+        std::fs::write(root.join("extra.bib"), include_str!("../../docs/qa/fixtures/extra.bib")).unwrap();
+        std::fs::write(root.join("author-year.csl"), include_str!("../../docs/qa/fixtures/author-year.csl")).unwrap();
+        let cmds = build_window(app, WindowScope::Project(root.to_owned()), std::slice::from_ref(&paper));
+        assert_eq!(preview_number(&cmds, "document.querySelectorAll('[role=math] svg').length"), 5.0);
+        assert_eq!(preview_number(&cmds, "(() => { const ids = [...document.querySelectorAll('svg [id]')].map(e => e.id); return new Set(ids).size === ids.length ? 1 : 0; })()"), 1.0);
+        assert_eq!(preview_number(&cmds, "[...document.querySelectorAll('[role=math] svg')].every(e => { const b = e.getBBox(), v = e.viewBox.baseVal; return b.y >= -2 && b.y + b.height <= v.height + 2; }) ? 1 : 0"), 1.0);
+        assert_eq!(preview_number(&cmds, "(() => { document.documentElement.dataset.theme = 'dark'; const color = getComputedStyle(document.body).color; return [...document.querySelectorAll('[role=math] svg use')].every(e => getComputedStyle(e).fill === color) && [...document.querySelectorAll('[role=math] svg [stroke=\"#000000\"]')].every(e => getComputedStyle(e).stroke === color) ? 1 : 0; })()"), 1.0);
+        preview_number(&cmds, "document.documentElement.dataset.theme = 'light'; 1");
+        assert_eq!(preview_number(&cmds, "document.querySelectorAll('.mm-footnotes li').length"), 2.0);
+        assert_eq!(preview_number(&cmds, "(() => { document.querySelector('[role=doc-noteref]').click(); const r = document.getElementById('mm-note-1').getBoundingClientRect(); return r.top >= 0 && r.top < innerHeight ? 1 : 0; })()"), 1.0);
+        assert_eq!(preview_number(&cmds, "(() => { document.querySelector('.mm-footnotes a').click(); const r = document.getElementById('mm-note-ref-1-1').getBoundingClientRect(); return r.top >= 0 && r.top < innerHeight ? 1 : 0; })()"), 1.0);
+        assert_eq!(preview_number(&cmds, "document.querySelectorAll('.mm-toc a').length"), 4.0);
+        assert_eq!(preview_number(&cmds, "document.body.textContent.includes('Ecuación 2.1') && document.body.textContent.includes('Energy Research') ? 1 : 0"), 1.0);
+        assert!(!cmds.tabs.borrow().active().editor.document().is_modified());
+        let evidence = std::env::var_os("MINMARK_QA_OUTPUT_DIR").map(PathBuf::from);
+        if let Some(evidence) = &evidence {
+            std::fs::create_dir_all(evidence).unwrap();
+            let done = Rc::new(Cell::new(false));
+            cmds.preview.test_snapshot(&evidence.join("academic-continuous.png"), done.clone());
+            pump_until(|| done.get());
+            let settings = cmds.settings.borrow().clone();
+            let pdf = export::export_document_at(source, &settings, Some(&paper), Some(root)).unwrap();
+            std::fs::write(evidence.join("academic.pdf"), pdf).unwrap();
+            std::fs::write(evidence.join("academic.html"), preview::render_document(source, &settings)).unwrap();
+        }
+        // Cambiar un .bib actualiza Preview sin editar ni marcar dirty el Markdown.
+        let changed = include_str!("../../docs/qa/fixtures/references.bib").replace("Energy Research", "Energy Research Updated");
+        std::fs::write(root.join("references.bib"), changed).unwrap();
+        pump_until(|| cmds.refresh_scheduled.get() || cmds.intelligence_busy.get());
+        assert_eq!(preview_number(&cmds, "document.body.textContent.includes('Energy Research Updated') ? 1 : 0"), 1.0);
+        assert!(!cmds.tabs.borrow().active().editor.document().is_modified());
+        // Teclado real del popup: aceptar, cancelar y un único undo/redo.
+        let completion_source = "---\nbibliography: references.bib\n---\nβ [@Sm, p. 42]\r\n";
+        let original_len = cmds.tabs.borrow().active().editor.document().content().len();
+        let end = cmds.tabs.borrow().active().editor.position_of(original_len);
+        cmds.tabs.borrow_mut().replace_active(Range::new(Position::new(0, 0), end), completion_source);
+        cmds.reload_active();
+        let cursor = cmds.tabs.borrow().active().editor.position_of(completion_source.find(", p.").unwrap());
+        cmds.editor_pane.focus_find_match(Range::new(cursor, cursor));
+        *cmds.completion_source.borrow_mut() = None;
+        cmds.refresh_intelligence(true);
+        pump_until(|| cmds.completion_source.borrow().is_some());
+        assert!(cmds.editor_pane.emit_test_key(gtk4::gdk::Key::Tab, gtk4::gdk::ModifierType::empty()));
+        assert_eq!(cmds.tabs.borrow().active().editor.document().content(), completion_source.replace("@Sm", "@smith2025"));
+        cmds.undo();
+        assert_eq!(cmds.tabs.borrow().active().editor.document().content(), completion_source);
+        *cmds.completion_source.borrow_mut() = None;
+        cmds.refresh_intelligence(true);
+        pump_until(|| cmds.completion_source.borrow().is_some());
+        assert!(cmds.editor_pane.emit_test_key(gtk4::gdk::Key::Escape, gtk4::gdk::ModifierType::empty()));
+        assert_eq!(cmds.tabs.borrow().active().editor.document().content(), completion_source);
+        cmds.redo();
+        assert!(cmds.tabs.borrow().active().editor.document().content().contains("@smith2025, p. 42"));
+        cmds.toggle_mode();
+        cmds.toggle_mode();
+        assert!(cmds.tabs.borrow().active().editor.document().content().ends_with("\r\n"));
+        // CSL alternativo, notas y TOC comparten la composición paginada/PDF.
+        let paginated = source.replace("language: es", "language: es\npagination: true\nbibliography_style: author-year.csl");
+        let len = cmds.tabs.borrow().active().editor.document().content().len();
+        let end = cmds.tabs.borrow().active().editor.position_of(len);
+        cmds.tabs.borrow_mut().replace_active(Range::new(Position::new(0, 0), end), &paginated);
+        cmds.reload_active();
+        assert!(preview_number(&cmds, "document.querySelectorAll('.mm-paged-page').length") >= 2.0);
+        if let Some(evidence) = &evidence {
+            let done = Rc::new(Cell::new(false));
+            cmds.preview.test_snapshot(&evidence.join("academic-paginated.png"), done.clone());
+            pump_until(|| done.get());
+            let pdf = export::export_document_at(&paginated, &cmds.settings.borrow(), Some(&paper), Some(root)).unwrap();
+            std::fs::write(evidence.join("academic-author-year.pdf"), pdf).unwrap();
+        }
+        assert_eq!(std::fs::read_to_string(&paper).unwrap(), source);
+        cmds.window.destroy();
     }
 }

@@ -1,0 +1,2 @@
+12:05:50.349207 - SPEECH OUTPUT: 'Sugerencia: smith2025 · Alice Smith · Energy Research · 2025' {'established': False, 'family': {'name': None, 'gender': None, 'lang': None, 'dialect': None, 'variant': None}}
+12:06:32.995042 - SPEECH OUTPUT: 'panel.' {'established': False, 'family': {'name': None, 'gender': None, 'lang': None, 'dialect': None, 'variant': None}}

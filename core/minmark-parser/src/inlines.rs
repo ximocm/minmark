@@ -148,7 +148,21 @@ pub(crate) fn scan_run(
             }
             '[' => {
                 let second = cur.peek2();
-                if second == Some('@') {
+                if second == Some('^') {
+                    // GFM deja literales las notas ausentes. Mantener el nodo
+                    // permite diagnosticarlas, también entre segmentos math.
+                    if let Some(end) = cur.rest().find(']') {
+                        let label = &cur.rest()[2..end];
+                        if !label.is_empty() && !label.contains(['\n', '\r', '[']) {
+                            flush(&mut buf, &mut out);
+                            out.push(Inline::FootnoteReference(minmark_document::normalize_label(label)));
+                            cur.eat(end + 1);
+                            continue;
+                        }
+                    }
+                    buf.push('[');
+                    cur.bump();
+                } else if second == Some('@') {
                     match try_citation(cur.rest()) {
                         Some((items, len)) => {
                             flush(&mut buf, &mut out);

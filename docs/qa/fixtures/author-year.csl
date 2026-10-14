@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<style xmlns="http://purl.org/net/xbiblio/csl" version="1.0" class="in-text">
+  <info><title>minmark QA author-year</title><id>https://minmark.local/qa/author-year</id></info>
+  <citation><layout prefix="(" suffix=")" delimiter="; "><names variable="author"><name form="short"/></names><date variable="issued" prefix=", "><date-part name="year"/></date><text variable="locator" prefix=", p. "/></layout></citation>
+  <bibliography><layout><names variable="author"><name/></names><text variable="title" prefix=", "/><date variable="issued" prefix=", "><date-part name="year"/></date></layout></bibliography>
+</style>

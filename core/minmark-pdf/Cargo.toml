@@ -13,6 +13,7 @@ minmark-renderer = { path = "../minmark-renderer" }
 typst = { workspace = true }
 typst-pdf = { workspace = true }
 typst-assets = { workspace = true }
+typst-svg = "0.13"
 
 [dev-dependencies]
 minmark-parser = { path = "../minmark-parser" }

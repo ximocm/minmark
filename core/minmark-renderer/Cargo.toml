@@ -9,6 +9,10 @@ description = "Renderer de Preview de minmark: AST → página HTML (ISSUE-016)"
 minmark-document = { workspace = true }
 minmark-config = { workspace = true }
 minmark-math = { workspace = true }
+hayagriva = { version = "0.10.1", default-features = false, features = ["biblatex"] }
+typst = { workspace = true }
+typst-assets = { workspace = true }
+typst-svg = "0.13"
 
 [dev-dependencies]
 minmark-parser = { path = "../minmark-parser" }

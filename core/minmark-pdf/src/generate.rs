@@ -14,15 +14,25 @@ use minmark_config::{
 use minmark_document::{
     Align, Ast, Block, BlockKind, CitationItem, Inline, ListItem, Substitution,
 };
-use minmark_math::translate;
 use minmark_renderer::Palette;
 use std::fmt::Write;
 
 /// Genera el documento Typst completo para la AST y los ajustes dados.
 pub fn generate(ast: &Ast, settings: &Settings) -> String {
-    let (ast, diagnostics) = minmark_renderer::resolve_cross_references(ast, settings);
+    let (ast, mut diagnostics) = minmark_renderer::Bibliography::default().resolve(ast);
+    let (ast, ref_diagnostics) = minmark_renderer::resolve_cross_references(&ast, settings);
+    diagnostics.extend(ref_diagnostics);
+    let (ast, note_diagnostics) = minmark_renderer::resolve_footnotes(&ast);
+    diagnostics.extend(note_diagnostics);
     let labels = minmark_renderer::reference_ids(&ast);
     let mut out = preamble(settings);
+    for block in &ast.blocks {
+        if let BlockKind::FootnoteDefinition { label, blocks } = &block.kind {
+            let _ = writeln!(out, "#let mm-note-{label} = [");
+            render_blocks(blocks, settings, &labels, &mut out);
+            out.push_str("]\n");
+        }
+    }
     render_blocks(&ast.blocks, settings, &labels, &mut out);
     for diagnostic in diagnostics {
         out.push_str(&escape_text(&diagnostic));
@@ -119,6 +129,27 @@ fn render_block(
         let _ = writeln!(out, "#box[]#label({})", typst_string(id));
     }
     match &block.kind {
+        BlockKind::Bibliography { entries, hanging_indent, second_field_align, line_spacing, entry_spacing } => {
+            out.push_str("#block[\n");
+            let _ = writeln!(out, "#set par(leading: {}em, hanging-indent: {}em)", (line_spacing - 1.0).max(0.0), if *hanging_indent && !*second_field_align { 1.5 } else { 0.0 });
+            out.push_str(if settings.language.starts_with("es") { "*Bibliografía*\n\n" } else { "*References*\n\n" });
+            for (label, content) in entries {
+                if *second_field_align {
+                    out.push_str("#grid(columns: (auto, 1fr), gutter: .5em, [");
+                    render_inlines(label, settings, labels, out);
+                    out.push_str("], [");
+                    render_inlines(content, settings, labels, out);
+                    out.push_str("])\n");
+                } else {
+                    render_inlines(label, settings, labels, out);
+                    if !label.is_empty() { out.push(' '); }
+                    render_inlines(content, settings, labels, out);
+                    out.push_str("\n\n");
+                }
+                let _ = writeln!(out, "#v({entry_spacing}em)");
+            }
+            out.push_str("]\n\n");
+        }
         BlockKind::Heading { level, content, .. } => {
             for _ in 0..(*level).clamp(1, 6) {
                 out.push('=');
@@ -172,7 +203,7 @@ fn render_block(
             rows,
             ..
         } => {
-            let columns = header.first().map(Vec::len).unwrap_or(aligns.len()).max(1);
+            let columns = header.len().max(aligns.len()).max(1);
             let _ = writeln!(out, "#table(");
             let _ = writeln!(out, "  columns: {columns},");
             if !aligns.is_empty() {
@@ -203,18 +234,22 @@ fn render_block(
             out.push_str(")\n\n");
         }
         BlockKind::MathBlock { latex, .. } => {
-            let translation = translate(latex);
-            if translation.is_supported() {
-                // §24: math de bloque con el subconjunto traducido (ADR-002).
-                out.push_str("$\n");
-                out.push_str(&translation.typst);
-                out.push_str("\n$\n\n");
-            } else {
-                // NFR-026: marcador visible, nunca silenciar ni deformar.
-                out.push_str(&escape_text(&translation.marker()));
-                out.push_str("\n\n");
+            match minmark_renderer::validated_math(latex) {
+                Ok(translation) => {
+                    // §24: math de bloque con el subconjunto traducido (ADR-002).
+                    out.push_str("$\n");
+                    out.push_str(&translation);
+                    out.push_str("\n$\n\n");
+                }
+                Err(marker) => {
+                    // NFR-026: marcador visible, nunca silenciar ni deformar.
+                    eprintln!("minmark: {marker}");
+                    out.push_str(&escape_text(&marker));
+                    out.push_str("\n\n");
+                }
             }
         }
+        BlockKind::FootnoteDefinition { .. } => {}
         BlockKind::Callout {
             callout_type,
             title,
@@ -235,6 +270,11 @@ fn render_block(
             out.push_str("]\n\n");
         }
         BlockKind::Rule => out.push_str("#line(length: 100%)\n\n"),
+    }
+    if !matches!(block.kind, BlockKind::Heading { .. }) {
+        if let Some(caption) = attrs.and_then(|a| a.caption.as_ref()) {
+            let _ = writeln!(out, "#align(center)[{}]\n", escape_text(caption));
+        }
     }
 }
 
@@ -257,6 +297,26 @@ fn render_inlines(
 ) {
     for inline in inlines {
         match inline {
+            Inline::Styled { content, style } => {
+                let mut body = String::new();
+                render_inlines(content, settings, labels, &mut body);
+                if style.italic { body = format!("#text(style: \"italic\")[{body}]"); }
+                if style.bold { body = format!("#text(weight: \"bold\")[{body}]"); }
+                if style.light { body = format!("#text(weight: \"light\")[{body}]"); }
+                if style.small_caps { body = format!("#smallcaps[{body}]"); }
+                if style.underline { body = format!("#underline[{body}]"); }
+                if style.vertical == 1 { body = format!("#super[{body}]"); }
+                if style.vertical == -1 { body = format!("#sub[{body}]"); }
+                out.push_str(&body);
+            }
+            Inline::FootnoteReference(label) => {
+                let (number, occurrence) = label.split_once('-').unwrap_or((label, "1"));
+                if occurrence == "1" {
+                    let _ = write!(out, "#footnote(mm-note-{number})<mm-note-{number}>");
+                } else {
+                    let _ = write!(out, "#footnote(<mm-note-{number}>)");
+                }
+            }
             Inline::Text(text) => out.push_str(&escape_text(text)),
             Inline::Code(code) => {
                 out.push_str("#raw(");
@@ -315,16 +375,17 @@ fn render_inlines(
                     out.push_str("]]]");
                 }
             }
-            Inline::Math(latex) => {
-                let translation = translate(latex);
-                if translation.is_supported() {
+            Inline::Math(latex) => match minmark_renderer::validated_math(latex) {
+                Ok(translation) => {
                     out.push('$');
-                    out.push_str(&translation.typst);
+                    out.push_str(&translation);
                     out.push('$');
-                } else {
-                    out.push_str(&escape_text(&translation.marker()));
                 }
-            }
+                Err(marker) => {
+                    eprintln!("minmark: {marker}");
+                    out.push_str(&escape_text(&marker));
+                }
+            },
             Inline::Color {
                 foreground,
                 background,
@@ -358,7 +419,13 @@ fn render_inlines(
             }
             Inline::Substitution(sub) => match sub {
                 // §29: TOC con composición nativa. §31: salto de página.
-                Substitution::Toc => out.push_str("#outline()"),
+                Substitution::Toc => {
+                    let _ = write!(
+                        out,
+                        "#outline(title: none, depth: {})",
+                        settings.toc_max_level
+                    );
+                }
                 Substitution::PageBreak => out.push_str("#pagebreak()"),
                 // §26.5: numeración real en Fase 5 (§27).
                 Substitution::CrossRef { id } => {
@@ -537,6 +604,7 @@ mod tests {
         assert!(out.contains("#table("));
         assert!(out.contains("table.header("));
         assert!(out.contains("align: (left, right,),"));
+        assert!(out.contains("columns: 2,"));
 
         let out = source("::: warning \"Atención\"\nCuidado.\n:::\n");
         assert!(out.contains("#block(stroke: (left: 3pt + rgb(\"#e65100\"))"));
@@ -547,7 +615,7 @@ mod tests {
     fn math_traducida_y_marcador() {
         // §24 + ADR-002.
         let out = source("$$\n\\frac{a}{b}\n$$\n");
-        assert!(out.contains("$\na/b\n$"));
+        assert!(out.contains("$\nfrac(a, b)\n$"));
 
         // El marcador viaja escapado como texto literal.
         let out = source("$$\n\\foo{x}\n$$\n");
@@ -573,7 +641,7 @@ mod tests {
     #[test]
     fn sustituciones() {
         let out = source("{{toc}}\n\n{{pagebreak}}\n\n{{ref:fig:a}}\n");
-        assert!(out.contains("#outline()"));
+        assert!(out.contains("#outline(title: none, depth: 3)"));
         assert!(out.contains("#pagebreak()"));
         assert!(out.contains("Referencia inexistente: fig:a"));
     }

@@ -1,0 +1,23 @@
+   Compiling minmark-config v0.2.0 (/media/ximo/COSAS/minmark/core/minmark-config)
+   Compiling minmark-renderer v0.2.0 (/media/ximo/COSAS/minmark/core/minmark-renderer)
+   Compiling minmark-pdf v0.2.0 (/media/ximo/COSAS/minmark/core/minmark-pdf)
+   Compiling minmark-ui v0.2.0 (/media/ximo/COSAS/minmark/ui)
+    Finished `test` profile [unoptimized] target(s) in 3.77s
+     Running unittests src/main.rs (/tmp/minmark-phase5-target/debug/deps/minmark-7ff28e148699005a)
+
+running 1 test
+test gtk_integration_tests::gtk_navigation_outline_completion_and_dirty_buffers ... libEGL warning: DRI3 error: Could not get DRI3 device
+libEGL warning: Ensure your X server supports DRI3 to get accelerated rendering
+
+(process:1523024): Gtk-CRITICAL **: 11:39:28.887: Unable to connect to the accessibility bus at 'unix:path=/run/user/1000/at-spi/bus_1,guid=c303cca129c4f3a66c3372d16acdd9a0': Could not connect: Connection refused
+
+** (process:2): WARNING **: 11:39:29.159: Failed to connect to bus: Could not connect: Connection refused
+
+** (process:2): WARNING **: 11:39:29.250: Can't connect to a11y bus: Error receiving data: Connection reset by peer
+
+** (process:2): WARNING **: 11:39:31.703: Failed to connect to bus: Could not connect: Connection refused
+
+** (process:2): WARNING **: 11:39:31.803: Can't connect to a11y bus: Error receiving data: Connection reset by peer
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 93 filtered out; finished in 4.55s

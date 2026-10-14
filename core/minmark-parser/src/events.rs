@@ -27,6 +27,7 @@ pub(crate) fn parse_segment(
     pulldown_options.insert(Options::ENABLE_TABLES);
     pulldown_options.insert(Options::ENABLE_STRIKETHROUGH);
     pulldown_options.insert(Options::ENABLE_TASKLISTS);
+    pulldown_options.insert(Options::ENABLE_FOOTNOTES);
 
     let iter = Parser::new_ext(source, pulldown_options).into_offset_iter();
     let mut state = State {
@@ -109,6 +110,17 @@ impl<'a> State<'a> {
                     blocks.push(Block {
                         span: self.span_from(range.start),
                         kind: BlockKind::Paragraph { content },
+                    });
+                }
+                Event::Start(Tag::FootnoteDefinition(label)) => {
+                    self.next();
+                    let inner = self.parse_blocks();
+                    blocks.push(Block {
+                        span: self.span_from(range.start),
+                        kind: BlockKind::FootnoteDefinition {
+                            label: minmark_document::normalize_label(&label),
+                            blocks: inner,
+                        },
                     });
                 }
                 Event::Start(Tag::Heading { level, .. }) => {
@@ -303,6 +315,10 @@ impl<'a> State<'a> {
             match event {
                 // Runs de texto plano: se fusionan por continuidad y se
                 // analizan con la gramática §7.4 sobre el fuente crudo.
+                Event::FootnoteReference(label) => {
+                    self.next();
+                    inlines.push(Inline::FootnoteReference(minmark_document::normalize_label(&label)));
+                }
                 Event::Text(_) | Event::SoftBreak | Event::HardBreak => {
                     // pulldown-cmark excluye el backslash de los escapes en sus
                     // rangos de offset: el escape puede empezar justo antes del

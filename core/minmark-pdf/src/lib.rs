@@ -74,18 +74,7 @@ impl TypstEngine {
         settings: &Settings,
         assets: std::collections::BTreeMap<std::path::PathBuf, Vec<u8>>,
     ) -> Result<Vec<u8>, PdfError> {
-        let source = generate(ast, settings);
-        let world = world::MiniWorld::new(source, assets);
-        let warned = typst::compile(&world);
-        let document = warned.output.map_err(|errors| {
-            PdfError::Compose(
-                errors
-                    .iter()
-                    .map(|error| error.message.to_string())
-                    .collect::<Vec<_>>()
-                    .join("; "),
-            )
-        })?;
+        let document = compile_document(ast, settings, assets)?;
         typst_pdf::pdf(&document, &typst_pdf::PdfOptions::default()).map_err(|errors| {
             PdfError::Compose(
                 errors
@@ -96,6 +85,47 @@ impl TypstEngine {
             )
         })
     }
+
+    /// Preview paginado con la misma composición que el PDF (§29–30).
+    pub fn preview_with_assets(
+        &self,
+        ast: &Ast,
+        settings: &Settings,
+        assets: std::collections::BTreeMap<std::path::PathBuf, Vec<u8>>,
+    ) -> Result<String, PdfError> {
+        let document = compile_document(ast, settings, assets)?;
+        let mut html = String::from("<!doctype html><html><head><meta charset=\"utf-8\"><style>body{margin:0;background:#e5e5e5}section{margin:24px auto;background:white;max-width:95%;width:max-content;box-shadow:0 1px 8px #999}svg{max-width:100%;height:auto;display:block}</style></head><body>");
+        for (index, page) in document.pages.iter().enumerate() {
+            html.push_str(&format!(
+                "<section class=\"mm-paged-page\" aria-label=\"Página {}\">",
+                index + 1
+            ));
+            html.push_str(&minmark_renderer::namespace_svg(&typst_svg::svg(page), &format!("mm-page-{index}-")));
+            html.push_str("</section>");
+        }
+        html.push_str("</body></html>");
+        Ok(html)
+    }
+}
+
+fn compile_document(
+    ast: &Ast,
+    settings: &Settings,
+    assets: std::collections::BTreeMap<std::path::PathBuf, Vec<u8>>,
+) -> Result<typst::layout::PagedDocument, PdfError> {
+    let source = generate(ast, settings);
+    let world = world::MiniWorld::new(source, assets);
+    let warned = typst::compile(&world);
+    let document = warned.output.map_err(|errors| {
+        PdfError::Compose(
+            errors
+                .iter()
+                .map(|error| error.message.to_string())
+                .collect::<Vec<_>>()
+                .join("; "),
+        )
+    })?;
+    Ok(document)
 }
 
 /// Dimensiones nominales de página en milímetros (ancho × alto, Portrait).
@@ -204,5 +234,24 @@ mod tests {
         // 120 mm ≈ 340.16 pt, 240 mm ≈ 680.31 pt.
         assert!(pdf.contains("340"), "ancho custom incorrecto");
         assert!(pdf.contains("680"), "alto custom incorrecto");
+    }
+}
+
+#[cfg(test)]
+mod footnote_layout_tests {
+    use super::*;
+    #[test]
+    fn long_notes_repeat_reorder_and_paginate() {
+        let long = "Nota larga verificable. ".repeat(220);
+        let source = format!("# Uno\n\nB[^b] y A[^a] y B[^b].\n\n{{{{pagebreak}}}}\n\n# Dos\n\nOtra referencia a A[^a].\n\n[^a]: Nota corta A.\n\n[^b]: {long}\n");
+        let ast = minmark_parser::parse(&source);
+        let settings = Settings { pagination_enabled: true, ..Default::default() };
+        let document = compile_document(&ast, &settings, Default::default()).unwrap();
+        assert!(document.pages.len() >= 2);
+        let pdf = TypstEngine.export(&ast, &settings).unwrap();
+        if let Some(directory) = std::env::var_os("MINMARK_QA_OUTPUT_DIR") {
+            std::fs::create_dir_all(&directory).unwrap();
+            std::fs::write(std::path::PathBuf::from(directory).join("long-notes.pdf"), pdf).unwrap();
+        }
     }
 }

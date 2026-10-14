@@ -38,6 +38,9 @@ pub fn translate(latex: &str) -> MathTranslation {
         unsupported: Vec::new(),
     };
     let exprs = parser.parse_seq(&Stop::group());
+    if parser.pos < parser.toks.len() {
+        parser.unsupported.push("grupo sin apertura".into());
+    }
     let mut typst = String::new();
     emit(&exprs, &mut typst);
     let typst = typst.trim().to_string();
@@ -252,10 +255,15 @@ impl Parser {
 
     /// Un átomo: grupo `{...}`, un carácter o un comando simple.
     fn parse_atom(&mut self) -> Expr {
+        while matches!(self.peek(), Some(Tok::Char(c)) if c.is_whitespace()) {
+            self.next();
+        }
         match self.next() {
             Some(Tok::LBrace) => {
                 let inner = self.parse_seq(&Stop::group());
-                self.next(); // RBrace (o EOF)
+                if self.next() != Some(Tok::RBrace) {
+                    self.unsupported.push("grupo sin cierre".into());
+                }
                 Expr::Seq(inner)
             }
             Some(Tok::Char(c)) => Expr::Lit(c.to_string()),
@@ -263,20 +271,35 @@ impl Parser {
                 let nodes = self.parse_cmd(&name);
                 Expr::Seq(nodes)
             }
-            Some(other) => Expr::Lit(format!("{other:?}")),
-            None => Expr::Lit(String::new()),
+            Some(other) => {
+                self.unsupported
+                    .push(format!("argumento inválido: {other:?}"));
+                Expr::Lit(String::new())
+            }
+            None => {
+                self.unsupported.push("argumento ausente".into());
+                Expr::Lit(String::new())
+            }
         }
     }
 
     /// Grupo `{...}` obligatorio como argumento.
     fn parse_group(&mut self) -> Expr {
+        while matches!(self.peek(), Some(Tok::Char(c)) if c.is_whitespace()) {
+            self.next();
+        }
         match self.next() {
             Some(Tok::LBrace) => {
                 let inner = self.parse_seq(&Stop::group());
-                self.next(); // RBrace
+                if self.next() != Some(Tok::RBrace) {
+                    self.unsupported.push("grupo sin cierre".into());
+                }
                 Expr::Seq(inner)
             }
-            _ => Expr::Seq(Vec::new()),
+            _ => {
+                self.unsupported.push("grupo ausente".into());
+                Expr::Seq(Vec::new())
+            }
         }
     }
 
@@ -460,7 +483,7 @@ fn symbol(name: &str) -> Option<&'static str> {
         // Operadores grandes y símbolos.
         "sum" => "sum",
         "prod" => "product",
-        "int" => "int",
+        "int" => "integral",
         "iint" => "integral.double",
         "infty" => "infinity",
         "partial" => "diff",
@@ -539,7 +562,26 @@ fn symbol(name: &str) -> Option<&'static str> {
 // --- Emisión ----------------------------------------------------------------
 
 fn emit(exprs: &[Expr], out: &mut String) {
-    for expr in exprs {
+    for (index, expr) in exprs.iter().enumerate() {
+        let next_letter = match expr {
+            Expr::Lit(text) => text.chars().next().is_some_and(|c| c.is_ascii_alphabetic()),
+            Expr::Sym(_)
+            | Expr::Frac(..)
+            | Expr::Sqrt { .. }
+            | Expr::Func(..)
+            | Expr::Matrix { .. } => true,
+            _ => false,
+        };
+        let numeric_after_script = index > 0
+            && matches!(exprs[index - 1], Expr::Sup(_) | Expr::Sub(_))
+            && matches!(expr, Expr::Lit(text) if text.starts_with(|c: char| c.is_ascii_digit()));
+        if (next_letter && out.ends_with(|c: char| c.is_ascii_alphabetic()))
+            || (matches!(expr, Expr::Frac(..))
+                && out.ends_with(|c: char| c.is_ascii_alphanumeric()))
+            || numeric_after_script
+        {
+            out.push(' ');
+        }
         match expr {
             Expr::Lit(text) => out.push_str(&escape_literal(text)),
             Expr::Sym(name) => out.push_str(name),
@@ -552,9 +594,11 @@ fn emit(exprs: &[Expr], out: &mut String) {
                 out.push_str(&compact(arg));
             }
             Expr::Frac(num, den) => {
-                out.push_str(&compact(num));
-                out.push('/');
-                out.push_str(&compact(den));
+                out.push_str("frac(");
+                emit(std::slice::from_ref(num.as_ref()), out);
+                out.push_str(", ");
+                emit(std::slice::from_ref(den.as_ref()), out);
+                out.push(')');
             }
             Expr::Sqrt { index, radicand } => match index {
                 Some(index) => {
@@ -623,8 +667,12 @@ fn compact(expr: &Expr) -> String {
 fn escape_literal(text: &str) -> String {
     let mut out = String::new();
     for c in text.chars() {
+        if c.is_ascii_alphabetic() && out.ends_with(|previous: char| previous.is_ascii_alphabetic())
+        {
+            out.push(' ');
+        }
         match c {
-            '#' | '$' | '_' | '^' | '&' | '%' | '\\' | '{' | '}' | '`' => {
+            '#' | '$' | '_' | '^' | '&' | '%' | '\\' | '{' | '}' | '`' | ',' => {
                 out.push('\\');
                 out.push(c);
             }
@@ -647,8 +695,8 @@ mod tests {
     #[test]
     fn fracciones_raices_y_scripts() {
         // ADR-002: operadores básicos.
-        assert_eq!(to_typst(r"\frac{a}{b}"), "a/b");
-        assert_eq!(to_typst(r"\frac{a+b}{c}"), "(a+b)/c");
+        assert_eq!(to_typst(r"\frac{a}{b}"), "frac(a, b)");
+        assert_eq!(to_typst(r"\frac{a+b}{c}"), "frac(a+b, c)");
         assert_eq!(to_typst(r"\sqrt{x}"), "sqrt(x)");
         assert_eq!(to_typst(r"\sqrt[3]{x}"), "root(3, x)");
         assert_eq!(to_typst(r"x^{2}"), "x^2");
@@ -660,7 +708,7 @@ mod tests {
     fn operadores_grandes_y_griegas() {
         // ADR-002: `\sum_{i=1}^{n}` → `sum_(i=1)^n`.
         assert_eq!(to_typst(r"\sum_{i=1}^{n}"), "sum_(i=1)^n");
-        assert_eq!(to_typst(r"\int_{a}^{b}"), "int_a^b");
+        assert_eq!(to_typst(r"\int_{a}^{b}"), "integral_a^b");
         assert_eq!(to_typst(r"\prod_{i=1}^{n}"), "product_(i=1)^n");
         assert_eq!(to_typst(r"\alpha + \beta"), "alpha + beta");
         assert_eq!(to_typst(r"\infty"), "infinity");
@@ -702,5 +750,23 @@ mod tests {
         assert_eq!(result.unsupported, vec![r"\foo".to_string()]);
         assert_eq!(result.typst, "");
         assert_eq!(result.marker(), "⚠ [math no soportado: \\foo]");
+    }
+}
+
+#[cfg(test)]
+mod compound_tests {
+    #[test]
+    fn groups_fractions_and_scripts_do_not_merge_adjacent_numbers() {
+        for (latex, expected) in [
+            (r"\frac {a} {b}", "frac(a, b)"),
+            (r"x^ {a+b}", "x^(a+b)"),
+            (r"x^{2}2", "x^2 2"),
+            (r"2\frac{1}{2}", "2 frac(1, 2)"),
+            (r"\frac{a}{b}^2", "frac(a, b)^2"),
+        ] {
+            let result = super::translate(latex);
+            assert!(result.is_supported());
+            assert_eq!(result.typst, expected);
+        }
     }
 }
