@@ -7,9 +7,11 @@
 //!
 //! Crate sin dependencias: solo `std` (§4.1).
 
+mod compositions;
 mod settings;
 mod theme;
 
+pub use compositions::{parse_compositions, Composition, CompositionWarning};
 pub use theme::{detect_system_theme, resolve_theme, ResolvedTheme, SystemTheme};
 
 pub use settings::{
@@ -272,14 +274,25 @@ mod tests {
 }
 
 /// Capa de ajustes escalares en el nivel raíz de TOML o front matter YAML.
-/// Las tablas, colecciones salvo `bibliography` y claves ajenas a Settings
-/// no se reinterpretan.
+/// Las tablas (cabecera que empieza por `[`) se saltan con su cuerpo entero:
+/// sus claves no forman parte de la capa. Las colecciones salvo `bibliography`
+/// y claves ajenas a Settings no se reinterpretan.
 pub fn parse_scalar_layer(source: &str, level: Level) -> ConfigLayer {
     let mut layer = ConfigLayer::new(level);
     let mut lines = source.lines().peekable();
     while let Some(line) = lines.next() {
         if level != Level::Document && line.trim_start().starts_with('[') {
-            break;
+            // Cabecera de tabla: se salta su cuerpo completo (hasta la
+            // siguiente cabecera o el fin del archivo) y se sigue leyendo en
+            // busca de escalares raíz; en TOML válido solo existen antes de la
+            // primera cabecera, y las claves de la tabla no se ingeren.
+            while let Some(rest) = lines.peek() {
+                if rest.trim_start().starts_with('[') {
+                    break;
+                }
+                lines.next();
+            }
+            continue;
         }
         if line.starts_with([' ', '\t']) {
             continue;
@@ -295,8 +308,16 @@ pub fn parse_scalar_layer(source: &str, level: Level) -> ConfigLayer {
         let raw = raw.trim();
         let value = if key == "bibliography" && raw.is_empty() && level == Level::Document {
             let mut items = Vec::new();
-            while let Some(line) = lines.peek().filter(|line| line.starts_with([' ', '\t']) && line.trim_start().starts_with("- ")) {
-                items.push(Value::Text(line.trim_start()[2..].trim().trim_matches(['\'', '"']).to_owned()));
+            while let Some(line) = lines
+                .peek()
+                .filter(|line| line.starts_with([' ', '\t']) && line.trim_start().starts_with("- "))
+            {
+                items.push(Value::Text(
+                    line.trim_start()[2..]
+                        .trim()
+                        .trim_matches(['\'', '"'])
+                        .to_owned(),
+                ));
                 lines.next();
             }
             Value::List(items)
@@ -366,7 +387,10 @@ mod bibliography_tests {
     use super::*;
     #[test]
     fn bibliography_accepts_scalar_arrays_and_yaml_lists_with_scope_precedence() {
-        for source in ["bibliography: [one.bib, two.bib]", "bibliography:\n  - one.bib\n  - 'two.bib'"] {
+        for source in [
+            "bibliography: [one.bib, two.bib]",
+            "bibliography:\n  - one.bib\n  - 'two.bib'",
+        ] {
             let document = parse_scalar_layer(source, Level::Document);
             let resolved = resolve(&[document]);
             assert_eq!(resolved.settings.bibliography, ["one.bib", "two.bib"]);
@@ -379,6 +403,9 @@ mod bibliography_tests {
         let document = parse_scalar_layer("bibliography_style: document.csl", Level::Document);
         let resolved = resolve(&[project, composition, document]);
         assert_eq!(resolved.settings.bibliography_style, "document.csl");
-        assert!(resolved.warnings.iter().any(|w| w.reason == WarningReason::NotApplicable));
+        assert!(resolved
+            .warnings
+            .iter()
+            .any(|w| w.reason == WarningReason::NotApplicable));
     }
 }
