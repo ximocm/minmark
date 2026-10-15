@@ -5,12 +5,13 @@
 //! exportación, para poder verificar el pipeline completo sin display.
 
 use minmark_config::Settings;
-use minmark_pdf::{PdfError, TypstEngine};
 #[cfg(test)]
 use minmark_pdf::PdfEngine;
+use minmark_pdf::{DocumentMeta, PdfError, TypstEngine};
 
 /// Exporta el texto Markdown a bytes PDF con los ajustes `pdf_*` de
-/// [`Settings`] (§32.3–§32.6: tamaño, márgenes y orientación).
+/// [`Settings`] (§32.3–§32.6: tamaño, márgenes y orientación) y los
+/// metadatos de las plantillas header/footer (§32.9).
 #[cfg(test)]
 pub fn export_document(source: &str, settings: &Settings) -> Result<Vec<u8>, PdfError> {
     let ast = minmark_parser::parse_with(
@@ -20,7 +21,12 @@ pub fn export_document(source: &str, settings: &Settings) -> Result<Vec<u8>, Pdf
             ..Default::default()
         },
     );
-    TypstEngine.export(&crate::academic::prepare_pdf(&ast, settings), settings)
+    let meta = DocumentMeta::from_ast(&ast);
+    TypstEngine.export(
+        &crate::academic::prepare_pdf(&ast, settings),
+        settings,
+        &meta,
+    )
 }
 
 #[cfg(test)]
@@ -63,14 +69,16 @@ mod reference_tests {
 
 /// Incluye las imágenes locales del documento como recursos en memoria.
 /// El motor recibe alias, nunca permiso para leer rutas arbitrarias.
+/// `meta` (§32.9) alimenta las variables de `pdf_header`/`pdf_footer`.
 pub fn export_document_at(
     source: &str,
     settings: &Settings,
     document: Option<&std::path::Path>,
     root: Option<&std::path::Path>,
+    meta: &DocumentMeta,
 ) -> Result<Vec<u8>, PdfError> {
     let (ast, assets) = document_assets(source, settings, document, root)?;
-    TypstEngine.export_with_assets(&ast, settings, assets)
+    TypstEngine.export_with_assets(&ast, settings, assets, meta)
 }
 
 pub fn paginated_preview_at(
@@ -78,9 +86,10 @@ pub fn paginated_preview_at(
     settings: &Settings,
     document: Option<&std::path::Path>,
     root: Option<&std::path::Path>,
+    meta: &DocumentMeta,
 ) -> Result<String, PdfError> {
     let (ast, assets) = document_assets(source, settings, document, root)?;
-    TypstEngine.preview_with_assets(&ast, settings, assets)
+    TypstEngine.preview_with_assets(&ast, settings, assets, meta)
 }
 
 fn document_assets(
@@ -215,6 +224,7 @@ mod figure_tests {
             &Settings::default(),
             Some(&root.join("document.md")),
             Some(&root),
+            &DocumentMeta::from_ast(&minmark_parser::parse(source)),
         )
         .unwrap();
         assert!(pdf.starts_with(b"%PDF"));
