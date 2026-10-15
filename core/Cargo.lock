@@ -1172,6 +1172,11 @@ version = "0.2.0"
 [[package]]
 name = "minmark-document"
 version = "0.2.0"
+dependencies = [
+ "minmark-config",
+ "minmark-parser",
+ "minmark-renderer",
+]
 
 [[package]]
 name = "minmark-fs"
