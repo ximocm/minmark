@@ -7,7 +7,7 @@
 //! Apariencia (§32.2): fondo blanco, texto oscuro, siempre. Configuración
 //! básica (§58.2): A4, márgenes 25 mm, Portrait — aplicada desde `Settings`.
 
-use crate::page_size_mm;
+use crate::{first_h1_title, page_size_mm, DocumentMeta};
 use minmark_config::{
     FontFamily, Orientation, PageNumberPosition, ParagraphStyle, Settings, TextAlignment,
 };
@@ -17,15 +17,16 @@ use minmark_document::{
 use minmark_renderer::Palette;
 use std::fmt::Write;
 
-/// Genera el documento Typst completo para la AST y los ajustes dados.
-pub fn generate(ast: &Ast, settings: &Settings) -> String {
+/// Genera el documento Typst completo para la AST, los ajustes y los
+/// metadatos documentales (§32.9) dados.
+pub fn generate(ast: &Ast, settings: &Settings, meta: &DocumentMeta) -> String {
     let (ast, mut diagnostics) = minmark_renderer::Bibliography::default().resolve(ast);
     let (ast, ref_diagnostics) = minmark_renderer::resolve_cross_references(&ast, settings);
     diagnostics.extend(ref_diagnostics);
     let (ast, note_diagnostics) = minmark_renderer::resolve_footnotes(&ast);
     diagnostics.extend(note_diagnostics);
     let labels = minmark_renderer::reference_ids(&ast);
-    let mut out = preamble(settings);
+    let mut out = preamble(&ast, settings, meta);
     for block in &ast.blocks {
         if let BlockKind::FootnoteDefinition { label, blocks } = &block.kind {
             let _ = writeln!(out, "#let mm-note-{label} = [");
@@ -41,24 +42,63 @@ pub fn generate(ast: &Ast, settings: &Settings) -> String {
     out
 }
 
-fn preamble(settings: &Settings) -> String {
+fn preamble(ast: &Ast, settings: &Settings, meta: &DocumentMeta) -> String {
     // §32.3–32.6: tamaño, márgenes en mm (§32.4) y orientación.
     let (mut width, mut height) = page_size_mm(settings.pdf_page_size);
     if settings.pdf_orientation == Orientation::Landscape {
         std::mem::swap(&mut width, &mut height);
     }
     let margins = &settings.pdf_margins_mm;
-    let mut out = format!(
+    // §32.9: estado con el texto plano del H1 más reciente, para {chapter}.
+    // Se declara antes de `#set page` porque las plantillas lo leen.
+    let mut out = String::from("#let mm-chapter = state(\"minmark-chapter\", \"\")\n");
+    let _ = write!(
+        out,
         "#set page(width: {width}mm, height: {height}mm, \
          margin: (top: {}mm, right: {}mm, bottom: {}mm, left: {}mm)",
         margins.top_mm, margins.right_mm, margins.bottom_mm, margins.left_mm
     );
+
+    // §32.9: plantillas de header/footer; vacías o None = sin marginal.
+    // §32.7–32.8: Typst descarta su número cuando el marginal de `number-align`
+    // lleva contenido explícito, así que si la plantilla ocupa ese mismo lado,
+    // el número se emite dentro de la plantilla; si no, sigue al número
+    // automático de `numbering`.
+    let position = settings.pdf_page_number_position;
+    let number_in_header = settings.pagination_enabled
+        && matches!(
+            position,
+            PageNumberPosition::HeaderLeft
+                | PageNumberPosition::HeaderCenter
+                | PageNumberPosition::HeaderRight
+        );
+    if let Some(template) = active_template(&settings.pdf_header) {
+        let _ = write!(
+            out,
+            ", header: {}",
+            marginal(template, ast, settings, meta, number_in_header, position)
+        );
+    }
+    if let Some(template) = active_template(&settings.pdf_footer) {
+        let _ = write!(
+            out,
+            ", footer: {}",
+            marginal(
+                template,
+                ast,
+                settings,
+                meta,
+                settings.pagination_enabled && !number_in_header,
+                position
+            )
+        );
+    }
     if settings.pagination_enabled {
         // §32.7–32.8: números de página solo con paginación activada.
         let _ = write!(
             out,
             ", numbering: \"1\", number-align: {}",
-            number_align(settings.pdf_page_number_position)
+            number_align(position)
         );
     }
     out.push_str(")\n");
@@ -81,13 +121,93 @@ fn preamble(settings: &Settings) -> String {
         ParagraphStyle::VerticalSpacing => out.push_str("#set par(first-line-indent: 0pt)\n"),
         ParagraphStyle::Indented => out.push_str("#set par(first-line-indent: 1.5em)\n"),
     }
-    // §33.5 alineación.
+    // §33.5 alineación (solo el cuerpo; los márgenes se alinean a mano en
+    // [`marginal`] para que las plantillas siempre empiecen por la izquierda).
     match settings.text_alignment {
         TextAlignment::Left => {}
         TextAlignment::Center => out.push_str("#set align(center)\n"),
         TextAlignment::Right => out.push_str("#set align(right)\n"),
     }
     out.push('\n');
+    out
+}
+
+/// §32.9: plantilla activa de un marginal; `None` si no existe o está vacía
+/// (el comportamiento por defecto es sin header/footer).
+fn active_template(value: &Option<String>) -> Option<&str> {
+    value.as_deref().filter(|text| !text.trim().is_empty())
+}
+
+/// Compone el contenido de un marginal (§32.9): la plantilla alineada a la
+/// izquierda y, cuando Typst descarta su número (§32.8), el número de página
+/// en la posición `pdf_page_number_position`.
+fn marginal(
+    template: &str,
+    ast: &Ast,
+    settings: &Settings,
+    meta: &DocumentMeta,
+    embed_number: bool,
+    position: PageNumberPosition,
+) -> String {
+    let body = render_template(template, ast, settings, meta);
+    if !embed_number {
+        // El argumento de `#set page` se evalúa en modo código: sin `#`, y el
+        // cuerpo `[...]` vuelve a ser markup.
+        return format!("align(left)[{body}]");
+    }
+    let number = "#(context counter(page).display(\"1\"))";
+    match position {
+        PageNumberPosition::HeaderLeft | PageNumberPosition::FooterLeft => format!(
+            "grid(columns: (auto, 1fr), gutter: .5em, align: (left, left), [{number}], [{body}])"
+        ),
+        PageNumberPosition::HeaderCenter | PageNumberPosition::FooterCenter => format!(
+            "grid(columns: (1fr, auto, 1fr), gutter: .5em, align: (left, center, left), \
+             [{body}], [{number}], [])"
+        ),
+        PageNumberPosition::HeaderRight | PageNumberPosition::FooterRight => format!(
+            "grid(columns: (1fr, auto), gutter: .5em, align: (left, right), [{body}], [{number}])"
+        ),
+    }
+}
+
+/// §32.9: expande una plantilla de header/footer a markup Typst. Las variables
+/// conocidas se sustituyen: `{title}` (con fallback al primer H1), `{author}`,
+/// `{project}` y `{date}` por su valor escapado; `{chapter}` por el estado que
+/// actualiza cada H1; `{page}` y `{pages}` por el contador de páginas, vacíos
+/// sin paginación (§32.7). Cualquier otra `{...}` queda literal (§7.4.5) y el
+/// resto del texto se escapa con [`escape_text`].
+fn render_template(template: &str, ast: &Ast, settings: &Settings, meta: &DocumentMeta) -> String {
+    let title = meta
+        .title
+        .clone()
+        .unwrap_or_else(|| first_h1_title(ast).unwrap_or_default());
+    let mut out = String::new();
+    let mut rest = template;
+    while let Some(open) = rest.find('{') {
+        let Some(close) = rest[open..].find('}').map(|index| open + index) else {
+            out.push_str(&escape_text(&rest[open..]));
+            return out;
+        };
+        out.push_str(&escape_text(&rest[..open]));
+        let name = &rest[open + 1..close];
+        match name {
+            "title" => out.push_str(&escape_text(&title)),
+            "author" => out.push_str(&escape_text(meta.author.as_deref().unwrap_or_default())),
+            "project" => out.push_str(&escape_text(meta.project.as_deref().unwrap_or_default())),
+            "date" => out.push_str(&escape_text(meta.date.as_deref().unwrap_or_default())),
+            "chapter" => out.push_str("#(context mm-chapter.get())"),
+            "page" if settings.pagination_enabled => {
+                out.push_str("#(context counter(page).display(\"1\"))")
+            }
+            "pages" if settings.pagination_enabled => {
+                out.push_str("#(context numbering(\"1\", ..counter(page).final()))")
+            }
+            "page" | "pages" => {} // §32.7: sin paginación, vacíos.
+            _ => out.push_str(&escape_text(&format!("{{{name}}}"))),
+        }
+        rest = &rest[close + 1..];
+    }
+    out.push_str(&escape_text(rest));
     out
 }
 
@@ -129,10 +249,29 @@ fn render_block(
         let _ = writeln!(out, "#box[]#label({})", typst_string(id));
     }
     match &block.kind {
-        BlockKind::Bibliography { entries, hanging_indent, second_field_align, line_spacing, entry_spacing } => {
+        BlockKind::Bibliography {
+            entries,
+            hanging_indent,
+            second_field_align,
+            line_spacing,
+            entry_spacing,
+        } => {
             out.push_str("#block[\n");
-            let _ = writeln!(out, "#set par(leading: {}em, hanging-indent: {}em)", (line_spacing - 1.0).max(0.0), if *hanging_indent && !*second_field_align { 1.5 } else { 0.0 });
-            out.push_str(if settings.language.starts_with("es") { "*Bibliografía*\n\n" } else { "*References*\n\n" });
+            let _ = writeln!(
+                out,
+                "#set par(leading: {}em, hanging-indent: {}em)",
+                (line_spacing - 1.0).max(0.0),
+                if *hanging_indent && !*second_field_align {
+                    1.5
+                } else {
+                    0.0
+                }
+            );
+            out.push_str(if settings.language.starts_with("es") {
+                "*Bibliografía*\n\n"
+            } else {
+                "*References*\n\n"
+            });
             for (label, content) in entries {
                 if *second_field_align {
                     out.push_str("#grid(columns: (auto, 1fr), gutter: .5em, [");
@@ -142,7 +281,9 @@ fn render_block(
                     out.push_str("])\n");
                 } else {
                     render_inlines(label, settings, labels, out);
-                    if !label.is_empty() { out.push(' '); }
+                    if !label.is_empty() {
+                        out.push(' ');
+                    }
                     render_inlines(content, settings, labels, out);
                     out.push_str("\n\n");
                 }
@@ -151,6 +292,15 @@ fn render_block(
             out.push_str("]\n\n");
         }
         BlockKind::Heading { level, content, .. } => {
+            if *level == 1 {
+                // §32.9: {chapter} lee este estado; el footer lo ve al final
+                // de la página y el header al empezarla (orden de frames).
+                let _ = writeln!(
+                    out,
+                    "#mm-chapter.update({})",
+                    typst_string(&plain_text(content))
+                );
+            }
             for _ in 0..(*level).clamp(1, 6) {
                 out.push('=');
             }
@@ -300,13 +450,27 @@ fn render_inlines(
             Inline::Styled { content, style } => {
                 let mut body = String::new();
                 render_inlines(content, settings, labels, &mut body);
-                if style.italic { body = format!("#text(style: \"italic\")[{body}]"); }
-                if style.bold { body = format!("#text(weight: \"bold\")[{body}]"); }
-                if style.light { body = format!("#text(weight: \"light\")[{body}]"); }
-                if style.small_caps { body = format!("#smallcaps[{body}]"); }
-                if style.underline { body = format!("#underline[{body}]"); }
-                if style.vertical == 1 { body = format!("#super[{body}]"); }
-                if style.vertical == -1 { body = format!("#sub[{body}]"); }
+                if style.italic {
+                    body = format!("#text(style: \"italic\")[{body}]");
+                }
+                if style.bold {
+                    body = format!("#text(weight: \"bold\")[{body}]");
+                }
+                if style.light {
+                    body = format!("#text(weight: \"light\")[{body}]");
+                }
+                if style.small_caps {
+                    body = format!("#smallcaps[{body}]");
+                }
+                if style.underline {
+                    body = format!("#underline[{body}]");
+                }
+                if style.vertical == 1 {
+                    body = format!("#super[{body}]");
+                }
+                if style.vertical == -1 {
+                    body = format!("#sub[{body}]");
+                }
                 out.push_str(&body);
             }
             Inline::FootnoteReference(label) => {
@@ -469,11 +633,21 @@ fn citation_text(items: &[CitationItem]) -> String {
     out
 }
 
-fn plain_text(inlines: &[Inline]) -> String {
+/// Texto plano de una secuencia de inlines: `alt` de imágenes (§7.4.4), valor
+/// de `{chapter}` y título de respaldo de `{title}` (§32.9).
+pub(crate) fn plain_text(inlines: &[Inline]) -> String {
     let mut out = String::new();
     for inline in inlines {
         match inline {
             Inline::Text(t) | Inline::Code(t) => out.push_str(t),
+            Inline::Emphasis(content)
+            | Inline::Strong(content)
+            | Inline::Strikethrough(content)
+            | Inline::Link { content, .. }
+            | Inline::Styled { content, .. } => out.push_str(&plain_text(content)),
+            Inline::Color { text, .. } => out.push_str(text),
+            Inline::WikiLink { target } => out.push_str(target),
+            Inline::SoftBreak | Inline::HardBreak => out.push(' '),
             _ => {}
         }
     }
@@ -547,7 +721,7 @@ mod tests {
     use minmark_parser::parse;
 
     fn source(md: &str) -> String {
-        generate(&parse(md), &Settings::default())
+        generate(&parse(md), &Settings::default(), &DocumentMeta::default())
     }
 
     #[test]
@@ -568,7 +742,7 @@ mod tests {
             ..Settings::default()
         };
         let ast = parse("# T\n");
-        let out = generate(&ast, &settings);
+        let out = generate(&ast, &settings, &DocumentMeta::default());
         assert!(out.contains("numbering: \"1\""));
         assert!(out.contains("number-align: bottom + right"));
 
@@ -577,7 +751,7 @@ mod tests {
             pdf_margins_mm: minmark_config::Margins::uniform(10.0),
             ..Settings::default()
         };
-        let out = generate(&parse("# T\n"), &settings);
+        let out = generate(&parse("# T\n"), &settings, &DocumentMeta::default());
         assert!(out.contains("#set page(width: 297mm, height: 210mm"));
         assert!(out.contains("top: 10mm"));
     }
@@ -654,12 +828,105 @@ mod tests {
                 language: language.into(),
                 ..Default::default()
             };
-            let out = generate(&minmark_parser::parse(source), &settings);
+            let out = generate(
+                &minmark_parser::parse(source),
+                &settings,
+                &DocumentMeta::default(),
+            );
             let image = out.find("#image(").unwrap();
             let caption = out.find(&format!("{name} 1. Esquema")).unwrap();
             assert!(image < caption);
             assert!(out[image..caption].contains("#parbreak()#align(center)"));
             assert!(out.contains("#block(breakable: false)["));
         }
+    }
+
+    #[test]
+    fn plantillas_de_header_footer_en_preamble_32_9() {
+        // §32.9: el state de {chapter} se declara antes de `#set page` y las
+        // plantillas se expanden con los metadatos; {foo} queda literal.
+        let settings = Settings {
+            pagination_enabled: true,
+            pdf_header: Some("Cab {title}".into()),
+            pdf_footer: Some("Pie {author} {foo}".into()),
+            ..Settings::default()
+        };
+        let meta = DocumentMeta {
+            title: Some("Mi Doc".into()),
+            author: Some("Autora".into()),
+            project: None,
+            date: None,
+        };
+        let out = generate(&parse("# T\n"), &settings, &meta);
+        let state = out.find("#let mm-chapter").unwrap();
+        let page = out.find("#set page").unwrap();
+        assert!(state < page, "el state debe declararse antes de {page:?}");
+        assert!(out.contains(", header: align(left)[Cab Mi Doc]"));
+        assert!(out.contains("[Pie Autora {foo}]"), "{out}");
+        // §32.8: con la plantilla en el lado del número (FooterRight por
+        // defecto) el número se emite dentro del footer.
+        assert!(out.contains("grid(columns: (1fr, auto)"));
+        assert!(out.contains("numbering: \"1\""));
+        assert!(out.contains("number-align: bottom + right"));
+    }
+
+    #[test]
+    fn numero_embebido_sigue_pdf_page_number_position_32_8() {
+        for (position, expected) in [
+            (PageNumberPosition::FooterLeft, "grid(columns: (auto, 1fr)"),
+            (
+                PageNumberPosition::FooterCenter,
+                "grid(columns: (1fr, auto, 1fr)",
+            ),
+            (PageNumberPosition::FooterRight, "grid(columns: (1fr, auto)"),
+            // El número va en el header y el footer solo lleva plantilla.
+            (
+                PageNumberPosition::HeaderCenter,
+                ", footer: align(left)[Pie]",
+            ),
+        ] {
+            let settings = Settings {
+                pagination_enabled: true,
+                pdf_page_number_position: position,
+                pdf_footer: Some("Pie".into()),
+                ..Settings::default()
+            };
+            let out = generate(&parse("# T\n"), &settings, &DocumentMeta::default());
+            assert!(
+                out.contains(expected),
+                "posición {position:?}: falta {expected:?} en:\n{out}"
+            );
+        }
+    }
+
+    #[test]
+    fn plantillas_vacias_o_none_sin_marginales_32_9() {
+        for header in [None, Some(String::new()), Some("   \n".to_owned())] {
+            let settings = Settings {
+                pdf_header: header,
+                pdf_footer: Some(String::new()),
+                ..Settings::default()
+            };
+            let out = generate(&parse("# T\n"), &settings, &DocumentMeta::default());
+            assert!(!out.contains("header:"), "sin header: {out}");
+            assert!(!out.contains("footer:"), "sin footer: {out}");
+        }
+    }
+
+    #[test]
+    fn sin_paginacion_page_y_pages_vacios_32_7() {
+        // §32.7: sin paginación no hay numbering ni contadores; {page} y
+        // {pages} se expanden vacíos (queda solo el texto literal).
+        let settings = Settings {
+            pdf_footer: Some("P[{page}]S[{pages}]".into()),
+            ..Settings::default()
+        };
+        let out = generate(&parse("# T\n"), &settings, &DocumentMeta::default());
+        assert!(
+            out.contains(", footer: align(left)[P\\[\\]S\\[\\]]"),
+            "{out}"
+        );
+        assert!(!out.contains("counter(page)"), "{out}");
+        assert!(!out.contains("numbering"), "{out}");
     }
 }

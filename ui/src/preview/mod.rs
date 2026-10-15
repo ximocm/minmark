@@ -66,7 +66,14 @@ pub fn render_document_at(
     root: Option<&std::path::Path>,
 ) -> String {
     if settings.pagination_enabled {
-        match crate::export::paginated_preview_at(source, settings, document, root) {
+        let meta = minmark_pdf::DocumentMeta::from_ast(&minmark_parser::parse_with(
+            source,
+            &minmark_parser::ParseOptions {
+                wiki_links: settings.wiki_links,
+                ..Default::default()
+            },
+        ));
+        match crate::export::paginated_preview_at(source, settings, document, root, &meta) {
             Ok(html) => return html,
             Err(error) => {
                 eprintln!("minmark: Preview paginado: {error}");
@@ -107,10 +114,18 @@ impl PreviewPane {
     #[cfg(test)]
     pub fn test_snapshot(&self, path: &std::path::Path, done: std::rc::Rc<std::cell::Cell<bool>>) {
         let path = path.to_owned();
-        self.webview.snapshot(webkit6::SnapshotRegion::FullDocument, webkit6::SnapshotOptions::NONE, None::<&gtk::gio::Cancellable>, move |result| {
-            result.expect("WebKit snapshot").save_to_png(&path).expect("snapshot PNG");
-            done.set(true);
-        });
+        self.webview.snapshot(
+            webkit6::SnapshotRegion::FullDocument,
+            webkit6::SnapshotOptions::NONE,
+            None::<&gtk::gio::Cancellable>,
+            move |result| {
+                result
+                    .expect("WebKit snapshot")
+                    .save_to_png(&path)
+                    .expect("snapshot PNG");
+                done.set(true);
+            },
+        );
     }
     #[cfg(test)]
     pub fn test_click_first_link(&self, done: std::rc::Rc<std::cell::Cell<bool>>) {

@@ -6,3 +6,8 @@ license.workspace = true
 description = "Modelo documental de minmark: buffer Markdown único y AST compartida"
 
 [dependencies]
+
+[dev-dependencies]
+minmark-parser = { path = "../minmark-parser" }
+minmark-renderer = { path = "../minmark-renderer" }
+minmark-config = { workspace = true }

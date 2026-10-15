@@ -1495,6 +1495,7 @@ impl Commands for AppCmds {
                 tab.path.clone(),
             )
         };
+        let meta = minmark_pdf::DocumentMeta::from_ast(&minmark_parser::parse(&text));
         glib::spawn_future_local(async move {
             let Some(path) = dialogs::save_pdf(&window, &suggested).await else {
                 return;
@@ -1504,6 +1505,7 @@ impl Commands for AppCmds {
                 &settings,
                 document_path.as_deref(),
                 root.as_deref(),
+                &meta,
             ) {
                 Ok(bytes) => {
                     if let Err(err) = std::fs::write(&path, &bytes) {
@@ -2355,7 +2357,12 @@ mod gtk_integration_tests {
         }
     }
     fn settle_preview(cmds: &AppCmds) {
-        pump_until(|| !cmds.intelligence_busy.get() && !cmds.intelligence_pending.get() && !cmds.refresh_scheduled.get() && !cmds.preview.test_is_loading());
+        pump_until(|| {
+            !cmds.intelligence_busy.get()
+                && !cmds.intelligence_pending.get()
+                && !cmds.refresh_scheduled.get()
+                && !cmds.preview.test_is_loading()
+        });
     }
     fn preview_number(cmds: &AppCmds, script: &str) -> f64 {
         settle_preview(cmds);
@@ -2657,75 +2664,184 @@ mod gtk_integration_tests {
         let paper = root.join("academic.md");
         let source = include_str!("../../docs/qa/fixtures/academic.md");
         std::fs::write(&paper, source).unwrap();
-        std::fs::write(root.join("references.bib"), include_str!("../../docs/qa/fixtures/references.bib")).unwrap();
-        std::fs::write(root.join("extra.bib"), include_str!("../../docs/qa/fixtures/extra.bib")).unwrap();
-        std::fs::write(root.join("author-year.csl"), include_str!("../../docs/qa/fixtures/author-year.csl")).unwrap();
-        let cmds = build_window(app, WindowScope::Project(root.to_owned()), std::slice::from_ref(&paper));
-        assert_eq!(preview_number(&cmds, "document.querySelectorAll('[role=math] svg').length"), 5.0);
+        std::fs::write(
+            root.join("references.bib"),
+            include_str!("../../docs/qa/fixtures/references.bib"),
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("extra.bib"),
+            include_str!("../../docs/qa/fixtures/extra.bib"),
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("author-year.csl"),
+            include_str!("../../docs/qa/fixtures/author-year.csl"),
+        )
+        .unwrap();
+        let cmds = build_window(
+            app,
+            WindowScope::Project(root.to_owned()),
+            std::slice::from_ref(&paper),
+        );
+        assert_eq!(
+            preview_number(&cmds, "document.querySelectorAll('[role=math] svg').length"),
+            5.0
+        );
         assert_eq!(preview_number(&cmds, "(() => { const ids = [...document.querySelectorAll('svg [id]')].map(e => e.id); return new Set(ids).size === ids.length ? 1 : 0; })()"), 1.0);
         assert_eq!(preview_number(&cmds, "[...document.querySelectorAll('[role=math] svg')].every(e => { const b = e.getBBox(), v = e.viewBox.baseVal; return b.y >= -2 && b.y + b.height <= v.height + 2; }) ? 1 : 0"), 1.0);
         assert_eq!(preview_number(&cmds, "(() => { document.documentElement.dataset.theme = 'dark'; const color = getComputedStyle(document.body).color; return [...document.querySelectorAll('[role=math] svg use')].every(e => getComputedStyle(e).fill === color) && [...document.querySelectorAll('[role=math] svg [stroke=\"#000000\"]')].every(e => getComputedStyle(e).stroke === color) ? 1 : 0; })()"), 1.0);
         preview_number(&cmds, "document.documentElement.dataset.theme = 'light'; 1");
-        assert_eq!(preview_number(&cmds, "document.querySelectorAll('.mm-footnotes li').length"), 2.0);
+        assert_eq!(
+            preview_number(
+                &cmds,
+                "document.querySelectorAll('.mm-footnotes li').length"
+            ),
+            2.0
+        );
         assert_eq!(preview_number(&cmds, "(() => { document.querySelector('[role=doc-noteref]').click(); const r = document.getElementById('mm-note-1').getBoundingClientRect(); return r.top >= 0 && r.top < innerHeight ? 1 : 0; })()"), 1.0);
         assert_eq!(preview_number(&cmds, "(() => { document.querySelector('.mm-footnotes a').click(); const r = document.getElementById('mm-note-ref-1-1').getBoundingClientRect(); return r.top >= 0 && r.top < innerHeight ? 1 : 0; })()"), 1.0);
-        assert_eq!(preview_number(&cmds, "document.querySelectorAll('.mm-toc a').length"), 4.0);
+        assert_eq!(
+            preview_number(&cmds, "document.querySelectorAll('.mm-toc a').length"),
+            4.0
+        );
         assert_eq!(preview_number(&cmds, "document.body.textContent.includes('Ecuación 2.1') && document.body.textContent.includes('Energy Research') ? 1 : 0"), 1.0);
         assert!(!cmds.tabs.borrow().active().editor.document().is_modified());
         let evidence = std::env::var_os("MINMARK_QA_OUTPUT_DIR").map(PathBuf::from);
         if let Some(evidence) = &evidence {
             std::fs::create_dir_all(evidence).unwrap();
             let done = Rc::new(Cell::new(false));
-            cmds.preview.test_snapshot(&evidence.join("academic-continuous.png"), done.clone());
+            cmds.preview
+                .test_snapshot(&evidence.join("academic-continuous.png"), done.clone());
             pump_until(|| done.get());
             let settings = cmds.settings.borrow().clone();
-            let pdf = export::export_document_at(source, &settings, Some(&paper), Some(root)).unwrap();
+            let pdf = export::export_document_at(
+                source,
+                &settings,
+                Some(&paper),
+                Some(root),
+                &minmark_pdf::DocumentMeta::from_ast(&minmark_parser::parse(source)),
+            )
+            .unwrap();
             std::fs::write(evidence.join("academic.pdf"), pdf).unwrap();
-            std::fs::write(evidence.join("academic.html"), preview::render_document(source, &settings)).unwrap();
+            std::fs::write(
+                evidence.join("academic.html"),
+                preview::render_document(source, &settings),
+            )
+            .unwrap();
         }
         // Cambiar un .bib actualiza Preview sin editar ni marcar dirty el Markdown.
-        let changed = include_str!("../../docs/qa/fixtures/references.bib").replace("Energy Research", "Energy Research Updated");
+        let changed = include_str!("../../docs/qa/fixtures/references.bib")
+            .replace("Energy Research", "Energy Research Updated");
         std::fs::write(root.join("references.bib"), changed).unwrap();
         pump_until(|| cmds.refresh_scheduled.get() || cmds.intelligence_busy.get());
-        assert_eq!(preview_number(&cmds, "document.body.textContent.includes('Energy Research Updated') ? 1 : 0"), 1.0);
+        assert_eq!(
+            preview_number(
+                &cmds,
+                "document.body.textContent.includes('Energy Research Updated') ? 1 : 0"
+            ),
+            1.0
+        );
         assert!(!cmds.tabs.borrow().active().editor.document().is_modified());
         // Teclado real del popup: aceptar, cancelar y un único undo/redo.
         let completion_source = "---\nbibliography: references.bib\n---\nβ [@Sm, p. 42]\r\n";
-        let original_len = cmds.tabs.borrow().active().editor.document().content().len();
+        let original_len = cmds
+            .tabs
+            .borrow()
+            .active()
+            .editor
+            .document()
+            .content()
+            .len();
         let end = cmds.tabs.borrow().active().editor.position_of(original_len);
-        cmds.tabs.borrow_mut().replace_active(Range::new(Position::new(0, 0), end), completion_source);
+        cmds.tabs
+            .borrow_mut()
+            .replace_active(Range::new(Position::new(0, 0), end), completion_source);
         cmds.reload_active();
-        let cursor = cmds.tabs.borrow().active().editor.position_of(completion_source.find(", p.").unwrap());
-        cmds.editor_pane.focus_find_match(Range::new(cursor, cursor));
+        let cursor = cmds
+            .tabs
+            .borrow()
+            .active()
+            .editor
+            .position_of(completion_source.find(", p.").unwrap());
+        cmds.editor_pane
+            .focus_find_match(Range::new(cursor, cursor));
         *cmds.completion_source.borrow_mut() = None;
         cmds.refresh_intelligence(true);
         pump_until(|| cmds.completion_source.borrow().is_some());
-        assert!(cmds.editor_pane.emit_test_key(gtk4::gdk::Key::Tab, gtk4::gdk::ModifierType::empty()));
-        assert_eq!(cmds.tabs.borrow().active().editor.document().content(), completion_source.replace("@Sm", "@smith2025"));
+        assert!(cmds
+            .editor_pane
+            .emit_test_key(gtk4::gdk::Key::Tab, gtk4::gdk::ModifierType::empty()));
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content(),
+            completion_source.replace("@Sm", "@smith2025")
+        );
         cmds.undo();
-        assert_eq!(cmds.tabs.borrow().active().editor.document().content(), completion_source);
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content(),
+            completion_source
+        );
         *cmds.completion_source.borrow_mut() = None;
         cmds.refresh_intelligence(true);
         pump_until(|| cmds.completion_source.borrow().is_some());
-        assert!(cmds.editor_pane.emit_test_key(gtk4::gdk::Key::Escape, gtk4::gdk::ModifierType::empty()));
-        assert_eq!(cmds.tabs.borrow().active().editor.document().content(), completion_source);
+        assert!(cmds
+            .editor_pane
+            .emit_test_key(gtk4::gdk::Key::Escape, gtk4::gdk::ModifierType::empty()));
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content(),
+            completion_source
+        );
         cmds.redo();
-        assert!(cmds.tabs.borrow().active().editor.document().content().contains("@smith2025, p. 42"));
+        assert!(cmds
+            .tabs
+            .borrow()
+            .active()
+            .editor
+            .document()
+            .content()
+            .contains("@smith2025, p. 42"));
         cmds.toggle_mode();
         cmds.toggle_mode();
-        assert!(cmds.tabs.borrow().active().editor.document().content().ends_with("\r\n"));
+        assert!(cmds
+            .tabs
+            .borrow()
+            .active()
+            .editor
+            .document()
+            .content()
+            .ends_with("\r\n"));
         // CSL alternativo, notas y TOC comparten la composición paginada/PDF.
-        let paginated = source.replace("language: es", "language: es\npagination: true\nbibliography_style: author-year.csl");
-        let len = cmds.tabs.borrow().active().editor.document().content().len();
+        let paginated = source.replace(
+            "language: es",
+            "language: es\npagination: true\nbibliography_style: author-year.csl",
+        );
+        let len = cmds
+            .tabs
+            .borrow()
+            .active()
+            .editor
+            .document()
+            .content()
+            .len();
         let end = cmds.tabs.borrow().active().editor.position_of(len);
-        cmds.tabs.borrow_mut().replace_active(Range::new(Position::new(0, 0), end), &paginated);
+        cmds.tabs
+            .borrow_mut()
+            .replace_active(Range::new(Position::new(0, 0), end), &paginated);
         cmds.reload_active();
         assert!(preview_number(&cmds, "document.querySelectorAll('.mm-paged-page').length") >= 2.0);
         if let Some(evidence) = &evidence {
             let done = Rc::new(Cell::new(false));
-            cmds.preview.test_snapshot(&evidence.join("academic-paginated.png"), done.clone());
+            cmds.preview
+                .test_snapshot(&evidence.join("academic-paginated.png"), done.clone());
             pump_until(|| done.get());
-            let pdf = export::export_document_at(&paginated, &cmds.settings.borrow(), Some(&paper), Some(root)).unwrap();
+            let pdf = export::export_document_at(
+                &paginated,
+                &cmds.settings.borrow(),
+                Some(&paper),
+                Some(root),
+                &minmark_pdf::DocumentMeta::from_ast(&minmark_parser::parse(&paginated)),
+            )
+            .unwrap();
             std::fs::write(evidence.join("academic-author-year.pdf"), pdf).unwrap();
         }
         assert_eq!(std::fs::read_to_string(&paper).unwrap(), source);

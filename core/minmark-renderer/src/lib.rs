@@ -32,8 +32,8 @@ mod palette;
 
 use minmark_config::{Settings, Theme};
 use minmark_document::{
-    document_anchors, find_heading_nodes, Align, Ast, Attributes, Block, BlockKind, CitationItem,
-    Inline, ListItem, Span, Substitution,
+    document_anchors, find_heading_nodes, parse_attributes, Align, Ast, Attributes, Block,
+    BlockKind, CitationItem, Inline, ListItem, Span, Substitution,
 };
 use std::collections::BTreeMap;
 
@@ -187,6 +187,7 @@ fn render_block(block: &Block, ids: &HeadingIds, settings: &Settings, out: &mut 
         BlockKind::Paragraph { content } => {
             out.push_str("<p");
             push_span(out, block.span);
+            push_paragraph_id(out, content, block.span, ids);
             out.push('>');
             render_inlines(content, settings, out);
             out.push_str("</p>\n");
@@ -347,6 +348,23 @@ fn push_id(out: &mut String, attrs: &Option<Attributes>) {
     }
 }
 
+/// ID del párrafo ancla de una composición (§20.4): un párrafo vacío cuya
+/// línea en el fuente es una línea de atributos `{#id}` emite ese `id` para
+/// que `#mm-part-{i}` sea alcanzable en el Preview. El parser nunca produce
+/// párrafos vacíos (ni atributos en párrafos), así que los documentos
+/// simples renderizan exactamente igual; los spans sintéticos de longitud
+/// cero (p. ej. notas de citas) tampoco consultan el mapa.
+fn push_paragraph_id(out: &mut String, content: &[Inline], span: Span, ids: &HeadingIds) {
+    if !content.is_empty() || span.end <= span.start {
+        return;
+    }
+    if let Some(id) = ids.attr_line_id_for_span(span) {
+        out.push_str(" id=\"");
+        push_escaped(out, id);
+        out.push('"');
+    }
+}
+
 /// Anclas de los headings del documento (§26): línea (1-based) de inicio del
 /// heading → ID final, con la política única de [`document_anchors`] — la
 /// misma que usa el índice del proyecto (`minmark-fs`), de modo que Preview e
@@ -354,6 +372,12 @@ fn push_id(out: &mut String, attrs: &Option<Attributes>) {
 struct HeadingIds {
     line_starts: Vec<u32>,
     ids: BTreeMap<u32, String>,
+    /// Líneas (1-based) cuyo contenido es una línea de atributos `{#id}`
+    /// (§7.4.3) → id, para el párrafo ancla vacío de una parte sin headings
+    /// de una composición (§20.4). El parser nunca produce párrafos vacíos,
+    /// así que esta consulta solo la hace `compose`; los documentos simples
+    /// renderizan igual que siempre.
+    attr_lines: BTreeMap<u32, String>,
 }
 
 impl HeadingIds {
@@ -367,7 +391,21 @@ impl HeadingIds {
         for (offset, _) in source.match_indices('\n') {
             line_starts.push(offset as u32 + 1);
         }
-        Self { line_starts, ids }
+        let mut attr_lines = BTreeMap::new();
+        for (n, line) in source.split_inclusive('\n').enumerate() {
+            let trimmed = line.trim();
+            if !trimmed.starts_with('{') || !trimmed.ends_with('}') {
+                continue;
+            }
+            if let Some(id) = parse_attributes(&trimmed[1..trimmed.len() - 1]).and_then(|a| a.id) {
+                attr_lines.insert(n as u32 + 1, id);
+            }
+        }
+        Self {
+            line_starts,
+            ids,
+            attr_lines,
+        }
     }
 
     fn line_of(&self, offset: u32) -> u32 {
@@ -376,6 +414,12 @@ impl HeadingIds {
 
     fn id_for_span(&self, span: Span) -> Option<&str> {
         self.ids.get(&self.line_of(span.start)).map(String::as_str)
+    }
+
+    fn attr_line_id_for_span(&self, span: Span) -> Option<&str> {
+        self.attr_lines
+            .get(&self.line_of(span.start))
+            .map(String::as_str)
     }
 }
 
@@ -858,6 +902,27 @@ mod tests {
             let marker = format!("data-mm-span=\"{},{}\"", block.span.start, block.span.end);
             assert!(out.contains(&marker), "falta {marker} en el HTML");
         }
+    }
+
+    /// §20.4: el párrafo ancla vacío de una composición emite el `id` de su
+    /// línea de atributos; un documento simple con la misma línea (párrafo
+    /// con contenido) no cambia.
+    #[test]
+    fn parrafo_ancla_vacio_emite_id_sin_afectar_simple() {
+        let source = "{#mm-part-0}\n\ntexto\n";
+        let mut ast = parse(source);
+        let out = render_preview(&ast, source, &Settings::default());
+        assert!(!out.contains("id=\"mm-part-0\""), "{out}");
+
+        let BlockKind::Paragraph { content } = &mut ast.blocks[0].kind else {
+            panic!("esperaba párrafo: {:?}", ast.blocks[0]);
+        };
+        content.clear();
+        let out = render_preview(&ast, source, &Settings::default());
+        assert!(
+            out.contains("<p data-mm-span=\"0,13\" id=\"mm-part-0\">"),
+            "{out}"
+        );
     }
 
     #[test]
