@@ -103,9 +103,12 @@ fn preamble(ast: &Ast, settings: &Settings, meta: &DocumentMeta) -> String {
     }
     out.push_str(")\n");
 
-    // §33: tipografía (sans/serif/mono libres; fallback del World embebido).
+    // §33: tipografía (sans/serif/mono libres; todas resuelven en el World
+    // embebido). §33.1: el default sans-serif es Liberation Sans —antes la
+    // cadena apuntaba a familias inexistentes (Inter/DejaVu Sans) y caía a
+    // una serif— con Libertinus Serif como último recurso.
     let fonts = match settings.body_font {
-        FontFamily::SansSerif => "\"Inter\", \"DejaVu Sans\", \"Libertinus Serif\"",
+        FontFamily::SansSerif => "\"Liberation Sans\", \"Libertinus Serif\"",
         FontFamily::Serif => "\"Libertinus Serif\", \"New Computer Modern\"",
         FontFamily::Monospace => "\"DejaVu Sans Mono\", \"New Computer Modern\"",
     };
@@ -732,6 +735,35 @@ mod tests {
         assert!(out.contains("margin: (top: 25mm, right: 25mm, bottom: 25mm, left: 25mm)"));
         // §32.7: sin números de página sin paginación activada.
         assert!(!out.contains("numbering"));
+    }
+
+    #[test]
+    fn familias_tipograficas_del_world_33() {
+        // §33.1: el default sans-serif emite Liberation Sans (asset sans del
+        // World embebido), no una serif; serif y mono emiten familias que
+        // también están en el World.
+        let out = source("# T\n");
+        assert!(
+            out.contains("#set text(font: (\"Liberation Sans\", \"Libertinus Serif\")"),
+            "default sans-serif sin Liberation Sans:\n{out}"
+        );
+        for (body_font, esperado) in [
+            (
+                FontFamily::Serif,
+                "#set text(font: (\"Libertinus Serif\", \"New Computer Modern\")",
+            ),
+            (
+                FontFamily::Monospace,
+                "#set text(font: (\"DejaVu Sans Mono\", \"New Computer Modern\")",
+            ),
+        ] {
+            let settings = Settings {
+                body_font,
+                ..Settings::default()
+            };
+            let out = generate(&parse("# T\n"), &settings, &DocumentMeta::default());
+            assert!(out.contains(esperado), "{esperado} ausente:\n{out}");
+        }
     }
 
     #[test]

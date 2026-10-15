@@ -327,6 +327,94 @@ mod tests {
         assert!(pdf.contains("340"), "ancho custom incorrecto");
         assert!(pdf.contains("680"), "alto custom incorrecto");
     }
+
+    #[test]
+    fn pagebreak_fuerza_pagina_en_paginado_31() {
+        // §31: en Preview paginado/PDF `{{pagebreak}}` fuerza nueva página:
+        // el documento sale en dos páginas y el código generado lleva
+        // `#pagebreak()`. (En continuo es un separador discreto: se cubre en
+        // minmark-renderer.)
+        let source =
+            "# Uno\n\nCuerpo sin dígitos.\n\n{{pagebreak}}\n\n# Dos.\n\nMás cuerpo sin dígitos.\n";
+        let ast = parse(source);
+        let settings = Settings {
+            pagination_enabled: true,
+            ..Settings::default()
+        };
+        let document = compile_document(
+            &ast,
+            &settings,
+            Default::default(),
+            &DocumentMeta::default(),
+        )
+        .unwrap();
+        assert!(
+            document.pages.len() >= 2,
+            "{} página(s) con {{pagebreak}}",
+            document.pages.len()
+        );
+        let out = generate(&ast, &settings, &DocumentMeta::default());
+        assert!(out.contains("#pagebreak()"), "sin salto forzado:\n{out}");
+    }
+
+    #[test]
+    fn tamano_custom_desde_capa_hasta_el_pdf_32_3() {
+        // §32.3/§58.1: `pdf_page_size = { … }` (TOML) y `pdf_page_size: { … }`
+        // (front matter YAML) resuelven en la cadena hasta Settings y el PDF
+        // sale con esas dimensiones: 120 mm ≈ 340 pt, 240 mm ≈ 680 pt.
+        for (source, level) in [
+            (
+                "pdf_page_size = { width_mm = 120, height_mm = 240 }",
+                minmark_config::Level::Global,
+            ),
+            (
+                "pdf_page_size: { width_mm: 120, height_mm: 240 }",
+                minmark_config::Level::Document,
+            ),
+        ] {
+            let resolved =
+                minmark_config::resolve(&[minmark_config::parse_scalar_layer(source, level)]);
+            assert_eq!(
+                resolved.settings.pdf_page_size,
+                PageSize::Custom {
+                    width_mm: 120.0,
+                    height_mm: 240.0,
+                },
+                "{level:?}"
+            );
+            assert!(resolved.warnings.is_empty(), "{level:?}");
+            let bytes = TypstEngine
+                .export(
+                    &parse("# T\n\nCuerpo.\n"),
+                    &resolved.settings,
+                    &DocumentMeta::default(),
+                )
+                .unwrap();
+            let pdf = String::from_utf8_lossy(&bytes);
+            assert!(pdf.contains("340"), "ancho custom incorrecto: {source}");
+            assert!(pdf.contains("680"), "alto custom incorrecto: {source}");
+        }
+    }
+
+    #[test]
+    fn exporta_por_defecto_con_liberation_sans_33() {
+        // §33.1: la exportación por defecto (sans-serif) incrusta Liberation
+        // Sans del World embebido; antes la cadena apuntaba a familias
+        // inexistentes y caía a Libertinus Serif (una serif).
+        let bytes = TypstEngine
+            .export(
+                &parse("# Hola\n"),
+                &Settings::default(),
+                &DocumentMeta::default(),
+            )
+            .unwrap();
+        assert!(bytes.starts_with(b"%PDF-"));
+        let pdf = String::from_utf8_lossy(&bytes);
+        assert!(
+            pdf.contains("Liberation"),
+            "el PDF por defecto no incrusta Liberation Sans"
+        );
+    }
 }
 
 #[cfg(test)]

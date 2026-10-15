@@ -9,3 +9,13 @@ Copyright their authors and contributors, credited in each resource's <info>.
 Source: https://github.com/citation-style-language/styles/blob/master/ieee.csl
 Source: https://github.com/citation-style-language/locales/blob/master/locales-en-US.xml
 Licensed under CC BY-SA 3.0: https://creativecommons.org/licenses/by-sa/3.0/
+
+Embedded Liberation Sans fonts (unmodified): LiberationSans-Regular.ttf,
+LiberationSans-Italic.ttf, LiberationSans-Bold.ttf and
+LiberationSans-BoldItalic.ttf, in core/minmark-renderer/assets/fonts/.
+Copyright (c) 2012 Red Hat, Inc. with Reserved Font Name Liberation.
+Digitized data copyright (c) 2010 Google Corporation with Reserved Font
+Arimo, Tinos and Cousine.
+Licensed under the SIL Open Font License, Version 1.1:
+core/minmark-renderer/assets/fonts/OFL.txt
+Source: https://github.com/liberationfonts

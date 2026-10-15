@@ -5,10 +5,12 @@
 //! único (§6.1), con el estilo de cada `gtk::TextTag` a partir de una
 //! [`minmark_renderer::Palette`]. Los tramos de sintaxis (`style: None`) se
 //! ocultan con el tag `mm-vis-syntax` (§8.3: oculta siempre o revelada en el
-//! elemento editado). Tests puros: sin GTK ni widgets.
+//! elemento editado). §31: `{{pagebreak}}` añade sus tramos de separador
+//! discreto a partir del highlighting, porque el plan no cubre sustituciones
+//! (§7.4.2). Tests puros: sin GTK ni widgets.
 
 use super::tags::{char_range, TagStyle};
-use minmark_parser::{CalloutTone, VisualPlan, VisualStyle};
+use minmark_parser::{CalloutTone, HighlightKind, VisualPlan, VisualStyle};
 use minmark_renderer::Palette;
 
 /// Tag de sintaxis ocultable (§8.3): marcadores invisibles de ancho cero.
@@ -28,6 +30,7 @@ pub struct VisualTagRange {
 /// en orden de aparición (con las mismas reglas de recorte que
 /// [`super::tags::tag_plan`]: sin panic ni slicing fuera de fronteras). Los
 /// slots de color personalizados se normalizan al bucket común (§58.2).
+/// §31: `{{pagebreak}}` añade sus tramos de separador discreto.
 pub fn visual_tag_plan(text: &str, plan: &VisualPlan) -> Vec<VisualTagRange> {
     let mut out = Vec::with_capacity(plan.spans.len());
     for span in &plan.spans {
@@ -41,8 +44,59 @@ pub fn visual_tag_plan(text: &str, plan: &VisualPlan) -> Vec<VisualTagRange> {
             });
         }
     }
+    pagebreak_ranges(text, &mut out);
     out.sort_by_key(|range| range.start_char);
     out
+}
+
+/// Token exacto de salto de página (§31).
+const PAGEBREAK: &str = "{{pagebreak}}";
+
+/// Tramos de `{{pagebreak}}` como separador discreto en Visual (§31): las
+/// llaves son sintaxis ocultable (§8.3, revelada al editar su elemento) y el
+/// token completo recibe el estilo de separador, análogo a `.mm-pagebreak`
+/// del Preview continuo (mismo color de regla que `VisualStyle::TableRule`).
+///
+/// Los tramos salen del highlighting del parser: el plan visual no produce
+/// tramos para sustituciones (§7.4.2) y el highlighting solo emite token
+/// cuando la gramática y la posición son válidas (§7.4.1), así que un token
+/// mal formado, sin cerrar o fuera de posición (code span, front matter)
+/// queda literal y el buffer conserva sus caracteres exactos (§6.2).
+fn pagebreak_ranges(text: &str, out: &mut Vec<VisualTagRange>) {
+    if !text.contains(PAGEBREAK) {
+        // Caso habitual: sin salto no hay ningún tramo que añadir y se
+        // evita el parseo extra del highlighting.
+        return;
+    }
+    for token in minmark_parser::highlight(text) {
+        if token.kind != HighlightKind::Substitution {
+            continue;
+        }
+        let start = token.span.start as usize;
+        let end = token.span.end as usize;
+        if text.get(start..end) != Some(PAGEBREAK) {
+            continue;
+        }
+        let Some((start_char, end_char)) = char_range(text, start, end) else {
+            continue;
+        };
+        // `{{` y `}}` quedan como sintaxis; el token entero, como separador.
+        out.push(VisualTagRange {
+            start_char,
+            end_char: start_char + 2,
+            style: None,
+        });
+        out.push(VisualTagRange {
+            start_char,
+            end_char,
+            style: Some(VisualStyle::TableRule),
+        });
+        out.push(VisualTagRange {
+            start_char: end_char - 2,
+            end_char,
+            style: None,
+        });
+    }
 }
 
 /// Normaliza un estilo: los slots de color fuera de la paleta §23 (colores
@@ -336,7 +390,9 @@ mod tests {
             ]
         );
         // Orden estable por posición.
-        assert!(ranges.windows(2).all(|w| w[0].start_char <= w[1].start_char));
+        assert!(ranges
+            .windows(2)
+            .all(|w| w[0].start_char <= w[1].start_char));
     }
 
     #[test]
@@ -438,7 +494,11 @@ mod tests {
             .collect();
         assert_eq!(
             styles,
-            vec![(0, 9, None), (9, 10, Some(VisualStyle::ColorFg(9))), (10, 11, None)]
+            vec![
+                (0, 9, None),
+                (9, 10, Some(VisualStyle::ColorFg(9))),
+                (10, 11, None)
+            ]
         );
     }
 
@@ -529,11 +589,7 @@ mod tests {
             .collect();
         assert_eq!(
             styles,
-            vec![
-                (0, 1, None),
-                (1, 2, Some(VisualStyle::Code)),
-                (2, 3, None),
-            ]
+            vec![(0, 1, None), (1, 2, Some(VisualStyle::Code)), (2, 3, None),]
         );
 
         let source = "> hola\n";
@@ -554,7 +610,10 @@ mod tests {
             .into_iter()
             .map(|r| (r.start_char, r.end_char, r.style))
             .collect();
-        assert_eq!(styles, vec![(0, 2, None), (2, 3, Some(VisualStyle::ListItem(1)))]);
+        assert_eq!(
+            styles,
+            vec![(0, 2, None), (2, 3, Some(VisualStyle::ListItem(1)))]
+        );
 
         // chars: "- " 0..2, "[x]" 2..5, " " 5..6, "hecho" 6..11.
         let source = "- [x] hecho\n";
@@ -595,5 +654,103 @@ mod tests {
         });
         let ranges = visual_tag_plan(source, &plan);
         assert!(ranges.iter().all(|r| r.start_char < r.end_char));
+    }
+
+    #[test]
+    fn pagebreak_como_separador_discreto_31() {
+        // §31: `{{pagebreak}}` oculta sus llaves como sintaxis (§8.3) y el
+        // token completo recibe el estilo de separador; el buffer no cambia
+        // (§6.2: los rangos apuntan a los caracteres exactos).
+        let source = "hola {{pagebreak}} adiós\n";
+        let plan = plan_of(source);
+        let ranges = visual_tag_plan(source, &plan);
+        let texto = |range: &VisualTagRange| &source[range.start_char..range.end_char];
+        // chars: "hola " 0..5, token 5..19, " adiós" 19..25, "\n" 25.
+        let separador = ranges
+            .iter()
+            .find(|range| range.style == Some(VisualStyle::TableRule))
+            .expect("tramo con estilo de separador");
+        assert_eq!(
+            &source[separador.start_char..separador.end_char],
+            "{{pagebreak}}"
+        );
+        // La sintaxis ocultable es solo `{{` y `}}`.
+        let sintaxis: Vec<&str> = ranges
+            .iter()
+            .filter(|range| range.style.is_none())
+            .map(texto)
+            .collect();
+        assert_eq!(sintaxis, vec!["{{", "}}"]);
+        // §8.3 «reveal-current»: el elemento (párrafo) contiene el token,
+        // así que editar su elemento revela las llaves.
+        assert!(
+            element_ranges(source, &plan)
+                .iter()
+                .any(|(start, end)| *start <= separador.start_char && separador.end_char <= *end),
+            "el párrafo del pagebreak debe ser un elemento revelable"
+        );
+    }
+
+    #[test]
+    fn pagebreak_mal_formado_o_fuera_de_posicion_es_literal_7_4_1() {
+        // §7.4.1: sin token válido no hay tramos —vocabulario desconocido,
+        // sin cerrar, con espacios o dentro de código— y el texto queda
+        // literal como hoy.
+        for source in [
+            "{{pagebrek}}\n",
+            "{{pagebreak\n",
+            "{{ pagebreak }}\n",
+            "`{{pagebreak}}`\n",
+        ] {
+            let plan = plan_of(source);
+            let ranges = visual_tag_plan(source, &plan);
+            let texto = |range: &VisualTagRange| &source[range.start_char..range.end_char];
+            assert!(
+                !ranges
+                    .iter()
+                    .any(|range| range.style == Some(VisualStyle::TableRule)),
+                "separador indebido en {source:?}"
+            );
+            assert!(
+                !ranges
+                    .iter()
+                    .any(|range| range.style.is_none() && matches!(texto(range), "{{" | "}}")),
+                "sintaxis indebida en {source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn solo_pagebreak_recibe_separador_31() {
+        // §7.4.2: `{{toc}}` y `{{ref:…}}` no son separadores y siguen
+        // literales sin tramos propios.
+        for source in ["{{toc}}\n", "{{ref:fig:a}}\n"] {
+            let ranges = visual_tag_plan(source, &plan_of(source));
+            assert!(
+                ranges
+                    .iter()
+                    .all(|range| range.style != Some(VisualStyle::TableRule)),
+                "separador indebido en {source:?}"
+            );
+        }
+        // Varios saltos en el mismo documento, cada uno con su par de
+        // llaves como sintaxis.
+        let source = "uno {{pagebreak}} dos\n\n{{pagebreak}}\n";
+        let ranges = visual_tag_plan(source, &plan_of(source));
+        let separadores: Vec<(usize, usize)> = ranges
+            .iter()
+            .filter(|range| range.style == Some(VisualStyle::TableRule))
+            .map(|range| (range.start_char, range.end_char))
+            .collect();
+        assert_eq!(separadores.len(), 2, "{ranges:?}");
+        for (start, end) in separadores {
+            assert_eq!(&source[start..end], "{{pagebreak}}");
+        }
+        let llaves: Vec<&str> = ranges
+            .iter()
+            .filter(|range| range.style.is_none())
+            .map(|range| &source[range.start_char..range.end_char])
+            .collect();
+        assert_eq!(llaves, vec!["{{", "}}", "{{", "}}"]);
     }
 }

@@ -149,18 +149,41 @@ const BASE_CSS: &str = r#"body { margin: 0; background: var(--mm-bg); color: var
 
 fn render_block(block: &Block, ids: &HeadingIds, settings: &Settings, out: &mut String) {
     match &block.kind {
-        BlockKind::Bibliography { entries, hanging_indent, second_field_align, line_spacing, entry_spacing } => {
+        BlockKind::Bibliography {
+            entries,
+            hanging_indent,
+            second_field_align,
+            line_spacing,
+            entry_spacing,
+        } => {
             out.push_str("<section class=\"mm-bibliography\"><h2>");
-            out.push_str(if settings.language.starts_with("es") { "Bibliografía" } else { "References" });
+            out.push_str(if settings.language.starts_with("es") {
+                "Bibliografía"
+            } else {
+                "References"
+            });
             out.push_str("</h2>");
             for (label, content) in entries {
-                let layout = if *second_field_align { "display:grid;grid-template-columns:max-content 1fr;column-gap:.5em;" }
-                    else if *hanging_indent { "padding-left:1.5em;text-indent:-1.5em;" } else { "" };
+                let layout = if *second_field_align {
+                    "display:grid;grid-template-columns:max-content 1fr;column-gap:.5em;"
+                } else if *hanging_indent {
+                    "padding-left:1.5em;text-indent:-1.5em;"
+                } else {
+                    ""
+                };
                 out.push_str(&format!("<div style=\"{layout}line-height:{line_spacing};margin-bottom:{entry_spacing}em\">"));
-                if *second_field_align { out.push_str("<div>"); render_inlines(label, settings, out); out.push_str("</div><div>"); }
-                else if !label.is_empty() { render_inlines(label, settings, out); out.push(' '); }
+                if *second_field_align {
+                    out.push_str("<div>");
+                    render_inlines(label, settings, out);
+                    out.push_str("</div><div>");
+                } else if !label.is_empty() {
+                    render_inlines(label, settings, out);
+                    out.push(' ');
+                }
                 render_inlines(content, settings, out);
-                if *second_field_align { out.push_str("</div>"); }
+                if *second_field_align {
+                    out.push_str("</div>");
+                }
                 out.push_str("</div>");
             }
             out.push_str("</section>");
@@ -181,7 +204,12 @@ fn render_block(block: &Block, ids: &HeadingIds, settings: &Settings, out: &mut 
             out.push(char::from(b'0' + level));
             out.push_str(">\n");
         }
-        BlockKind::Paragraph { content } if matches!(content.as_slice(), [Inline::Substitution(Substitution::Toc)]) => {
+        BlockKind::Paragraph { content }
+            if matches!(
+                content.as_slice(),
+                [Inline::Substitution(Substitution::Toc)]
+            ) =>
+        {
             out.push_str("<nav class=\"mm-toc\"></nav>");
         }
         BlockKind::Paragraph { content } => {
@@ -460,13 +488,27 @@ fn render_inlines(inlines: &[Inline], settings: &Settings, out: &mut String) {
         match inline {
             Inline::Styled { content, style } => {
                 out.push_str("<span style=\"");
-                if style.italic { out.push_str("font-style:italic;"); }
-                if style.bold { out.push_str("font-weight:bold;"); }
-                if style.light { out.push_str("font-weight:300;"); }
-                if style.small_caps { out.push_str("font-variant:small-caps;"); }
-                if style.underline { out.push_str("text-decoration:underline;"); }
-                if style.vertical == 1 { out.push_str("vertical-align:super;font-size:.8em;"); }
-                if style.vertical == -1 { out.push_str("vertical-align:sub;font-size:.8em;"); }
+                if style.italic {
+                    out.push_str("font-style:italic;");
+                }
+                if style.bold {
+                    out.push_str("font-weight:bold;");
+                }
+                if style.light {
+                    out.push_str("font-weight:300;");
+                }
+                if style.small_caps {
+                    out.push_str("font-variant:small-caps;");
+                }
+                if style.underline {
+                    out.push_str("text-decoration:underline;");
+                }
+                if style.vertical == 1 {
+                    out.push_str("vertical-align:super;font-size:.8em;");
+                }
+                if style.vertical == -1 {
+                    out.push_str("vertical-align:sub;font-size:.8em;");
+                }
                 out.push_str("\">");
                 render_inlines(content, settings, out);
                 out.push_str("</span>");
@@ -648,7 +690,10 @@ fn plain_text(inlines: &[Inline]) -> String {
             match inline {
                 Inline::FootnoteReference(label) => out.push_str(label),
                 Inline::Text(t) | Inline::Code(t) | Inline::Math(t) => out.push_str(t),
-                Inline::Emphasis(c) | Inline::Strong(c) | Inline::Strikethrough(c) | Inline::Styled { content: c, .. } => walk(c, out),
+                Inline::Emphasis(c)
+                | Inline::Strong(c)
+                | Inline::Strikethrough(c)
+                | Inline::Styled { content: c, .. } => walk(c, out),
                 Inline::Link { content, .. } | Inline::Image { alt: content, .. } => {
                     walk(content, out)
                 }
@@ -679,7 +724,10 @@ fn push_math(out: &mut String, latex: &str) {
             out.push_str("<span role=\"math\" aria-label=\"");
             push_escaped(out, latex);
             out.push_str("\">");
-            let prefix = format!("mm-math-{}-", NEXT_SVG.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+            let prefix = format!(
+                "mm-math-{}-",
+                NEXT_SVG.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            );
             out.push_str(&namespace_svg(&svg, &prefix));
             out.push_str("</span>");
         }
@@ -871,7 +919,21 @@ mod tests {
 
         let out = html("Ver {{ref:fig:arq}} y {{toc}}.\n");
         assert!(out.contains("Referencia inexistente: fig:arq"));
-        assert!(out.contains("<nav class=\"mm-toc\" aria-label=\"Tabla de contenidos\"><ol></ol></nav>"));
+        assert!(out
+            .contains("<nav class=\"mm-toc\" aria-label=\"Tabla de contenidos\"><ol></ol></nav>"));
+    }
+
+    #[test]
+    fn continuo_separador_discreto_sin_simular_paginas_31() {
+        // §31: en continuo `{{pagebreak}}` es un separador discreto y no
+        // simula una página; la página nueva la fuerzan solo el Preview
+        // paginado y el PDF (regresión del slice de página/saltos).
+        let out = html("# Uno\n\n{{pagebreak}}\n\n# Dos\n");
+        assert!(out.contains("<div class=\"mm-pagebreak\"></div>"));
+        assert!(out.contains(".mm-pagebreak { border-top: 1px dashed"));
+        assert!(!out.contains("page-break"), "el continuo no fuerza saltos");
+        assert!(!out.contains("break-after"), "el continuo no fuerza saltos");
+        assert!(!out.contains("@page"), "el continuo no declara páginas");
     }
 
     #[test]

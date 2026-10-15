@@ -275,8 +275,11 @@ mod tests {
 
 /// Capa de ajustes escalares en el nivel raíz de TOML o front matter YAML.
 /// Las tablas (cabecera que empieza por `[`) se saltan con su cuerpo entero:
-/// sus claves no forman parte de la capa. Las colecciones salvo `bibliography`
-/// y claves ajenas a Settings no se reinterpretan.
+/// sus claves no forman parte de la capa. Una tabla inline
+/// (`pdf_page_size = { width_mm = 120, height_mm = 240 }` en TOML, la misma
+/// con `:` en front matter YAML) sí se ingiere como [`Value::Map`] (§32.3:
+/// tamaño Custom). Las listas salvo `bibliography` no se reinterpretan y las
+/// claves ajenas a Settings no se ingeren.
 pub fn parse_scalar_layer(source: &str, level: Level) -> ConfigLayer {
     let mut layer = ConfigLayer::new(level);
     let mut lines = source.lines().peekable();
@@ -331,6 +334,16 @@ pub fn parse_scalar_layer(source: &str, level: Level) -> ConfigLayer {
                 .map(|item| Value::Text(item.trim().trim_matches(['\'', '"']).to_owned()))
                 .collect();
             Value::List(items)
+        } else if raw.starts_with('{') {
+            // Tabla inline (§32.3): `pdf_page_size = { width_mm = 120,
+            // height_mm = 240 }` en TOML y `pdf_page_size: { width_mm: 120,
+            // height_mm: 240 }` en front matter YAML. Una tabla mal formada
+            // no se ingiere: la clave se ignora por completo (mismo criterio
+            // de robustez que el resto del parser).
+            let Some(value) = parse_inline_table(raw, level) else {
+                continue;
+            };
+            value
         } else if let Some(quote) = raw.chars().next().filter(|c| *c == '"' || *c == '\'') {
             let Some(end) = raw[1..].find(quote).map(|i| i + 1) else {
                 continue;
@@ -363,6 +376,162 @@ pub fn parse_scalar_layer(source: &str, level: Level) -> ConfigLayer {
     layer
 }
 
+/// Tabla inline `{ width_mm = 120, height_mm = 240 }` → [`Value::Map`] para
+/// [`parse_scalar_layer`] (§32.3: `pdf_page_size` Custom en TOML y en front
+/// matter YAML). Acepta separador de par `=` (TOML) o `:` (YAML), coma final
+/// y comentario `#` (dentro o detrás de la tabla). Devuelve `None` —la
+/// clave no se ingiere— si la tabla no cierra, hay cadenas sin cerrar, pares
+/// sin separador, valores vacíos o colecciones anidadas (ningún ajuste las
+/// admite).
+fn parse_inline_table(raw: &str, level: Level) -> Option<Value> {
+    // `raw` empieza por `{` (comprobado en el llamador).
+    let body = &raw[1..];
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+    let mut inner_end = None;
+    for (index, c) in body.char_indices() {
+        if let Some(open) = quote {
+            if escaped {
+                escaped = false;
+            } else if open == '"' && c == '\\' {
+                escaped = true;
+            } else if c == open {
+                quote = None;
+            }
+            continue;
+        }
+        match c {
+            '"' | '\'' => quote = Some(c),
+            '}' => {
+                inner_end = Some(index);
+                break;
+            }
+            _ => {}
+        }
+    }
+    // Sin `}` de cierre o con una cadena sin cerrar antes de él.
+    let inner_end = inner_end?;
+    let suffix = body[inner_end + 1..].trim();
+    if !suffix.is_empty() && !suffix.starts_with('#') {
+        return None;
+    }
+    let mut map = BTreeMap::new();
+    for pair in split_inline_pairs(&body[..inner_end])? {
+        if pair.trim().is_empty() {
+            continue; // coma final o par vacío
+        }
+        let (key, value) = split_inline_pair(pair)?;
+        map.insert(
+            inline_key(key)?.to_owned(),
+            parse_inline_scalar(value, level)?,
+        );
+    }
+    Some(Value::Map(map))
+}
+
+/// Divide el contenido de una tabla inline en pares por comas fuera de
+/// cadenas; un `#` fuera de cadenas termina el contenido (comentario), como
+/// en el resto del parser. `None` si queda una cadena sin cerrar.
+fn split_inline_pairs(inner: &str) -> Option<Vec<&str>> {
+    let mut parts = Vec::new();
+    let mut start = 0;
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+    for (index, c) in inner.char_indices() {
+        if let Some(open) = quote {
+            if escaped {
+                escaped = false;
+            } else if open == '"' && c == '\\' {
+                escaped = true;
+            } else if c == open {
+                quote = None;
+            }
+            continue;
+        }
+        match c {
+            '"' | '\'' => quote = Some(c),
+            '#' => {
+                parts.push(&inner[start..index]);
+                return Some(parts);
+            }
+            ',' => {
+                parts.push(&inner[start..index]);
+                start = index + 1;
+            }
+            _ => {}
+        }
+    }
+    quote.is_none().then(|| {
+        parts.push(&inner[start..]);
+        parts
+    })
+}
+
+/// Clave y valor de un par `clave = valor` (TOML) o `clave: valor` (YAML),
+/// con el separador fuera de cadenas; `None` si no hay separador.
+fn split_inline_pair(pair: &str) -> Option<(&str, &str)> {
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+    for (index, c) in pair.char_indices() {
+        if let Some(open) = quote {
+            if escaped {
+                escaped = false;
+            } else if open == '"' && c == '\\' {
+                escaped = true;
+            } else if c == open {
+                quote = None;
+            }
+            continue;
+        }
+        match c {
+            '"' | '\'' => quote = Some(c),
+            '=' | ':' => return Some((pair[..index].trim(), pair[index + 1..].trim())),
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Clave de un par: desnuda no vacía o entrecomillada completa.
+fn inline_key(key: &str) -> Option<&str> {
+    if let Some(quote) = key.chars().next().filter(|c| *c == '"' || *c == '\'') {
+        let rest = &key[1..];
+        let end = rest.find(quote)?;
+        return rest[end + 1..].is_empty().then(|| &rest[..end]);
+    }
+    (!key.is_empty()).then_some(key)
+}
+
+/// Escalar dentro de una tabla inline con las mismas reglas que el valor
+/// raíz de su nivel: cadena entrecomillada, bool, entero, decimal o —solo en
+/// YAML de documento— palabra desnuda (en TOML no existen las cadenas sin
+/// comillas). Vacío o colección (`{`/`[`): tabla mal formada.
+fn parse_inline_scalar(raw: &str, level: Level) -> Option<Value> {
+    let raw = raw.trim();
+    if raw.is_empty() || raw.starts_with(['{', '[']) {
+        return None;
+    }
+    if let Some(quote) = raw.chars().next().filter(|c| *c == '"' || *c == '\'') {
+        let rest = &raw[1..];
+        let end = rest.find(quote)?;
+        return rest[end + 1..]
+            .is_empty()
+            .then(|| Value::Text(rest[..end].to_owned()));
+    }
+    match raw {
+        "true" => return Some(Value::Bool(true)),
+        "false" => return Some(Value::Bool(false)),
+        _ => {}
+    }
+    if let Ok(value) = raw.parse::<i64>() {
+        return Some(Value::Integer(value));
+    }
+    if let Ok(value) = raw.parse::<f64>() {
+        return Some(Value::Number(value));
+    }
+    (level == Level::Document).then(|| Value::Text(raw.to_owned()))
+}
+
 #[cfg(test)]
 mod scalar_layer_tests {
     use super::*;
@@ -379,6 +548,118 @@ mod scalar_layer_tests {
         assert_eq!(resolved.settings.language, "en");
         assert_eq!(resolved.warnings[0].reason, WarningReason::NotApplicable);
         assert!(!Settings::default().wiki_links);
+    }
+
+    #[test]
+    fn tabla_inline_resuelve_page_size_custom_en_los_cuatro_niveles_32_3() {
+        // §32.3/§58.2: `pdf_page_size` es de los cuatro niveles y una tabla
+        // inline (TOML con `=`, front matter YAML con `:`) produce
+        // `Value::Map`, que Settings resuelve a Custom con sus dimensiones.
+        for (source, level) in [
+            (
+                "pdf_page_size = { width_mm = 120, height_mm = 240 }",
+                Level::Global,
+            ),
+            (
+                "pdf_page_size = { width_mm = 120, height_mm = 240 }",
+                Level::Project,
+            ),
+            (
+                "pdf_page_size = { width_mm = 120, height_mm = 240 }",
+                Level::Composition,
+            ),
+            (
+                "pdf_page_size: { width_mm: 120, height_mm: 240 }",
+                Level::Document,
+            ),
+        ] {
+            let resolved = resolve(&[parse_scalar_layer(source, level)]);
+            assert_eq!(
+                resolved.settings.pdf_page_size,
+                PageSize::Custom {
+                    width_mm: 120.0,
+                    height_mm: 240.0,
+                },
+                "{level:?}"
+            );
+            assert!(
+                resolved.warnings.is_empty(),
+                "{level:?}: {:?}",
+                resolved.warnings
+            );
+        }
+        // El default sigue siendo A4 (§32.3/§58.2) sin declaración.
+        assert_eq!(Settings::default().pdf_page_size, PageSize::A4);
+    }
+
+    #[test]
+    fn tabla_inline_con_tipos_comentario_y_coma_final_32_3() {
+        // §32.3: la tabla conserva el tipo de cada valor (bool, entero,
+        // decimal, cadena) con comentario `#` y coma final, como el resto
+        // del parser.
+        let layer = parse_scalar_layer(
+            "custom_colors = { brand = \"#336699\", flag = true, n = 2, x = 1.5, } # colores\n",
+            Level::Project,
+        );
+        assert_eq!(
+            layer.entries.get("custom_colors"),
+            Some(&Value::Map(BTreeMap::from([
+                ("brand".to_string(), Value::Text("#336699".to_string())),
+                ("flag".to_string(), Value::Bool(true)),
+                ("n".to_string(), Value::Integer(2)),
+                ("x".to_string(), Value::Number(1.5)),
+            ])))
+        );
+        // §23/§58.2: Settings recibe el mapa y aplica el color (el mapa solo
+        // admite cadenas, como `parse_string_map` exige).
+        let resolved = resolve(&[parse_scalar_layer(
+            "custom_colors = { brand = \"#336699\" }",
+            Level::Project,
+        )]);
+        assert_eq!(
+            resolved
+                .settings
+                .custom_colors
+                .get("brand")
+                .map(String::as_str),
+            Some("#336699")
+        );
+        assert!(resolved.warnings.is_empty(), "{:?}", resolved.warnings);
+    }
+
+    #[test]
+    fn tabla_inline_mal_formada_no_se_ingiere() {
+        // §32.3: sintaxis no reconocida → la clave entera se ignora y el
+        // resto de la capa se sigue leyendo (mismo criterio de robustez que
+        // el resto del parser).
+        for (source, level) in [
+            (
+                "pdf_page_size = { width_mm = 120, height_mm = 240",
+                Level::Global,
+            ),
+            ("pdf_page_size = { width_mm 120 }", Level::Global),
+            (
+                "pdf_page_size = { width_mm = , height_mm = 240 }",
+                Level::Global,
+            ),
+            ("pdf_page_size = { width_mm = { a = 1 } }", Level::Global),
+            ("pdf_page_size = { width_mm = 120 } basura", Level::Global),
+            ("pdf_page_size: { width_mm: \"120", Level::Document),
+        ] {
+            let layer = parse_scalar_layer(source, level);
+            assert!(
+                layer.entries.is_empty(),
+                "ingerida en {level:?}: {source:?} → {:?}",
+                layer.entries
+            );
+        }
+        // Una línea mal formada no aborta la capa: la siguiente se ingerie.
+        let layer = parse_scalar_layer(
+            "pdf_page_size = { width_mm 120 }\nfont_size_pt = 12\n",
+            Level::Global,
+        );
+        assert!(layer.entries.get("pdf_page_size").is_none());
+        assert_eq!(layer.entries.get("font_size_pt"), Some(&Value::Integer(12)));
     }
 }
 
