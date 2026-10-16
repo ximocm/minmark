@@ -144,7 +144,10 @@ impl TreeModel {
     /// lanzar la tarea de lectura; `false` si ya está cargada o en curso (nunca
     /// se lee el mismo directorio dos veces). Un fallo previo se reintenta.
     pub fn begin_load(&mut self, dir: &Path) -> bool {
-        let state = self.nodes.entry(dir.to_path_buf()).or_insert(NodeState::Unloaded);
+        let state = self
+            .nodes
+            .entry(dir.to_path_buf())
+            .or_insert(NodeState::Unloaded);
         if matches!(state, NodeState::Unloaded | NodeState::Failed(_)) {
             *state = NodeState::Loading;
             true
@@ -239,7 +242,10 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let dir = std::env::temp_dir().join(format!("minmark-explorer-{tag}-{}-{nanos}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "minmark-explorer-{tag}-{}-{nanos}",
+            std::process::id()
+        ));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
@@ -293,10 +299,22 @@ mod tests {
             "estilo.csl",
             "config.toml",
         ] {
-            assert!(is_document_type(name), "{name} debería ser visible por defecto (§14.4)");
+            assert!(
+                is_document_type(name),
+                "{name} debería ser visible por defecto (§14.4)"
+            );
         }
-        for name in ["video.mp4", "datos.csv", "sin-extension", "doc.md.bak", ".md"] {
-            assert!(!is_document_type(name), "{name} no es tipo documental (§14.4)");
+        for name in [
+            "video.mp4",
+            "datos.csv",
+            "sin-extension",
+            "doc.md.bak",
+            ".md",
+        ] {
+            assert!(
+                !is_document_type(name),
+                "{name} no es tipo documental (§14.4)"
+            );
         }
     }
 
@@ -304,23 +322,43 @@ mod tests {
     fn por_defecto_solo_tipos_documentales_14_4() {
         let root = temp_tree("tipos");
         let mut model = TreeModel::new(root.clone());
-        assert_eq!(load(&mut model, &root, vec![
-            dir_entry(&root.join("cap1")),
-            entry(&root.join("doc.md")),
-            entry(&root.join("foto.png")),
-            entry(&root.join("refs.bib")),
-            entry(&root.join("estilo.csl")),
-            entry(&root.join("config.toml")),
-            entry(&root.join("video.mp4")),
-            entry(&root.join("datos.csv")),
-        ]), 1);
+        assert_eq!(
+            load(
+                &mut model,
+                &root,
+                vec![
+                    dir_entry(&root.join("cap1")),
+                    entry(&root.join("doc.md")),
+                    entry(&root.join("foto.png")),
+                    entry(&root.join("refs.bib")),
+                    entry(&root.join("estilo.csl")),
+                    entry(&root.join("config.toml")),
+                    entry(&root.join("video.mp4")),
+                    entry(&root.join("datos.csv")),
+                ]
+            ),
+            1
+        );
 
         let rows = model.rows();
         let nombres: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
-        assert_eq!(nombres, ["cap1", "doc.md", "foto.png", "refs.bib", "estilo.csl", "config.toml"]);
+        assert_eq!(
+            nombres,
+            [
+                "cap1",
+                "doc.md",
+                "foto.png",
+                "refs.bib",
+                "estilo.csl",
+                "config.toml"
+            ]
+        );
 
         // Show All Files (§14.4) muestra todo.
-        model.set_filters(ExplorerFilters { show_all: true, ..Default::default() });
+        model.set_filters(ExplorerFilters {
+            show_all: true,
+            ..Default::default()
+        });
         let rows = model.rows();
         let nombres: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
         assert_eq!(nombres.len(), 8);
@@ -332,29 +370,43 @@ mod tests {
     fn ocultos_ocultos_por_defecto_14_5() {
         let root = temp_tree("ocultos");
         let mut model = TreeModel::new(root.clone());
-        load(&mut model, &root, vec![
-            entry(&root.join("doc.md")),
-            entry(&root.join(".oculto.md")),
-            dir_entry(&root.join(".carpeta")),
-        ]);
+        load(
+            &mut model,
+            &root,
+            vec![
+                entry(&root.join("doc.md")),
+                entry(&root.join(".oculto.md")),
+                dir_entry(&root.join(".carpeta")),
+            ],
+        );
         let rows = model.rows();
         let nombres: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
         assert_eq!(nombres, ["doc.md"]);
 
         // Show Hidden Files (§14.5) revela los ocultos…
-        model.set_filters(ExplorerFilters { show_hidden: true, ..Default::default() });
-        load(&mut model, &root, vec![
-            entry(&root.join("doc.md")),
-            entry(&root.join(".oculto.md")),
-            entry(&root.join(".oculto.mp4")),
-        ]);
+        model.set_filters(ExplorerFilters {
+            show_hidden: true,
+            ..Default::default()
+        });
+        load(
+            &mut model,
+            &root,
+            vec![
+                entry(&root.join("doc.md")),
+                entry(&root.join(".oculto.md")),
+                entry(&root.join(".oculto.mp4")),
+            ],
+        );
         let rows = model.rows();
         let nombres: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
         assert_eq!(nombres, ["doc.md", ".oculto.md"]);
 
         // …y es independiente de Show All Files: `.oculto.mp4` solo se ve
         // con ambos.
-        model.set_filters(ExplorerFilters { show_all: true, show_hidden: true });
+        model.set_filters(ExplorerFilters {
+            show_all: true,
+            show_hidden: true,
+        });
         let rows = model.rows();
         let nombres: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
         assert_eq!(nombres, ["doc.md", ".oculto.md", ".oculto.mp4"]);
@@ -368,13 +420,19 @@ mod tests {
         let root = temp_tree("gitignore");
         fs::write(root.join(".gitignore"), "salida.md\ncache/\n").unwrap();
         let mut model = TreeModel::new(root.clone());
-        load(&mut model, &root, vec![
-            entry(&root.join("salida.md")),
-            dir_entry(&root.join("cache")),
-        ]);
-        load(&mut model, &root.join("cache"), vec![
-            entry(&root.join("cache/dentro.md")),
-        ]);
+        load(
+            &mut model,
+            &root,
+            vec![
+                entry(&root.join("salida.md")),
+                dir_entry(&root.join("cache")),
+            ],
+        );
+        load(
+            &mut model,
+            &root.join("cache"),
+            vec![entry(&root.join("cache/dentro.md"))],
+        );
         assert!(model.toggle(&root.join("cache")));
 
         let rows = model.rows();
@@ -393,12 +451,16 @@ mod tests {
         fs::write(root.join("doc.md"), "# doc\n").unwrap();
 
         let mut model = TreeModel::new(root.clone());
-        load(&mut model, &root, vec![
-            symlink_entry(&root.join("enlazada"), true),
-            symlink_entry(&root.join("enlace.md"), false),
-            dir_entry(&real),
-            entry(&root.join("doc.md")),
-        ]);
+        load(
+            &mut model,
+            &root,
+            vec![
+                symlink_entry(&root.join("enlazada"), true),
+                symlink_entry(&root.join("enlace.md"), false),
+                dir_entry(&real),
+                entry(&root.join("doc.md")),
+            ],
+        );
 
         let rows = model.rows();
         let por_nombre = |name: &str| rows.iter().find(|r| r.name == name).unwrap().clone();
@@ -457,7 +519,11 @@ mod tests {
         assert_eq!(model.rows().len(), 200);
         for i in 0..200 {
             let sub = root.join(format!("sub{i:03}"));
-            assert_eq!(model.state(&sub), &NodeState::Unloaded, "nadie debe precargar sub{i:03}");
+            assert_eq!(
+                model.state(&sub),
+                &NodeState::Unloaded,
+                "nadie debe precargar sub{i:03}"
+            );
         }
 
         // Expandir un hijo lee SOLO ese hijo; los demás siguen sin leer.
@@ -496,7 +562,10 @@ mod tests {
         let mut model = TreeModel::new(root.clone());
         assert!(model.begin_load(&root));
         model.finish_load(&root, Err("permiso denegado".to_owned()));
-        assert_eq!(model.state(&root), &NodeState::Failed("permiso denegado".to_owned()));
+        assert_eq!(
+            model.state(&root),
+            &NodeState::Failed("permiso denegado".to_owned())
+        );
         assert!(model.rows().is_empty());
         // Reintento al volver a pedirlo (por ejemplo al reexpandir).
         assert!(model.begin_load(&root));
@@ -508,11 +577,16 @@ mod tests {
         let root = temp_tree("anidacion");
         let mut model = TreeModel::new(root.clone());
         load(&mut model, &root, vec![dir_entry(&root.join("a"))]);
-        load(&mut model, &root.join("a"), vec![
-            dir_entry(&root.join("a/b")),
-            entry(&root.join("a/x.md")),
-        ]);
-        load(&mut model, &root.join("a/b"), vec![entry(&root.join("a/b/y.md"))]);
+        load(
+            &mut model,
+            &root.join("a"),
+            vec![dir_entry(&root.join("a/b")), entry(&root.join("a/x.md"))],
+        );
+        load(
+            &mut model,
+            &root.join("a/b"),
+            vec![entry(&root.join("a/b/y.md"))],
+        );
 
         // Solo lo expandido se renderiza.
         assert_eq!(model.rows().len(), 1);
@@ -520,7 +594,9 @@ mod tests {
         assert!(model.toggle(&root.join("a/b")));
         let rows = model.rows();
         assert_eq!(
-            rows.iter().map(|r| (r.name.as_str(), r.depth)).collect::<Vec<_>>(),
+            rows.iter()
+                .map(|r| (r.name.as_str(), r.depth))
+                .collect::<Vec<_>>(),
             [("a", 0), ("b", 1), ("y.md", 2), ("x.md", 1)]
         );
         let _ = fs::remove_dir_all(&root);

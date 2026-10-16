@@ -19,11 +19,11 @@ mod state;
 
 pub use state::{load as load_state, save as save_state, ExplorerState};
 
-use model::{ExplorerFilters, Row, TreeModel};
 use gtk4 as gtk;
 use gtk4::glib;
 use gtk4::prelude::*;
 use minmark_fs::{read_dir_entries, TreeEntry};
+use model::{ExplorerFilters, Row, TreeModel};
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -147,8 +147,12 @@ impl ExplorerPane {
                 let store = store.clone();
                 let on_open = Rc::clone(&on_open);
                 button.connect_clicked(move |_| {
-                    let Some(list_item) = weak_item.upgrade() else { return };
-                    let Some(row) = current_row(&list_item) else { return };
+                    let Some(list_item) = weak_item.upgrade() else {
+                        return;
+                    };
+                    let Some(row) = current_row(&list_item) else {
+                        return;
+                    };
                     if row.expandable {
                         toggle_dir(&model, &store, &row.path);
                     } else if !row.is_dir {
@@ -184,7 +188,9 @@ impl ExplorerPane {
             let list_item = object
                 .downcast_ref::<gtk::ListItem>()
                 .expect("el factory de lista recibe gtk::ListItem");
-            let Some(row) = current_row(list_item) else { return };
+            let Some(row) = current_row(list_item) else {
+                return;
+            };
             let Some(button) = list_item.child().and_downcast::<gtk::Button>() else {
                 return;
             };
@@ -254,7 +260,13 @@ impl ExplorerPane {
         // Raíz del proyecto: primera lectura a demanda (§47.5).
         request_load(&model, &store, root.clone());
 
-        Self { widget, model, store, root, on_show_all_changed }
+        Self {
+            widget,
+            model,
+            store,
+            root,
+            on_show_all_changed,
+        }
     }
 
     /// Widget raíz del panel, para insertarlo en el `Paned` de la ventana.
@@ -312,17 +324,18 @@ fn build_context_menu(
 }
 
 /// Muestra el menú en las coordenadas del gesto (relativas a `host`).
-fn popup_at(popover: &gtk::PopoverMenu, host: &gtk::Box, gesture: &gtk::GestureClick, x: f64, y: f64) {
+fn popup_at(
+    popover: &gtk::PopoverMenu,
+    host: &gtk::Box,
+    gesture: &gtk::GestureClick,
+    x: f64,
+    y: f64,
+) {
     let widget = gesture
         .widget()
         .and_then(|w| w.translate_coordinates(host, x, y));
     let (x, y) = widget.unwrap_or((x, y));
-    popover.set_pointing_to(Some(&gtk::gdk::Rectangle::new(
-        x as i32,
-        y as i32,
-        1,
-        1,
-    )));
+    popover.set_pointing_to(Some(&gtk::gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
     popover.popup();
 }
 
@@ -379,12 +392,10 @@ fn spawn_load(model: Arc<Mutex<TreeModel>>, store: &gtk::gio::ListStore, dir: Pa
         let entries: Result<Vec<TreeEntry>, String> =
             read_dir_entries(&dir).map_err(|err| err.to_string());
         glib::idle_add_once(move || {
-            {
-                let mut model = lock(&model);
-                model.finish_load(&dir, entries);
-                if let Some(store) = store_weak.upgrade() {
-                    rebuild(&store, &model);
-                }
+            let mut model = lock(&model);
+            model.finish_load(&dir, entries);
+            if let Some(store) = store_weak.upgrade() {
+                rebuild(&store, &model);
             }
         });
     });
@@ -400,7 +411,9 @@ fn rebuild(store: &gtk::gio::ListStore, model: &TreeModel) {
 
 /// Lock sin panics en la UI: un hilo envenenado no tumba la ventana.
 fn lock(model: &Mutex<TreeModel>) -> MutexGuard<'_, TreeModel> {
-    model.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    model
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 #[cfg(test)]

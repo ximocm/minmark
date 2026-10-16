@@ -523,18 +523,38 @@ mod tests {
 mod citation_tests {
     use super::*;
     fn bibliography() -> minmark_renderer::Bibliography {
-        minmark_renderer::Bibliography::from_sources(&[("refs.bib".into(), include_str!("../../docs/qa/fixtures/references.bib").into())], None)
+        minmark_renderer::Bibliography::from_sources(
+            &[(
+                "refs.bib".into(),
+                include_str!("../../docs/qa/fixtures/references.bib").into(),
+            )],
+            None,
+        )
     }
     #[test]
     fn citation_contexts_exclude_code_escapes_comments_and_locators() {
         let bibliography = bibliography();
-        for source in ["`[@Sm`", "```md\n[@Sm", "\\[@Sm", "<!-- [@Sm -->", "mail@Sm", "[@smith2025, p. Sm"] {
+        for source in [
+            "`[@Sm`",
+            "```md\n[@Sm",
+            "\\[@Sm",
+            "<!-- [@Sm -->",
+            "mail@Sm",
+            "[@smith2025, p. Sm",
+        ] {
             let cursor = source.find("Sm").unwrap() + 2;
-            assert!(citation_completions(source, cursor, &bibliography).is_empty(), "{source}");
+            assert!(
+                citation_completions(source, cursor, &bibliography).is_empty(),
+                "{source}"
+            );
         }
         for source in ["[@Sm", "[@Sm]", "[@jones2024; @Sm]", "[@2025]", "[@Energy]"] {
             let cursor = source.trim_end_matches(']').len();
-            assert_eq!(citation_completions(source, cursor, &bibliography)[0].text, "smith2025", "{source}");
+            assert_eq!(
+                citation_completions(source, cursor, &bibliography)[0].text,
+                "smith2025",
+                "{source}"
+            );
         }
     }
     #[test]
@@ -544,7 +564,15 @@ mod citation_tests {
         let cursor = source.find(", p.").unwrap();
         let completion = citation_completions(source, cursor, &bibliography()).remove(0);
         let mut editor = Editor::new(Document::from_text(None, source.into()));
-        editor.replace(Range::new(editor.position_of(completion.span.start as usize), editor.position_of(completion.span.end as usize)), &completion.text).unwrap();
+        editor
+            .replace(
+                Range::new(
+                    editor.position_of(completion.span.start as usize),
+                    editor.position_of(completion.span.end as usize),
+                ),
+                &completion.text,
+            )
+            .unwrap();
         assert_eq!(editor.document().content(), "β [@smith2025, p. 42]\r\n");
         editor.undo();
         assert_eq!(editor.document().content(), source);

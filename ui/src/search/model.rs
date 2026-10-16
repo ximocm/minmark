@@ -184,7 +184,10 @@ impl SearchModel {
                 if ranges.is_empty() {
                     return Vec::new();
                 }
-                vec![ReplaceFile { rel_path: target.rel_path.clone(), ranges }]
+                vec![ReplaceFile {
+                    rel_path: target.rel_path.clone(),
+                    ranges,
+                }]
             }
             ReplaceScope::All => self
                 .groups
@@ -292,10 +295,7 @@ mod tests {
 
         // Lote parcial: mismo fichero crece, fichero nuevo se añade y el
         // estado (contraído, excluido) sobrevive.
-        model.append_batch(vec![
-            file("uno.md", &[(20, 23)]),
-            file("dos.md", &[(0, 3)]),
-        ]);
+        model.append_batch(vec![file("uno.md", &[(20, 23)]), file("dos.md", &[(0, 3)])]);
         assert_eq!(model.total_files(), 2);
         assert_eq!(model.total_matches(), 3);
         assert!(!model.groups()[0].expanded);
@@ -320,8 +320,14 @@ mod tests {
         assert_eq!(
             model.replace_files(ReplaceScope::All),
             vec![
-                ReplaceFile { rel_path: "uno.md".into(), ranges: vec![(0, 3), (10, 13)] },
-                ReplaceFile { rel_path: "dos.md".into(), ranges: vec![(5, 8)] },
+                ReplaceFile {
+                    rel_path: "uno.md".into(),
+                    ranges: vec![(0, 3), (10, 13)]
+                },
+                ReplaceFile {
+                    rel_path: "dos.md".into(),
+                    ranges: vec![(5, 8)]
+                },
             ]
         );
 
@@ -330,19 +336,31 @@ mod tests {
         // Individual: la activa va aunque esté excluida (acción explícita).
         assert_eq!(
             model.replace_files(ReplaceScope::Current),
-            vec![ReplaceFile { rel_path: "uno.md".into(), ranges: vec![(10, 13)] }]
+            vec![ReplaceFile {
+                rel_path: "uno.md".into(),
+                ranges: vec![(10, 13)]
+            }]
         );
         // Por fichero: solo las incluidas del grupo activo.
         assert_eq!(
             model.replace_files(ReplaceScope::Group),
-            vec![ReplaceFile { rel_path: "uno.md".into(), ranges: vec![(0, 3)] }]
+            vec![ReplaceFile {
+                rel_path: "uno.md".into(),
+                ranges: vec![(0, 3)]
+            }]
         );
         // Global: solo incluidas, de todos los grupos.
         assert_eq!(
             model.replace_files(ReplaceScope::All),
             vec![
-                ReplaceFile { rel_path: "uno.md".into(), ranges: vec![(0, 3)] },
-                ReplaceFile { rel_path: "dos.md".into(), ranges: vec![(5, 8)] },
+                ReplaceFile {
+                    rel_path: "uno.md".into(),
+                    ranges: vec![(0, 3)]
+                },
+                ReplaceFile {
+                    rel_path: "dos.md".into(),
+                    ranges: vec![(5, 8)]
+                },
             ]
         );
 
