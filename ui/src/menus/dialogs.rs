@@ -15,8 +15,8 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use gtk4 as gtk;
-use gtk4::glib;
 use gtk4::gio;
+use gtk4::glib;
 use gtk4::prelude::*;
 
 /// Filtro Markdown (*.md / *.markdown + MIME `text/markdown`) para los diálogos.
@@ -227,6 +227,131 @@ pub fn prompt_text(
             window.destroy();
             on_submit(None);
         });
+    }
+    window.connect_close_request({
+        let on_submit = Rc::clone(&on_submit);
+        move |_| {
+            on_submit(None);
+            glib::Propagation::Proceed
+        }
+    });
+
+    window.present();
+}
+
+/// Selección de composición (§20, ISSUE-022/023): lista modal con las
+/// composiciones del proyecto, en el patrón de [`prompt_text`].
+///
+/// `on_submit(Some(nombre))` al aceptar la fila seleccionada (doble click o
+/// Aceptar), `on_submit(None)` al cancelar (botón, Escape o cierre). El
+/// diálogo es callback y no futuro para encadenarse con los futuros del
+/// flujo de exportación.
+pub fn choose_composition(
+    parent: &impl IsA<gtk::Window>,
+    names: &[String],
+    on_submit: Rc<dyn Fn(Option<String>)>,
+) {
+    let window = gtk::Window::builder()
+        .title("Composición")
+        .modal(true)
+        .transient_for(parent)
+        .default_width(360)
+        .resizable(false)
+        .build();
+
+    let vbox = gtk::Box::new(gtk::Orientation::Vertical, 8);
+    vbox.set_margin_top(12);
+    vbox.set_margin_bottom(12);
+    vbox.set_margin_start(12);
+    vbox.set_margin_end(12);
+
+    let list = gtk::ListBox::new();
+    list.set_selection_mode(gtk::SelectionMode::Single);
+    for name in names {
+        let label = gtk::Label::new(Some(name));
+        label.set_xalign(0.0);
+        let row = gtk::ListBoxRow::new();
+        row.set_child(Some(&label));
+        list.append(&row);
+    }
+    if let Some(first) = list.row_at_index(0) {
+        list.select_row(Some(&first));
+    }
+    let scroll = gtk::ScrolledWindow::new();
+    scroll.set_child(Some(&list));
+    scroll.set_min_content_height(180);
+    scroll.set_vexpand(true);
+
+    let buttons = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    buttons.set_halign(gtk::Align::End);
+    let cancel = gtk::Button::with_label("Cancelar");
+    let accept = gtk::Button::with_label("Aceptar");
+    accept.add_css_class("suggested-action");
+    buttons.append(&cancel);
+    buttons.append(&accept);
+
+    vbox.append(&scroll);
+    vbox.append(&buttons);
+    window.set_default_widget(Some(&accept));
+    window.set_child(Some(&vbox));
+
+    // Nombre de la fila seleccionada; `None` si no hay fila. La lista es
+    // propia del diálogo (los callbacks GTK son `'static`).
+    let nombres = names.to_vec();
+    let seleccionada = {
+        let list = list.clone();
+        Rc::new(move || -> Option<String> {
+            let row = list.selected_row()?;
+            let row = row.index().max(0) as usize;
+            nombres.get(row).cloned()
+        })
+    };
+    {
+        let window = window.clone();
+        let seleccionada = seleccionada.clone();
+        let on_submit = Rc::clone(&on_submit);
+        accept.connect_clicked(move |_| {
+            let nombre = seleccionada();
+            window.destroy();
+            on_submit(nombre);
+        });
+    }
+    // Doble click sobre una fila: acepta ESA fila (la selecciona primero).
+    {
+        let para_seleccionar = list.clone();
+        let seleccionada = seleccionada.clone();
+        let window = window.clone();
+        let on_submit = Rc::clone(&on_submit);
+        list.connect_row_activated(move |_, row| {
+            para_seleccionar.select_row(Some(row));
+            let nombre = seleccionada();
+            window.destroy();
+            on_submit(nombre);
+        });
+    }
+    {
+        let window = window.clone();
+        let on_submit = Rc::clone(&on_submit);
+        cancel.connect_clicked(move |_| {
+            window.destroy();
+            on_submit(None);
+        });
+    }
+    // Escape y el cierre de la ventana cancelan (§3.7: nunca en silencio
+    // seleccionan una por defecto).
+    {
+        let on_escape = window.clone();
+        let on_submit = Rc::clone(&on_submit);
+        let controller = gtk::EventControllerKey::new();
+        controller.connect_key_pressed(move |_, key, _, _| {
+            if key == gtk4::gdk::Key::Escape {
+                on_escape.destroy();
+                on_submit(None);
+                return glib::Propagation::Stop;
+            }
+            glib::Propagation::Proceed
+        });
+        window.add_controller(controller);
     }
     window.connect_close_request({
         let on_submit = Rc::clone(&on_submit);

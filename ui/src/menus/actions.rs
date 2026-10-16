@@ -4,7 +4,9 @@
 //! verificar la estructura §36 sin display ni main loop de GTK;
 //! [`build_menubar`] lo materializa en `gio::Menu` (GMenu es GObject puro de
 //! GIO y no necesita `gtk_init`). [`install_actions`] registra las acciones
-//! `win.*` y fija los aceleradores §39.
+//! `win.*` (deshabilitando las de composición sin proyecto, ISSUE-022) y
+//! fija los aceleradores §39. [`ALL_COMMANDS`] es la lista completa §38,
+//! pública para que la Command Palette se alimente de ella.
 
 use std::rc::Rc;
 
@@ -34,6 +36,8 @@ pub enum Command {
     SaveAs,
     /// Exporta el documento activo a PDF (§32.1, ISSUE-035, §39: `Ctrl+E`).
     ExportPdf,
+    /// Exporta la composición activa como un único PDF (§20.4, ISSUE-023).
+    ExportCompositionPdf,
     CloseTab,
     Undo,
     Redo,
@@ -51,6 +55,8 @@ pub enum Command {
     ToggleExplorer,
     /// Cambio de modo de vista (§36, menú View).
     View(ViewMode), // ViewMode de crate::preview
+    /// Preview combinado de una composición (§20.4, ISSUE-023, menú Project).
+    PreviewComposition,
     About,
     Shortcuts,
 }
@@ -72,6 +78,7 @@ impl Command {
             Command::Save => "win.save",
             Command::SaveAs => "win.save-as",
             Command::ExportPdf => "win.export-pdf",
+            Command::ExportCompositionPdf => "win.export-composition-pdf",
             Command::CloseTab => "win.close-tab",
             Command::Undo => "win.undo",
             Command::Redo => "win.redo",
@@ -84,6 +91,7 @@ impl Command {
             Command::View(ViewMode::Editor) => "win.view-editor",
             Command::View(ViewMode::Split) => "win.view-split",
             Command::View(ViewMode::Preview) => "win.view-preview",
+            Command::PreviewComposition => "win.preview-composition",
             Command::About => "win.about",
             Command::Shortcuts => "win.shortcuts",
         }
@@ -105,6 +113,7 @@ impl Command {
             Command::Save => "Save",
             Command::SaveAs => "Save As",
             Command::ExportPdf => "Export PDF",
+            Command::ExportCompositionPdf => "Export Composition PDF",
             Command::CloseTab => "Close Tab",
             Command::Undo => "Undo",
             Command::Redo => "Redo",
@@ -115,9 +124,20 @@ impl Command {
             Command::VisualSyntax => "Toggle Visual Syntax",
             Command::ToggleExplorer => "Toggle Explorer",
             Command::View(mode) => mode.label(),
+            Command::PreviewComposition => "Preview Composition",
             Command::About => "About",
             Command::Shortcuts => "Atajos",
         }
+    }
+
+    /// Acción que exige un proyecto con composiciones (§20, ISSUE-022): sin
+    /// ellas el ítem queda deshabilitado en el menú y en la paleta (§38)
+    /// vía [`Commands::compositions_available`].
+    pub fn requires_composition(&self) -> bool {
+        matches!(
+            self,
+            Command::PreviewComposition | Command::ExportCompositionPdf
+        )
     }
 }
 
@@ -141,6 +161,17 @@ pub trait Commands {
     /// Exporta el documento activo a PDF (§32.1, ISSUE-035): diálogo de
     /// destino y motor [`minmark_pdf::TypstEngine`].
     fn export_pdf(&self);
+    /// Exporta la composición elegida como un único PDF (§20.4, ISSUE-023):
+    /// el mismo flujo de diálogo que [`Commands::export_pdf`].
+    fn export_composition_pdf(&self) {}
+    /// Preview combinado de la composición elegida (§20.4, ISSUE-023) en
+    /// una ventana temporal con el patrón Outline/Backlinks.
+    fn preview_composition(&self) {}
+    /// ¿Hay composiciones que gestionar (§20, ISSUE-022)? Sin proyecto
+    /// abierto las acciones de composición quedan deshabilitadas.
+    fn compositions_available(&self) -> bool {
+        false
+    }
     fn close_tab(&self);
     fn undo(&self);
     fn redo(&self);
@@ -184,8 +215,10 @@ pub const ACCELERATORS: &[(&str, &str)] = &[
     ("win.toggle-explorer", "<Control>b"),
 ];
 
-/// Todos los comandos, en orden de aparición en los menús §36.
-const ALL_COMMANDS: &[Command] = &[
+/// Todos los comandos, en orden de aparición en los menús §36. §38: es la
+/// lista completa que la Command Palette ejecuta — pública para que la
+/// paleta se alimente de ella — y todo comando es alcanzable desde el menú.
+pub const ALL_COMMANDS: &[Command] = &[
     Command::New,
     Command::NewWindow,
     Command::Open,
@@ -198,6 +231,7 @@ const ALL_COMMANDS: &[Command] = &[
     Command::Save,
     Command::SaveAs,
     Command::ExportPdf,
+    Command::ExportCompositionPdf,
     Command::CloseTab,
     Command::Undo,
     Command::Redo,
@@ -210,6 +244,7 @@ const ALL_COMMANDS: &[Command] = &[
     Command::View(ViewMode::Editor),
     Command::View(ViewMode::Split),
     Command::View(ViewMode::Preview),
+    Command::PreviewComposition,
     Command::About,
     Command::Shortcuts,
 ];
@@ -221,9 +256,10 @@ type SectionSpec = &'static [EntrySpec];
 /// Submenú puro §36: `(título, secciones)`.
 type SubmenuSpec = (&'static str, &'static [SectionSpec]);
 
-/// Modelo de menú §36 en datos puros: File, Edit, View y Help. View agrupa
-/// «Markdown/Visual» (ToggleMode) y la sección radio implícita
-/// Editor/Split/Preview (§36).
+/// Modelo de menú §36 en datos puros: File, Edit, View, Project y Help
+/// (Insert/Format llegan con sus fases). View agrupa «Markdown/Visual»
+/// (ToggleMode) y la sección radio implícita Editor/Split/Preview (§36);
+/// Project nace con las composiciones (§20, ISSUE-022).
 const MENUBAR_SPEC: &[SubmenuSpec] = &[
     (
         "File",
@@ -237,6 +273,7 @@ const MENUBAR_SPEC: &[SubmenuSpec] = &[
             ("Save", "win.save"),
             ("Save As", "win.save-as"),
             ("Export PDF", "win.export-pdf"),
+            ("Export Composition PDF", "win.export-composition-pdf"),
             ("Close Tab", "win.close-tab"),
         ]],
     ),
@@ -269,12 +306,17 @@ const MENUBAR_SPEC: &[SubmenuSpec] = &[
         ],
     ),
     (
+        "Project",
+        &[&[("Preview Composition", "win.preview-composition")]],
+    ),
+    (
         "Help",
         &[&[("Atajos", "win.shortcuts"), ("About", "win.about")]],
     ),
 ];
 
-/// Modelo de menú §36: File, Edit, View, Help (Insert/Format/Project llegan con sus fases).
+/// Modelo de menú §36: File, Edit, View, Project, Help (Insert/Format llegan
+/// con sus fases).
 pub fn build_menubar() -> gio::Menu {
     let menubar = gio::Menu::new();
     for &(title, sections) in MENUBAR_SPEC {
@@ -307,6 +349,7 @@ fn dispatch(cmd: Command, host: &dyn Commands) {
         Command::Save => host.save(),
         Command::SaveAs => host.save_as(),
         Command::ExportPdf => host.export_pdf(),
+        Command::ExportCompositionPdf => host.export_composition_pdf(),
         Command::CloseTab => host.close_tab(),
         Command::Undo => host.undo(),
         Command::Redo => host.redo(),
@@ -317,6 +360,7 @@ fn dispatch(cmd: Command, host: &dyn Commands) {
         Command::VisualSyntax => host.toggle_visual_syntax(),
         Command::ToggleExplorer => host.toggle_explorer(),
         Command::View(mode) => host.set_view(mode),
+        Command::PreviewComposition => host.preview_composition(),
         Command::About => host.about(),
         Command::Shortcuts => host.shortcuts(),
     }
@@ -342,6 +386,11 @@ pub fn install_actions<W: IsA<gtk::Window>>(
             .strip_prefix("win.")
             .expect("los action_id usan el prefijo «win.» (§36)");
         let action = gio::SimpleAction::new(name, None);
+        // §20/ISSUE-022: sin proyecto con composiciones el ítem queda
+        // deshabilitado (también en la paleta §38: la misma acción `win.*`).
+        if cmd.requires_composition() {
+            action.set_enabled(host.compositions_available());
+        }
         let host = Rc::clone(&host);
         action.connect_activate(move |_, _| dispatch(cmd, &*host));
         group.add_action(&action);
@@ -415,10 +464,11 @@ mod tests {
     }
 
     /// §36: estructura exacta del menú — File (New/New Window/Open/Quick
-    /// Open/Open Folder/Import Markdown/Save/Save As/Export PDF/Close Tab,
-    /// ISSUE-021/029/035), Edit (Undo/Redo/Find/Replace/Project Search,
-    /// §40.1/§40.2), View (Markdown/Visual + Editor/Split/Preview), Help
-    /// (Atajos/About).
+    /// Open/Open Folder/Import Markdown/Save/Save As/Export PDF/Export
+    /// Composition PDF/Close Tab, ISSUE-021/029/035/023), Edit (Undo/Redo/
+    /// Find/Replace/Project Search, §40.1/§40.2), View (Markdown/Visual +
+    /// Editor/Split/Preview), Project (Preview Composition, §20/ISSUE-022)
+    /// y Help (Atajos/About).
     #[test]
     fn estructura_menu_36() {
         let esperado: &[(&str, &[&[(&str, &str)]])] = &[
@@ -434,6 +484,7 @@ mod tests {
                     ("Save", "win.save"),
                     ("Save As", "win.save-as"),
                     ("Export PDF", "win.export-pdf"),
+                    ("Export Composition PDF", "win.export-composition-pdf"),
                     ("Close Tab", "win.close-tab"),
                 ]],
             ),
@@ -466,11 +517,34 @@ mod tests {
                 ],
             ),
             (
+                "Project",
+                &[&[("Preview Composition", "win.preview-composition")]],
+            ),
+            (
                 "Help",
                 &[&[("Atajos", "win.shortcuts"), ("About", "win.about")]],
             ),
         ];
         assert_eq!(MENUBAR_SPEC, esperado);
+    }
+
+    /// §20/ISSUE-022: las acciones de composición (Project ▸ Preview
+    /// Composition y File ▸ Export Composition PDF) son las que exigen
+    /// composiciones y por eso se deshabilitan sin proyecto.
+    #[test]
+    fn comandos_de_composicion_marcados_como_requirientes() {
+        for cmd in ALL_COMMANDS {
+            let esperado = matches!(
+                cmd.action_id(),
+                "win.preview-composition" | "win.export-composition-pdf"
+            );
+            assert_eq!(
+                cmd.requires_composition(),
+                esperado,
+                "requires_composition desalineado en {}",
+                cmd.action_id()
+            );
+        }
     }
 
     /// `build_menubar()` materializa [`MENUBAR_SPEC`] en `gio::Menu` con los

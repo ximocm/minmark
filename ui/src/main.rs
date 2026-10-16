@@ -1,9 +1,12 @@
 //! minmark — aplicación de escritorio GTK4 + WebKitGTK 6.0 (ISSUE-020, ADR-001).
 //!
 //! Integra el core (`core/`) con la UI decidida en ADR-001:
-//! - menús §36 (File, Edit, View, Help; Insert/Format/Project llegan con sus
-//!   fases);
+//! - menús §36 (File, Edit, View, Project, Help; Insert/Format llegan con
+//!   sus fases);
 //! - atajos §39 (Ctrl+N/O/S, Ctrl+Shift+S, Ctrl+W, Ctrl+Alt+M);
+//! - composiciones (§20, ISSUE-022/023): Preview combinado y PDF único desde
+//!   el menú Project/File, con la cadena de ajustes §58 y la bibliografía
+//!   unida de los archivos incluidos (ISSUE-024);
 //! - editor Markdown Mode (ISSUE-015) y modo Visual §8.2 (ISSUE-030:
 //!   representación semántica editable sobre el mismo buffer);
 //! - Preview WebView continuo (ISSUE-016) con temas (ISSUE-017);
@@ -24,6 +27,7 @@
 //! mismo documento en los dos modos §8 (Markdown y Visual, ISSUE-030).
 
 mod academic;
+mod composition;
 mod editor;
 mod explorer;
 mod export;
@@ -52,7 +56,9 @@ use gtk4::{
     Application, ApplicationWindow, Box as GtkBox, CssProvider, Orientation, Paned, PopoverMenuBar,
     Widget,
 };
-use minmark_config::{detect_system_theme, resolve_theme, ResolvedTheme, Settings, VisualSyntax};
+use minmark_config::{
+    detect_system_theme, resolve_theme, Composition, ResolvedTheme, Settings, VisualSyntax,
+};
 use minmark_document::{Position, Range, SearchOptions, Selection};
 use minmark_fs::Watcher as _;
 use minmark_renderer::Palette;
@@ -294,6 +300,13 @@ struct AppCmds {
     /// Watcher del subárbol del proyecto (ISSUE-026, §46); `None` en
     /// standalone.
     watcher: Option<Rc<RefCell<minmark_fs::InotifyWatcher>>>,
+    /// Composiciones del `.mdproject.toml` de la raíz (§20, ISSUE-022);
+    /// vacías en ventanas standalone, donde las acciones de composición
+    /// quedan deshabilitadas.
+    compositions: RefCell<Vec<Composition>>,
+    /// Ventana temporal del Preview combinado (§20.4, ISSUE-023),
+    /// reutilizable con el patrón Outline/Backlinks.
+    composition_preview: RefCell<Option<Rc<CompositionPreview>>>,
     /// Operaciones propias §14.8 (ISSUE-026 criterio 3).
     self_ops: Rc<SelfOps>,
     settings: RefCell<Settings>,
@@ -332,6 +345,17 @@ struct Sidebar {
     paned: Paned,
     visible: Cell<bool>,
     state: RefCell<ExplorerState>,
+}
+
+/// Ventana temporal del Preview de una composición (§20.4, ISSUE-023), con
+/// el patrón Outline/Backlinks: instancia reutilizable que Escape (o la ✕)
+/// oculta sin destruir, y cuya WebView conserva la página entre aperturas.
+struct CompositionPreview {
+    window: gtk4::Window,
+    pane: Rc<PreviewPane>,
+    /// Generación del último render pedido: descarta los entregados tarde
+    /// cuando se abre otra composición mientras este render sigue en vuelo.
+    generation: Cell<u64>,
 }
 
 impl AppCmds {
@@ -1356,6 +1380,190 @@ impl AppCmds {
         self.editor_pane.widget().set_visible(show_editor);
         self.preview.widget().set_visible(show_preview);
     }
+
+    // --- Composiciones (§20, ISSUE-022/023) ---------------------------------
+
+    /// Contenido actual de los buffers abiertos con ruta (ISSUE-023): la
+    /// composición usa el buffer sin guardar en lugar del disco (§6.1).
+    fn open_buffers(&self) -> Vec<(PathBuf, String)> {
+        self.tabs
+            .borrow()
+            .tabs()
+            .iter()
+            .filter_map(|tab| {
+                Some((
+                    ruta_comparable(tab.path.as_ref()?),
+                    tab.editor.document().content().to_owned(),
+                ))
+            })
+            .collect()
+    }
+
+    /// Ejecuta `then` con la composición elegida (ISSUE-022): con una sola
+    /// no hay diálogo; con varias se presenta la selección (§20.1). Sin
+    /// composiciones no hace nada (la acción está deshabilitada).
+    fn with_composition(&self, then: Rc<dyn Fn(&AppCmds, Composition)>) {
+        let nombres: Vec<String> = self
+            .compositions
+            .borrow()
+            .iter()
+            .map(|comp| comp.name.clone())
+            .collect();
+        match nombres.len() {
+            0 => {}
+            1 => {
+                let comp = self.compositions.borrow()[0].clone();
+                then(self, comp);
+            }
+            _ => {
+                let Some(me) = self.slot() else { return };
+                dialogs::choose_composition(
+                    &self.window,
+                    &nombres,
+                    Rc::new(move |elegida| {
+                        let Some(elegida) = elegida else { return };
+                        let comp = me
+                            .compositions
+                            .borrow()
+                            .iter()
+                            .find(|comp| comp.name == elegida)
+                            .cloned();
+                        if let Some(comp) = comp {
+                            then(&me, comp);
+                        }
+                    }),
+                );
+            }
+        }
+    }
+
+    /// Ventana temporal del Preview combinado (patrón Outline/Backlinks):
+    /// se crea en el primer uso y después se reutiliza; Escape o la ✕ la
+    /// ocultan sin destruir la WebView.
+    fn composition_window(&self) -> Rc<CompositionPreview> {
+        if let Some(preview) = self.composition_preview.borrow().as_ref() {
+            return Rc::clone(preview);
+        }
+        let window = gtk4::Window::builder()
+            .transient_for(&self.window)
+            .default_width(1000)
+            .default_height(800)
+            .build();
+        let pane = Rc::new(PreviewPane::new());
+        // El clic en un enlace no navega fuera del documento combinado
+        // (§3.4: la WebView conserva la página, igual que el Preview normal).
+        pane.connect_link_activation(Rc::new(|_| {}));
+        window.set_child(Some(&pane.widget()));
+        {
+            let on_escape = window.clone();
+            let controller = gtk4::EventControllerKey::new();
+            controller.connect_key_pressed(move |_, key, _, _| {
+                if key == gtk4::gdk::Key::Escape {
+                    on_escape.set_visible(false);
+                    return glib::Propagation::Stop;
+                }
+                glib::Propagation::Proceed
+            });
+            window.add_controller(controller);
+        }
+        window.connect_close_request(move |window| {
+            window.set_visible(false);
+            glib::Propagation::Stop
+        });
+        let preview = Rc::new(CompositionPreview {
+            window,
+            pane,
+            generation: Cell::new(0),
+        });
+        *self.composition_preview.borrow_mut() = Some(Rc::clone(&preview));
+        preview
+    }
+
+    /// Abre la ventana temporal con el Preview COMBINADO de la composición
+    /// (§20.4, ISSUE-023): continuo o paginado según el `pagination`
+    /// efectivo; el render corre en un hilo y se entrega al hilo de UI
+    /// (patrón §47.5). Consultar no escribe los fuentes (§20).
+    fn show_composition_preview(&self, comp: &Composition) {
+        let Some(root) = self.scope.project_root() else {
+            return;
+        };
+        let combined = composition::build(&root, comp, &self.open_buffers());
+        let preview = self.composition_window();
+        preview
+            .window
+            .set_title(Some(&format!("Preview — {}", combined.name)));
+        preview.window.present();
+        let generation = preview.generation.get().wrapping_add(1);
+        preview.generation.set(generation);
+        let base = composition::base_uri(&root);
+        // Misma composición ⇒ misma página (actualización in-place §10.2);
+        // otra composición ⇒ recarga completa de la WebView.
+        let clave = (
+            Some(root.join(format!(".mdproject-composition:{}", combined.name))),
+            0u64,
+        );
+        let pane = Rc::clone(&preview.pane);
+        let slot = self.slot.clone();
+        let (tx, rx) = channel();
+        std::thread::spawn(move || {
+            let html = composition::render(combined);
+            let _ = tx.send(html);
+        });
+        let ventana = Rc::clone(&preview);
+        deliver_to_quickopen(rx, slot, move |_me, html| {
+            if ventana.generation.get() != generation {
+                return; // otro render más reciente ya ocupó la ventana
+            }
+            pane.update_html(&html, Some(&base), clave.clone());
+        });
+    }
+
+    /// Exporta la composición elegida como un único PDF (§20.4, ISSUE-023)
+    /// por el MISMO flujo que la exportación individual: diálogo de
+    /// destino, sobrescritura y errores idénticos (§32.1).
+    fn export_composition(&self, comp: &Composition) {
+        let Some(root) = self.scope.project_root() else {
+            return;
+        };
+        let combined = composition::build(&root, comp, &self.open_buffers());
+        let suggested = format!("{}.pdf", combined.name);
+        let crate::composition::Combined {
+            composed,
+            settings,
+            meta,
+            root,
+            ..
+        } = combined;
+        self.run_pdf_export(suggested, move || {
+            export::export_composed(composed.ast, &settings, &root, &meta)
+        });
+    }
+
+    /// Flujo de exportación PDF único (§32.1): diálogo de destino con su
+    /// confirmación de sobrescritura (`dialogs::save_pdf`), escritura del
+    /// bytes y errores visibles con el mismo patrón que siempre. `produce`
+    /// genera los bytes por el camino que corresponda (individual o
+    /// composición) — la lógica del diálogo no se duplica.
+    fn run_pdf_export(
+        &self,
+        suggested: String,
+        produce: impl FnOnce() -> Result<Vec<u8>, minmark_pdf::PdfError> + 'static,
+    ) {
+        let window = self.window.clone();
+        glib::spawn_future_local(async move {
+            let Some(path) = dialogs::save_pdf(&window, &suggested).await else {
+                return;
+            };
+            match produce() {
+                Ok(bytes) => {
+                    if let Err(err) = std::fs::write(&path, &bytes) {
+                        show_error(&window, &err.to_string());
+                    }
+                }
+                Err(err) => show_error(&window, &err.to_string()),
+            }
+        });
+    }
 }
 
 impl Commands for AppCmds {
@@ -1476,7 +1684,6 @@ impl Commands for AppCmds {
         let Some(_me) = self.slot() else { return };
         // El front matter del snapshot puede preceder al refresco diferido.
         self.refresh_now();
-        let window = self.window.clone();
         let root = self.scope.project_root();
         let (text, settings, suggested, document_path) = {
             let tabs = self.tabs.borrow();
@@ -1496,25 +1703,33 @@ impl Commands for AppCmds {
             )
         };
         let meta = minmark_pdf::DocumentMeta::from_ast(&minmark_parser::parse(&text));
-        glib::spawn_future_local(async move {
-            let Some(path) = dialogs::save_pdf(&window, &suggested).await else {
-                return;
-            };
-            match export::export_document_at(
+        self.run_pdf_export(suggested, move || {
+            export::export_document_at(
                 &text,
                 &settings,
                 document_path.as_deref(),
                 root.as_deref(),
                 &meta,
-            ) {
-                Ok(bytes) => {
-                    if let Err(err) = std::fs::write(&path, &bytes) {
-                        show_error(&window, &err.to_string());
-                    }
-                }
-                Err(err) => show_error(&window, &err.to_string()),
-            }
+            )
         });
+    }
+
+    fn export_composition_pdf(&self) {
+        // §20.4/ISSUE-023: selección si hay varias y después el MISMO
+        // flujo de diálogo que `export_pdf` (`run_pdf_export`).
+        self.with_composition(Rc::new(|me, comp| me.export_composition(&comp)));
+    }
+
+    fn preview_composition(&self) {
+        // §20.4/ISSUE-023: selección si hay varias y ventana temporal con
+        // el Preview combinado (patrón Outline/Backlinks).
+        self.with_composition(Rc::new(|me, comp| me.show_composition_preview(&comp)));
+    }
+
+    fn compositions_available(&self) -> bool {
+        // ISSUE-022: sin proyecto con `[[composition]]` las acciones de
+        // composición quedan deshabilitadas en menú y paleta.
+        !self.compositions.borrow().is_empty()
     }
 
     fn close_tab(&self) {
@@ -2079,6 +2294,14 @@ fn build_window(app: &Application, scope: WindowScope, open_paths: &[PathBuf]) -
     vbox.set_vexpand(true);
     window.set_child(Some(&vbox));
 
+    // §20 (ISSUE-022): composiciones del `.mdproject.toml` de la raíz del
+    // proyecto activo; en standalone la lista queda vacía y `install_actions`
+    // deshabilita las acciones de composición (`compositions_available`).
+    let compositions = match &scope {
+        WindowScope::Project(root) => composition::discover(root),
+        WindowScope::Standalone => Vec::new(),
+    };
+
     let cmds = Rc::new(AppCmds {
         app: app.clone(),
         window: window.clone(),
@@ -2103,6 +2326,8 @@ fn build_window(app: &Application, scope: WindowScope, open_paths: &[PathBuf]) -
         quickopen_dir: RefCell::new(None),
         sidebar,
         watcher,
+        compositions: RefCell::new(compositions),
+        composition_preview: RefCell::new(None),
         self_ops: Rc::new(SelfOps::default()),
         settings: RefCell::new(settings),
         academic_monitors: RefCell::new(Vec::new()),
