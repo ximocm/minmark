@@ -407,7 +407,8 @@ mod tests {
         };
         state.refresh(&e);
         // Colocamos el cursor al principio para las navegaciones.
-        e.set_selection(Selection::collapsed(Position::new(0, 0))).unwrap();
+        e.set_selection(Selection::collapsed(Position::new(0, 0)))
+            .unwrap();
         (e, state)
     }
 
@@ -473,11 +474,17 @@ mod tests {
         state.replacement = "X".to_string();
         assert_eq!(
             state.replace_edit().unwrap(),
-            (Range::new(Position::new(0, 0), Position::new(0, 1)), "X".to_string())
+            (
+                Range::new(Position::new(0, 0), Position::new(0, 1)),
+                "X".to_string()
+            )
         );
         let todos = state.replace_all_edits();
         assert_eq!(todos.len(), 2);
-        assert_eq!(todos[1].0, Range::new(Position::new(0, 4), Position::new(0, 5)));
+        assert_eq!(
+            todos[1].0,
+            Range::new(Position::new(0, 4), Position::new(0, 5))
+        );
     }
 
     #[test]
@@ -494,7 +501,11 @@ mod tests {
         assert_eq!(state.counter_text(), "2/3");
         state.set_anchor(Position::new(0, 100));
         state.refresh(&e);
-        assert_eq!(state.counter_text(), "1/3", "sin nada después: wrap a la primera");
+        assert_eq!(
+            state.counter_text(),
+            "1/3",
+            "sin nada después: wrap a la primera"
+        );
     }
 
     #[test]

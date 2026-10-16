@@ -1,7 +1,7 @@
 //! Menús, atajos y diálogos de minmark (ISSUE-020).
 //!
 //! - [`actions`]: comandos explícitos y observables (§3.7), barra de menú §36
-//!   (File, Edit, View, Help; Insert/Format/Project llegan con sus fases) y
+//!   (File, Edit, View, Project, Help; Insert/Format llegan con sus fases) y
 //!   atajos de teclado §39.
 //! - [`dialogs`]: diálogos GTK4 asíncronos — abrir/guardar (§12.4) y
 //!   confirmaciones explícitas ante descartes (§3.7) y cambios externos (§12.7).

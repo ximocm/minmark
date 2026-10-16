@@ -74,8 +74,11 @@ mod tests {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_nanos();
-            let path =
-                std::env::temp_dir().join(format!("minmark-scope-{}-{}", std::process::id(), nanos));
+            let path = std::env::temp_dir().join(format!(
+                "minmark-scope-{}-{}",
+                std::process::id(),
+                nanos
+            ));
             fs::create_dir_all(&path).unwrap();
             Self(path)
         }

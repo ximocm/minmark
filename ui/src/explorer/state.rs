@@ -29,7 +29,10 @@ pub struct ExplorerState {
 
 impl Default for ExplorerState {
     fn default() -> Self {
-        Self { visible: true, width: DEFAULT_WIDTH }
+        Self {
+            visible: true,
+            width: DEFAULT_WIDTH,
+        }
     }
 }
 
@@ -84,8 +87,7 @@ pub fn state_path() -> PathBuf {
         .map(PathBuf::from)
         .filter(|path| path.is_absolute())
         .or_else(|| {
-            std::env::var_os("HOME")
-                .map(|home| PathBuf::from(home).join(".local").join("state"))
+            std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local").join("state"))
         })
         .unwrap_or_else(std::env::temp_dir);
     base.join("minmark").join("ui.ini")
@@ -126,8 +128,10 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        std::env::temp_dir()
-            .join(format!("minmark-ui-state-{tag}-{}-{nanos}.ini", std::process::id()))
+        std::env::temp_dir().join(format!(
+            "minmark-ui-state-{tag}-{}-{nanos}.ini",
+            std::process::id()
+        ))
     }
 
     #[test]
@@ -149,8 +153,14 @@ mod tests {
     #[test]
     fn serialize_y_parse_conservan_el_estado() {
         for state in [
-            ExplorerState { visible: false, width: 400 },
-            ExplorerState { visible: true, width: MIN_WIDTH },
+            ExplorerState {
+                visible: false,
+                width: 400,
+            },
+            ExplorerState {
+                visible: true,
+                width: MIN_WIDTH,
+            },
             ExplorerState::default(),
         ] {
             assert_eq!(parse(&serialize(&state)), state);
@@ -161,18 +171,29 @@ mod tests {
     fn parse_tolerante_con_basura() {
         // Archivo corrupto o de otra versión: se conservan los defaults por
         // clave, sin panic.
-        let state = parse("esto no es ini\nexplorer.visible=quizas\nexplorer.width=anchísimo\notra.clave=1\n");
+        let state = parse(
+            "esto no es ini\nexplorer.visible=quizas\nexplorer.width=anchísimo\notra.clave=1\n",
+        );
         assert_eq!(state, ExplorerState::default());
 
         // Claves válidas entre líneas ilegibles siguen aplicándose.
         let state = parse("\n# comentario\nexplorer.visible=false\nexplorer.width=1234\n");
-        assert_eq!(state, ExplorerState { visible: false, width: MAX_WIDTH });
+        assert_eq!(
+            state,
+            ExplorerState {
+                visible: false,
+                width: MAX_WIDTH
+            }
+        );
     }
 
     #[test]
     fn guardar_y_cargar_desde_ruta() {
         let path = temp_file("roundtrip");
-        let state = ExplorerState { visible: false, width: 333 };
+        let state = ExplorerState {
+            visible: false,
+            width: 333,
+        };
         save_to(&path, &state).unwrap();
         assert_eq!(load_from(&path), state);
         std::fs::remove_file(&path).unwrap();

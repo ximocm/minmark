@@ -6,8 +6,8 @@
 //! (§12.7). El historial Undo/Redo vive dentro de cada [`Editor`] y cambiar de
 //! modo no lo reinicia (§8.5).
 
-use crate::editor::EditMode;
 use super::scope::WindowScope;
+use crate::editor::EditMode;
 use minmark_document::{Editor, Position, Range, Selection};
 use minmark_fs::{FileStore, FsError, LocalFs};
 use std::path::{Path, PathBuf};
@@ -463,11 +463,8 @@ mod tests {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_nanos();
-            let path = std::env::temp_dir().join(format!(
-                "minmark-tabs-{}-{}",
-                std::process::id(),
-                nanos
-            ));
+            let path =
+                std::env::temp_dir().join(format!("minmark-tabs-{}-{}", std::process::id(), nanos));
             fs::create_dir_all(&path).unwrap();
             Self(path)
         }
@@ -493,7 +490,10 @@ mod tests {
         let mut tabs = TabManager::new();
         let index = tabs.open(&path).unwrap();
         assert_eq!(tabs.active_index(), index);
-        assert_eq!(tabs.active().editor.document().content(), "# Título\n\ncuerpo\n");
+        assert_eq!(
+            tabs.active().editor.document().content(),
+            "# Título\n\ncuerpo\n"
+        );
         assert_eq!(tabs.active().path, Some(path.clone()));
         // §37: sin `●` recién abierto.
         assert_eq!(tabs.title(index), "archivo.md");
@@ -633,9 +633,7 @@ mod tests {
         // incluso con mtime de baja resolución).
         fs::write(&path, "externo\n").unwrap();
         let error = tabs.save_active();
-        assert!(
-            matches!(&error, Err(FsError::ExternalModification { path: p }) if *p == path)
-        );
+        assert!(matches!(&error, Err(FsError::ExternalModification { path: p }) if *p == path));
         // El disco queda intacto y el buffer no se pierde (§12.7).
         assert_eq!(fs::read_to_string(&path).unwrap(), "externo\n");
         assert_eq!(tabs.active().editor.document().content(), "originalX\n");
@@ -657,10 +655,7 @@ mod tests {
 
         // `new_tab` ×3 al empezar con 1 tab: índices 1..3 y títulos
         // «Sin título 2..4» (el 1 es el inicial).
-        assert_eq!(
-            [tabs.new_tab(), tabs.new_tab(), tabs.new_tab()],
-            [1, 2, 3]
-        );
+        assert_eq!([tabs.new_tab(), tabs.new_tab(), tabs.new_tab()], [1, 2, 3]);
         assert_eq!(tabs.len(), 4);
         assert_eq!(tabs.title(0), "Sin título 1");
         assert_eq!(tabs.title(1), "Sin título 2");
@@ -818,7 +813,10 @@ mod tests {
 
         assert_eq!(tabs.active().editor.document().content(), "cuatro\ncinco\n");
         // §8.5: el historial queda exactamente como estaba.
-        assert!(tabs.active().editor.can_undo(), "el historial no se reinicia");
+        assert!(
+            tabs.active().editor.can_undo(),
+            "el historial no se reinicia"
+        );
         assert!(!tabs.active().editor.can_redo());
         // §8.6: el cursor se conserva y el índice de líneas es el del
         // contenido nuevo (insertar en (0,1) cae donde toca).
@@ -827,6 +825,9 @@ mod tests {
             Selection::collapsed(Position::new(0, 1))
         );
         tabs.insert_active(Position::new(0, 1), "Z");
-        assert_eq!(tabs.active().editor.document().content(), "cZuatro\ncinco\n");
+        assert_eq!(
+            tabs.active().editor.document().content(),
+            "cZuatro\ncinco\n"
+        );
     }
 }

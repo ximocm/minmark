@@ -31,8 +31,8 @@
 
 mod model;
 
-pub use model::{ReplaceScope, SearchModel};
 pub use minmark_fs::search::ReplaceSummary;
+pub use model::{ReplaceScope, SearchModel};
 
 use model::scope_from;
 
@@ -43,8 +43,8 @@ use gtk4::{
 };
 use minmark_document::{Matcher, SearchOptions};
 use minmark_fs::search::{
-    apply_replace, plan_replace, search_streaming, MassReplace, SearchEvent,
-    SearchSource, SearchScope, SkippedFile,
+    apply_replace, plan_replace, search_streaming, MassReplace, SearchEvent, SearchScope,
+    SearchSource, SkippedFile,
 };
 use minmark_fs::ProjectIndex;
 use std::cell::{Cell, RefCell};
@@ -223,11 +223,13 @@ impl SearchPanel {
         // relanzar cancela la anterior, §47.5).
         {
             let handler = core.clone();
-            core.search_entry.connect_activate(move |_| handler.launch_search());
+            core.search_entry
+                .connect_activate(move |_| handler.launch_search());
         }
         {
             let handler = core.clone();
-            core.search_entry.connect_changed(move |_| handler.launch_search());
+            core.search_entry
+                .connect_changed(move |_| handler.launch_search());
         }
         for button in [&core.case_button, &core.word_button, &core.regex_button] {
             let handler = core.clone();
@@ -235,15 +237,17 @@ impl SearchPanel {
         }
         {
             let handler = core.clone();
-            core.scope_dropdown.connect_selected_notify(move |dropdown| {
-                let core = &handler;
-                core.custom_entry.set_sensitive(dropdown.selected() == 2);
-                core.launch_search();
-            });
+            core.scope_dropdown
+                .connect_selected_notify(move |dropdown| {
+                    let core = &handler;
+                    core.custom_entry.set_sensitive(dropdown.selected() == 2);
+                    core.launch_search();
+                });
         }
         {
             let handler = core.clone();
-            core.custom_entry.connect_activate(move |_| handler.launch_search());
+            core.custom_entry
+                .connect_activate(move |_| handler.launch_search());
         }
 
         // Reemplazo §40.2 (individual / en fichero / todo) y deshacer único.
@@ -264,7 +268,8 @@ impl SearchPanel {
         }
         {
             let handler = core.clone();
-            core.undo_button.connect_clicked(move |_| handler.launch_undo());
+            core.undo_button
+                .connect_clicked(move |_| handler.launch_undo());
         }
 
         core.rebuild();
@@ -488,8 +493,7 @@ impl Core {
         let (tx, rx) = channel::<OpDone>();
         std::thread::spawn(move || {
             let resultado = (|| {
-                let matcher =
-                    Matcher::new(&query, options).map_err(|error| error.to_string())?;
+                let matcher = Matcher::new(&query, options).map_err(|error| error.to_string())?;
                 let plan = plan_replace(&root, &matcher, &template, &files)
                     .map_err(|error| error.to_string())?;
                 apply_replace(&plan).map_err(|error| error.to_string())
@@ -523,17 +527,19 @@ impl Core {
     /// Timer local para el resultado único de un reemplazo/deshacer.
     fn install_op_poller(self: &Rc<Self>, rx: Receiver<OpDone>) {
         let core = self.clone();
-        glib::timeout_add_local(Duration::from_millis(POLL_MS), move || match rx.try_recv() {
-            Err(TryRecvError::Empty) => glib::ControlFlow::Continue,
-            Err(TryRecvError::Disconnected) => {
-                core.finish_op(OpDone::Replaced(Err(
-                    "el reemplazo se interrumpió antes de terminar".to_owned()
-                )));
-                glib::ControlFlow::Break
-            }
-            Ok(done) => {
-                core.finish_op(done);
-                glib::ControlFlow::Break
+        glib::timeout_add_local(Duration::from_millis(POLL_MS), move || {
+            match rx.try_recv() {
+                Err(TryRecvError::Empty) => glib::ControlFlow::Continue,
+                Err(TryRecvError::Disconnected) => {
+                    core.finish_op(OpDone::Replaced(Err(
+                        "el reemplazo se interrumpió antes de terminar".to_owned(),
+                    )));
+                    glib::ControlFlow::Break
+                }
+                Ok(done) => {
+                    core.finish_op(done);
+                    glib::ControlFlow::Break
+                }
             }
         });
     }
@@ -609,7 +615,10 @@ impl Core {
             };
             file_row.append(&chevron);
             let name = Label::new(None);
-            name.set_markup(&format!("<b>{}</b>", glib::markup_escape_text(&group.rel_path)));
+            name.set_markup(&format!(
+                "<b>{}</b>",
+                glib::markup_escape_text(&group.rel_path)
+            ));
             name.set_xalign(0.0);
             name.set_hexpand(true);
             file_row.append(&name);
@@ -665,7 +674,11 @@ impl Core {
                     let weak = Rc::downgrade(self);
                     text_button.connect_clicked(move |_| {
                         if let Some(core) = weak.upgrade() {
-                            if core.model.borrow_mut().set_current(group_index, match_index) {
+                            if core
+                                .model
+                                .borrow_mut()
+                                .set_current(group_index, match_index)
+                            {
                                 core.rebuild();
                                 core.open_current();
                             }
@@ -829,11 +842,15 @@ mod tests {
     fn especificacion_de_botones_y_alcance_40_2() {
         assert_eq!(
             BUTTON_LABELS,
-            ["Reemplazar", "Reemplazar en fichero", "Reemplazar todo", "Deshacer reemplazo"]
+            [
+                "Reemplazar",
+                "Reemplazar en fichero",
+                "Reemplazar todo",
+                "Deshacer reemplazo"
+            ]
         );
         assert_eq!(
-            SCOPE_OPTIONS[0],
-            "Markdown (.md, .markdown)",
+            SCOPE_OPTIONS[0], "Markdown (.md, .markdown)",
             "el alcance por defecto §40.2 es .md"
         );
         assert_eq!(SCOPE_OPTIONS.len(), 3);
@@ -860,13 +877,28 @@ mod tests {
         model.set_results(vec![FileMatches {
             rel_path: "a.md".to_owned(),
             matches: vec![
-                LineMatch { line: 1, col: 1, line_text: "x".to_owned(), start: 0, end: 1 },
-                LineMatch { line: 2, col: 1, line_text: "x".to_owned(), start: 3, end: 4 },
+                LineMatch {
+                    line: 1,
+                    col: 1,
+                    line_text: "x".to_owned(),
+                    start: 0,
+                    end: 1,
+                },
+                LineMatch {
+                    line: 2,
+                    col: 1,
+                    line_text: "x".to_owned(),
+                    start: 3,
+                    end: 4,
+                },
             ],
         }]);
         assert_eq!(counters_text(&model), "2 coincidencias en 1 fichero");
         model.toggle_excluded(0, 1);
-        assert_eq!(counters_text(&model), "2 coincidencias en 1 fichero (1 excluida)");
+        assert_eq!(
+            counters_text(&model),
+            "2 coincidencias en 1 fichero (1 excluida)"
+        );
         assert_eq!(
             summary_text(1, 2, 1, 1),
             "2 coincidencias en 1 fichero (1 excluida) · 1 archivo omitido (no UTF-8 o ilegibles, §12.5)"
