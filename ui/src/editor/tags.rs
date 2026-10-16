@@ -32,9 +32,11 @@ pub struct TagRange {
 pub fn tag_plan(text: &str, highlights: &[Highlight]) -> Vec<TagRange> {
     let mut plan: Vec<TagRange> = Vec::with_capacity(highlights.len());
     for highlight in highlights {
-        let Some((start_char, end_char)) =
-            char_range(text, highlight.span.start as usize, highlight.span.end as usize)
-        else {
+        let Some((start_char, end_char)) = char_range(
+            text,
+            highlight.span.start as usize,
+            highlight.span.end as usize,
+        ) else {
             continue;
         };
         plan.push(TagRange {
@@ -51,11 +53,7 @@ pub fn tag_plan(text: &str, highlights: &[Highlight]) -> Vec<TagRange> {
 /// Convierte un rango `[start_byte, end_byte)` del fuente a `[start_char,
 /// end_char)` sobre `text` (índices de char unicode), con las mismas reglas
 /// de recorte que [`tag_plan`]; `None` si no queda ningún char entero.
-pub(crate) fn char_range(
-    text: &str,
-    start_byte: usize,
-    end_byte: usize,
-) -> Option<(usize, usize)> {
+pub(crate) fn char_range(text: &str, start_byte: usize, end_byte: usize) -> Option<(usize, usize)> {
     let start_byte = ceil_char_boundary(text, start_byte);
     let end_byte = floor_char_boundary(text, end_byte);
     if start_byte >= end_byte {
@@ -310,7 +308,7 @@ mod tests {
         let plan = tag_plan(
             text,
             &[
-                token(6, 12, HighlightKind::Code), // chars [2,4)
+                token(6, 12, HighlightKind::Code),   // chars [2,4)
                 token(0, 2, HighlightKind::Heading), // chars [0,1)
             ],
         );
@@ -349,7 +347,9 @@ mod tests {
             ]
         );
         assert_eq!(
-            plan.iter().map(|r| (r.start_char, r.end_char)).collect::<Vec<_>>(),
+            plan.iter()
+                .map(|r| (r.start_char, r.end_char))
+                .collect::<Vec<_>>(),
             vec![(0, 4), (0, 2), (1, 2)]
         );
     }
