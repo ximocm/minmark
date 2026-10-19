@@ -2387,8 +2387,7 @@ fn build_window(app: &Application, scope: WindowScope, open_paths: &[PathBuf]) -
     // B1: la ventana conserva una referencia DÉBIL al grupo para reevaluar
     // el `enabled` de las acciones de composiciones cuando la lista cambie
     // (§20) sin cerrar el ciclo de referencias con `cmds`.
-    *cmds.action_group.borrow_mut() =
-        Some(install_actions(&window, app, cmds.clone()).downgrade());
+    *cmds.action_group.borrow_mut() = Some(install_actions(&window, app, cmds.clone()).downgrade());
 
     // ISSUE-026 (§46): bucle de eventos del watcher en el hilo de UI. Se detiene
     // con la ventana.
