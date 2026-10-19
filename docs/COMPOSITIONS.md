@@ -102,10 +102,20 @@ configuración.
   reduce proporcionalmente hasta el suelo `table_min_font_pt` (defecto 8 pt);
   el reparto multipágina dentro del envoltorio y el caption debajo (§28) se
   conservan.
+- Los anchos se miden siempre a la tipografía del cuerpo, sin heredar otras
+  medidas (p. ej. el cuerpo reducido de una nota al pie), y un run continuo
+  se mide entero aunque cruce énfasis u otras fronteras de inline: solo el
+  espacio/tab ASCII abre línea — U+00A0 y similares no quiebran.
+- Las columnas se emiten con anchos calculados en Typst (`mm-fit-track`):
+  Typst 0.13.1 no admite `minmax`, así que cada columna recibe su reparto
+  justo natural y solo se eleva hasta su mínima cuando el reparto dejaría a
+  un token inseparable por debajo de lo que cabe — la tabla no desborda nunca
+  el área de texto por el reparto.
 - Si ni siquiera el suelo cabe, la exportación se detiene (no se recorta) con
   `error de composición PDF: panicked with: "<tabla>: no cabe en el ancho
   disponible con table_min_font_pt=8pt (§35.2)"`, identificando la tabla por
-  su caption expandido, su ID o su nº de orden documental.
+  su caption expandido, su ID o su nº de orden documental (por orden de
+  documento, estable aunque se reordenen las notas al pie).
 
 ## Limitaciones
 

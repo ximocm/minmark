@@ -33,11 +33,16 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
   cabe se reduce proporcionalmente hasta `table_min_font_pt` (defecto 8 pt) sin
   perder el reparto multipágina ni el caption debajo; si ni siquiera el suelo
   cabe, la exportación se detiene nombrando la tabla problemática —caption
-  expandido, ID o nº de orden— con el mensaje
+  expandido, ID o nº de orden por orden de documento— con el mensaje
   `error de composición PDF: panicked with: "<tabla>: no cabe en el ancho
   disponible con table_min_font_pt=8pt (§35.2)"` en lugar de recortarla.
   Una tabla que ya cabe nunca se amplía, aunque el cuerpo esté por debajo del
-  suelo. Documentación: [Composiciones](docs/COMPOSITIONS.md).
+  suelo. Los anchos se miden siempre a la tipografía del cuerpo (sin heredar
+  la medida de notas al pie) y como runs sin quiebre que solo parten en
+  espacio/tab ASCII; el reparto de columnas se emite con anchos calculados en
+  Typst que respetan la mínima por columna (Typst 0.13.1 no admite `minmax`),
+  de modo que ningún token inseparable sale del área de texto. Documentación:
+  [Composiciones](docs/COMPOSITIONS.md).
 
 ### Corregido
 

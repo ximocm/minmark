@@ -287,3 +287,17 @@ repartida en varias páginas, alcance del tamaño reducido y geometría de
 contenedor), 406 del core y 115 de UI en verde; clippy sin avisos nuevos y
 `scripts/test_release.py` 6/6. La sonda Typst desechable usada para diseñar se
 eliminó.
+
+Revisión independiente posterior (una pasada): 6 defectos confirmados de
+subestimación del modelo y de identidad, corregidos y reverificados — runs sin
+quiebre que cruzaban fronteras de inline se acumulan y se miden enteros; las
+mínimas por columna llegan al reparto nativo (`minmax` no existe en Typst
+0.13.1; helper propio que respeta la mínima con la corrección de que el inset
+vive dentro del track); las medidas se toman a la tipografía base (un `set`
+fuera del contenido medido no llega a `measure`); los quiebres solo cortan en
+espacio/tab ASCII (U+00A0 y U+202F van dentro del run); el marcador de nota se
+mide como superíndice del número resuelto; los ordinales de identidad se
+asignan por `span.start`, estables ante el reordenado de notas. Se reforzaron
+las pruebas comprobando bounds renderizados (no solo la fuente emitida) y el
+caption completo compuesto. Total final: 49 pruebas de `minmark-pdf` (17
+nuevas), 411 del core y 115 de UI en verde.

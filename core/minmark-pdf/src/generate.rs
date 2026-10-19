@@ -51,6 +51,9 @@ fn preamble(ast: &Ast, settings: &Settings, meta: &DocumentMeta) -> String {
     // §32.9: estado con el texto plano del H1 más reciente, para {chapter}.
     // Se declara antes de `#set page` porque las plantillas lo leen.
     let mut out = String::from("#let mm-chapter = state(\"minmark-chapter\", \"\")\n");
+    // §35.2: helpers del reparto de tablas (mínimas por columna); puros
+    // `#let` sin dependencias, se emiten una sola vez.
+    out.push_str(crate::fit::TRACK_HELPERS);
     let _ = write!(
         out,
         "#set page(width: {width}mm, height: {height}mm, \
@@ -790,7 +793,7 @@ mod tests {
         assert!(out.contains("#table("));
         assert!(out.contains("table.header("));
         assert!(out.contains("align: (left, right,),"));
-        assert!(out.contains("columns: 2,"));
+        assert!(out.contains("columns: mm-fit-cols,"));
 
         let out = source("::: warning \"Atención\"\nCuidado.\n:::\n");
         assert!(out.contains("#block(stroke: (left: 3pt + rgb(\"#e65100\"))"));
@@ -1022,10 +1025,12 @@ mod tests {
         assert!(out.contains("inset: 5pt * mm-fit-u"), "{out}");
         assert!(out.contains("stroke: 1pt * mm-fit-u"), "{out}");
         assert!(out.contains("measure(["), "los átomos se miden:\n{out}");
-        // La tabla sigue siendo nativa (reparto multipágina) con sus celdas.
+        // La tabla sigue siendo nativa (reparto multipágina) con sus celdas y
+        // el reparto de columnas respetando las mínimas (§35.2).
         assert!(out.contains("#table("), "{out}");
         assert!(out.contains("table.header("), "{out}");
-        assert!(out.contains("columns: 1,"), "{out}");
+        assert!(out.contains("columns: mm-fit-cols,"), "{out}");
+        assert!(out.contains("mm-fit-track(("), "suelos por columna:\n{out}");
         // El caption renderizado queda fuera del envoltorio, tras la tabla.
         let open = out.find("#layout(").expect("layout");
         let close = open + out[open..].find("})").expect("cierre del layout");
