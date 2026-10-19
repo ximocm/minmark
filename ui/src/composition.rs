@@ -2,12 +2,17 @@
 //! combinada y render/export del documento lógico.
 //!
 //! - [`discover`] lee las tablas `[[composition]]` del `.mdproject.toml` de
-//!   la raíz del proyecto activo (§20). Sin proyecto no hay composiciones y
-//!   las acciones quedan deshabilitadas.
+//!   la raíz del proyecto activo (§20); [`refresh`] redescubre sobre la
+//!   caché de la ventana al abrir el proyecto y con el watcher cuando ese
+//!   archivo cambia (B1, revisión PR #44), de modo que `files` y `overrides`
+//!   salen siempre de la misma lectura que la cadena §58. Sin proyecto no
+//!   hay composiciones y las acciones quedan deshabilitadas.
 //! - [`build`] carga cada archivo en orden declarado (§20.1): el buffer
-//!   abierto manda sobre el disco (§6.1, ISSUE-023) y un archivo ausente
-//!   produce un bloque de diagnóstico visible **en su posición** sin abortar
-//!   el resto. Consultar o renderizar nunca escribe los fuentes (§20).
+//!   abierto manda sobre el disco (§6.1, ISSUE-023), una ruta fuera de la
+//!   raíz no se lee nunca y produce «Archivo fuera del ámbito» (§48, B2) y
+//!   un archivo ausente produce un bloque de diagnóstico visible **en su
+//!   posición** sin abortar el resto. Consultar o renderizar nunca escribe
+//!   los fuentes (§20).
 //! - [`render`] produce el Preview combinado (§20.4): continuo sobre la AST
 //!   compuesta o paginado con el camino Typst existente, según el ajuste
 //!   `pagination` efectivo (cadena §58).
@@ -18,7 +23,7 @@
 use minmark_config::{Composition, Settings};
 use minmark_document::{compose, Block, BlockKind, ComposePart, Composed, Inline, Span};
 use minmark_pdf::DocumentMeta;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 // Preludio de GTK para `FileExt` (`gio::File::uri`, base URI del Preview).
 use gtk4::prelude::*;
 
@@ -37,6 +42,21 @@ pub fn discover(root: &Path) -> Vec<Composition> {
         );
     }
     compositions
+}
+
+/// Redescubrimiento de la ventana (B1, revisión PR #44, #22): relée el
+/// `.mdproject.toml` de `root` y deja en `cache` las composiciones actuales,
+/// devolviendo si la lista quedó no vacía — el estado `enabled` de las
+/// acciones de composición (§20, ISSUE-022). Se usa al abrir el proyecto
+/// (`build_window`) y con el watcher cuando cambia `.mdproject.toml`, de
+/// modo que la caché de la ventana sigue al archivo en cuanto cambia. La
+/// cadena §58 (`load_composition_at`) vuelve a leerlo al construir: `files`
+/// y `overrides` son de lecturas próximas, eventualmente consistentes con
+/// el watcher, no de una misma lectura atómica. Sin proyecto, la cache
+/// queda vacía.
+pub fn refresh(cache: &mut Vec<Composition>, root: Option<&Path>) -> bool {
+    *cache = root.map(discover).unwrap_or_default();
+    !cache.is_empty()
 }
 
 /// Documento lógico combinado, listo para Preview y para la exportación
@@ -68,13 +88,21 @@ pub fn build(root: &Path, composition: &Composition, buffers: &[(PathBuf, String
     let mut fuentes: Vec<(PathBuf, String)> = Vec::with_capacity(composition.files.len());
     for rel in &composition.files {
         let path = root.join(rel);
-        let abierto = buffers
-            .iter()
-            .find(|(abierto, _)| comparable(abierto) == comparable(&path));
-        let fuente = match abierto {
-            Some((_, fuente)) => fuente.clone(),
-            None => std::fs::read_to_string(&path)
-                .unwrap_or_else(|_| format!("Archivo ausente: {rel}\n")),
+        // §48 (B2): una ruta fuera de la raíz NO se lee nunca (ni del disco
+        // ni del buffer abierto); su hueco conserva la posición con el
+        // diagnóstico visible, sin abortar el resto (mismo patrón que
+        // «Archivo ausente», §20.1).
+        let fuente = if fuera_del_ambito(root, Path::new(rel)) {
+            format!("Archivo fuera del ámbito: {rel}\n")
+        } else {
+            let abierto = buffers
+                .iter()
+                .find(|(abierto, _)| comparable(abierto) == comparable(&path));
+            match abierto {
+                Some((_, fuente)) => fuente.clone(),
+                None => std::fs::read_to_string(&path)
+                    .unwrap_or_else(|_| format!("Archivo ausente: {rel}\n")),
+            }
         };
         fuentes.push((PathBuf::from(rel), fuente));
     }
@@ -205,6 +233,45 @@ pub fn base_uri(root: &Path) -> String {
 /// de un mismo fichero son el mismo fichero, §12.7).
 fn comparable(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// Frontera §48 (B2, revisión PR #44): ¿`rel` — declarada en
+/// `[[composition]].files` — se sale de `root`? Chequeo léxico (relativa,
+/// sin `..` que salga de la raíz, no absoluta) y canónico con la misma
+/// política que [`minmark_fs::resolve_in_project`]: la ruta resuelta debe
+/// seguir dentro de la raíz canónica, lo que caza el `..` intermedio y los
+/// symlinks que escapan. Si el destino no existe se resuelve el ancestro
+/// existente más cercano, de modo que un padre que escapa también está
+/// fuera de ámbito aunque la canónica del fichero completo no resuelva
+/// (revisión PR #44). Un error de E/S no etiqueta la ruta como fuera de
+/// ámbito: su hueco lo diagnostica después la lectura («Archivo ausente»,
+/// §20.1).
+fn fuera_del_ambito(root: &Path, rel: &Path) -> bool {
+    if rel.is_absolute() {
+        return true;
+    }
+    let mut profundidad = 0usize;
+    for componente in rel.components() {
+        match componente {
+            Component::CurDir => {}
+            Component::Normal(_) => profundidad += 1,
+            Component::ParentDir => {
+                if profundidad == 0 {
+                    return true;
+                }
+                profundidad -= 1;
+            }
+            // Prefijo (`C:\`) u otra grafía que no es una relativa válida.
+            Component::Prefix(_) | Component::RootDir => return true,
+        }
+    }
+    // Reutiliza la política §48 del core en lugar de repetirla: resuelve el
+    // ancestro existente más cercano y solo un escape real está fuera de
+    // ámbito (un error de E/S no etiqueta la ruta).
+    matches!(
+        minmark_fs::resolve_in_project(root, rel),
+        Err(minmark_fs::FsError::PathOutsideProject { .. })
+    )
 }
 
 /// Escapado HTML mínimo para mensajes (§7.2: nada sale crudo).
@@ -513,6 +580,292 @@ mod tests {
         let vacio = root.join("sin-config");
         std::fs::create_dir_all(&vacio).unwrap();
         assert!(discover(&vacio).is_empty());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// §48 (B2, revisión PR #44): `files` con `../` que sale de la raíz NO
+    /// se lee nunca: el hueco conserva su posición con el diagnóstico
+    /// «Archivo fuera del ámbito» (§20.1) y el contenido de fuera jamás
+    /// aparece en la fuente virtual ni en el Preview.
+    #[test]
+    fn files_con_parent_dir_fuera_del_ambito_diagnostican_y_no_se_leen() {
+        let base = std::env::temp_dir().join(format!(
+            "minmark-composition-ambito-parent-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&base);
+        let root = base.join("proyecto");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join(".mdproject.toml"),
+            "[[composition]]\nname = \"Libro\"\nfiles = [\"dentro.md\", \"../fuera.md\", \"ultimo.md\"]\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("dentro.md"), "Contenido dentro.\n").unwrap();
+        std::fs::write(root.join("ultimo.md"), "Contenido último.\n").unwrap();
+        std::fs::write(base.join("fuera.md"), "SECRETO-FUERA-DEL-AMBITO\n").unwrap();
+
+        let composition = discover(&root).pop().expect("composición");
+        let combined = build(&root, &composition, &[]);
+        let fuente = &combined.composed.source;
+        let diagnostico = fuente
+            .find("Archivo fuera del ámbito: ../fuera.md")
+            .expect("diagnóstico visible en su posición");
+        let dentro = fuente.find("Contenido dentro.").expect("primera parte");
+        let ultimo = fuente.find("Contenido último.").expect("tercera parte");
+        assert!(
+            dentro < diagnostico && diagnostico < ultimo,
+            "el hueco va en su posición"
+        );
+        assert!(
+            !fuente.contains("SECRETO-FUERA-DEL-AMBITO"),
+            "el contenido de fuera de la raíz se filtró en la fuente virtual"
+        );
+
+        let html = render(build(&root, &composition, &[]));
+        assert!(html.contains("Archivo fuera del ámbito: ../fuera.md"));
+        assert!(!html.contains("SECRETO-FUERA-DEL-AMBITO"));
+        std::fs::remove_dir_all(base).unwrap();
+    }
+
+    /// §48 (B2): una ruta absoluta en `files` no se lee nunca y produce el
+    /// mismo bloque de diagnóstico en su posición, sin abortar el resto.
+    #[test]
+    fn files_absolutos_fuera_del_ambito_no_se_leen() {
+        let root = directorio("absoluta");
+        std::fs::write(
+            root.join(".mdproject.toml"),
+            "[[composition]]\nname = \"Libro\"\nfiles = [\"/etc/passwd\", \"uno.md\"]\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("uno.md"), "Contenido uno.\n").unwrap();
+
+        let composition = discover(&root).pop().expect("composición");
+        let combined = build(&root, &composition, &[]);
+        let fuente = &combined.composed.source;
+        assert!(
+            fuente.contains("Archivo fuera del ámbito: /etc/passwd"),
+            "diagnóstico ausente: {fuente}"
+        );
+        assert!(
+            !fuente.contains("root:"),
+            "el contenido de /etc/passwd se filtró en la fuente virtual"
+        );
+        assert!(fuente.contains("Contenido uno."), "el resto no se aborta");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// §48/§20.1 (B2): una ruta relativa DENTRO de la raíz, en
+    /// subdirectorio, se lee normalmente (la frontera no la bloquea).
+    #[test]
+    fn files_en_subdirectorio_dentro_del_ambito_se_leen() {
+        let root = directorio("subdirectorio");
+        std::fs::create_dir_all(root.join("caps")).unwrap();
+        std::fs::write(
+            root.join(".mdproject.toml"),
+            "[[composition]]\nname = \"Libro\"\nfiles = [\"caps/uno.md\"]\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("caps/uno.md"), "Contenido en subdirectorio.\n").unwrap();
+
+        let composition = discover(&root).pop().expect("composición");
+        let combined = build(&root, &composition, &[]);
+        assert!(combined
+            .composed
+            .source
+            .contains("Contenido en subdirectorio."));
+        assert!(!combined.composed.source.contains("fuera del ámbito"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// §48 (B2): el chequeo canónico (como `resource_paths`) caza lo que una
+    /// comprobación léxica ingenua no ve: el `..` intermedio que escapa
+    /// (`docs/../../fuera.md`) y el symlink dentro de la raíz que apunta
+    /// fuera (`enlace/fuera.md`).
+    #[test]
+    fn files_que_escapan_canonicamente_no_se_leen() {
+        let base = std::env::temp_dir().join(format!(
+            "minmark-composition-ambito-canonico-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&base);
+        let root = base.join("proyecto");
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        std::fs::write(base.join("fuera.md"), "SECRETO-CANONICO\n").unwrap();
+        std::os::unix::fs::symlink(&base, root.join("enlace")).unwrap();
+        std::fs::write(
+            root.join(".mdproject.toml"),
+            "[[composition]]\nname = \"A\"\nfiles = [\"docs/../../fuera.md\"]\n[[composition]]\nname = \"B\"\nfiles = [\"enlace/fuera.md\"]\n",
+        )
+        .unwrap();
+
+        for nombre in ["A", "B"] {
+            let composition = discover(&root)
+                .into_iter()
+                .find(|c| c.name == nombre)
+                .expect("composición");
+            let combined = build(&root, &composition, &[]);
+            let fuente = &combined.composed.source;
+            assert!(
+                fuente.contains("Archivo fuera del ámbito"),
+                "{nombre}: diagnóstico ausente: {fuente}"
+            );
+            assert!(
+                !fuente.contains("SECRETO-CANONICO"),
+                "{nombre}: el contenido fuera de la raíz se filtró"
+            );
+        }
+        std::fs::remove_dir_all(base).unwrap();
+    }
+
+    /// §48 (B2, revisión PR #44): un destino cuyo PADRE es un symlink que
+    /// escapa está fuera de ámbito aunque el fichero completo no exista (la
+    /// canónica falla por NotFound): se resuelve el ancestro existente más
+    /// cercano y no se lee ni del disco ni del buffer abierto. Un fichero
+    /// ausente DENTRO de la raíz sigue siendo «Archivo ausente» (§20.1).
+    #[test]
+    fn files_bajo_symlink_escapado_sin_fichero_diagnostican_y_no_usan_el_buffer() {
+        let base = std::env::temp_dir().join(format!(
+            "minmark-composition-ambito-symlink-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&base);
+        let root = base.join("proyecto");
+        std::fs::create_dir_all(root.join("caps")).unwrap();
+        std::fs::create_dir_all(base.join("exterior")).unwrap();
+        std::os::unix::fs::symlink(base.join("exterior"), root.join("enlace")).unwrap();
+        std::fs::write(
+            root.join(".mdproject.toml"),
+            "[[composition]]\nname = \"A\"\nfiles = [\"enlace/falta.md\"]\n[[composition]]\nname = \"B\"\nfiles = [\"caps/falta.md\"]\n",
+        )
+        .unwrap();
+
+        // El buffer abierto de la ruta que escapa tampoco se cuela.
+        let buffers = [(
+            root.join("enlace/falta.md"),
+            "BUFFER-FUERA-DEL-AMBITO\n".to_string(),
+        )];
+        let composition = discover(&root)
+            .into_iter()
+            .find(|c| c.name == "A")
+            .expect("composición A");
+        let fuente = &build(&root, &composition, &buffers).composed.source;
+        assert!(
+            fuente.contains("Archivo fuera del ámbito: enlace/falta.md"),
+            "diagnóstico ausente: {fuente}"
+        );
+        assert!(
+            !fuente.contains("BUFFER-FUERA-DEL-AMBITO"),
+            "el buffer de la ruta que escapa se coló en la fuente virtual"
+        );
+
+        // Contraprueba: la misma ausencia dentro de la raíz no es un escape.
+        let dentro = discover(&root)
+            .into_iter()
+            .find(|c| c.name == "B")
+            .expect("composición B");
+        let fuente = &build(&root, &dentro, &[]).composed.source;
+        assert!(
+            fuente.contains("Archivo ausente: caps/falta.md"),
+            "dentro de la raíz el hueco es «Archivo ausente»: {fuente}"
+        );
+        assert!(!fuente.contains("fuera del ámbito"), "{fuente}");
+        std::fs::remove_dir_all(base).unwrap();
+    }
+
+    /// S1/ISSUE-024 (revisión PR #44): el Preview combinado conserva los
+    /// destinos internos `#fragmento` (§20.4) y las anclas `id` de los
+    /// headings (§26) — la navegación por scroll in-page se apoya en ambos.
+    #[test]
+    fn preview_combinado_conserva_las_anclas_y_los_destinos_internos() {
+        let root = directorio("destinos-internos");
+        std::fs::write(
+            root.join(".mdproject.toml"),
+            "[[composition]]\nname = \"Libro\"\nfiles = [\"uno.md\", \"dos.md\"]\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("uno.md"), "[Ir al destino](#destino)\n").unwrap();
+        std::fs::write(root.join("dos.md"), "## Destino {#destino}\n").unwrap();
+
+        let composition = discover(&root).pop().expect("composición");
+        let html = render(build(&root, &composition, &[]));
+        assert!(
+            html.contains("href=\"#destino\""),
+            "el destino interno se reescribió: falta href"
+        );
+        assert!(
+            html.contains("id=\"destino\""),
+            "falta la ancla en el combinado"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// B1 (revisión PR #44, #22): el redescubrimiento tras cambiar
+    /// `.mdproject.toml` devuelve la cache de la ventana a la MISMA lectura
+    /// que la cadena §58: la nueva composición aparece, `files` y `overrides`
+    /// salen de la tabla nueva y el estado de las acciones (no vacía ⇒
+    /// habilitadas, vacía ⇒ deshabilitadas) queda acorde.
+    #[test]
+    fn redescubre_las_composiciones_tras_cambiar_el_mdproject() {
+        let root = directorio("redescubrir");
+        std::fs::create_dir_all(root.join("caps")).unwrap();
+        std::fs::write(root.join("uno.md"), "Contenido uno.\n").unwrap();
+        std::fs::write(root.join("caps/dos.md"), "Contenido dos.\n").unwrap();
+        std::fs::write(
+            root.join(".mdproject.toml"),
+            "[[composition]]\nname = \"A\"\nfiles = [\"uno.md\"]\npdf_orientation = \"landscape\"\n",
+        )
+        .unwrap();
+
+        let mut cache = Vec::new();
+        assert!(
+            refresh(&mut cache, Some(&root)),
+            "con composiciones las acciones quedan habilitadas (§20)"
+        );
+        assert_eq!(cache.len(), 1);
+
+        // Edición en caliente: A cambia de `files` y de `overrides` y nace B.
+        std::fs::write(
+            root.join(".mdproject.toml"),
+            "pdf_page_size = \"Letter\"\n[[composition]]\nname = \"A\"\nfiles = [\"caps/dos.md\"]\npdf_orientation = \"portrait\"\n[[composition]]\nname = \"B\"\nfiles = [\"uno.md\"]\n",
+        )
+        .unwrap();
+        assert!(refresh(&mut cache, Some(&root)));
+        let nombres: Vec<String> = cache.iter().map(|c| c.name.clone()).collect();
+        assert_eq!(nombres, ["A", "B"], "la nueva composición aparece");
+
+        // Coherencia §58: `files`/`overrides` de la cache y el ajuste de
+        // proyecto que relee `load_composition_at` salen de la MISMA lectura.
+        let combined = build(&root, &cache[0], &[]);
+        assert!(
+            combined.composed.source.contains("Contenido dos."),
+            "files de la tabla nueva"
+        );
+        assert!(!combined.composed.source.contains("Contenido uno."));
+        assert_eq!(
+            combined.settings.pdf_orientation,
+            Orientation::Portrait,
+            "overrides de la tabla nueva (§58.1)"
+        );
+        assert_eq!(
+            combined.settings.pdf_page_size,
+            minmark_config::PageSize::Letter,
+            "proyecto de la misma lectura que files/overrides (§58)"
+        );
+
+        // Sin composiciones ⇒ acciones deshabilitadas; al volver ⇒ habilitadas.
+        std::fs::write(root.join(".mdproject.toml"), "pdf_page_size = \"Letter\"\n").unwrap();
+        assert!(
+            !refresh(&mut cache, Some(&root)),
+            "sin composiciones las acciones quedan deshabilitadas (§20)"
+        );
+        assert!(cache.is_empty());
+        std::fs::write(
+            root.join(".mdproject.toml"),
+            "[[composition]]\nname = \"B\"\nfiles = [\"uno.md\"]\n",
+        )
+        .unwrap();
+        assert!(refresh(&mut cache, Some(&root)));
         std::fs::remove_dir_all(root).unwrap();
     }
 }
