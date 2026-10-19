@@ -11,6 +11,20 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 
 ### Añadido
 
+- Fase 6: composiciones multiarchivo declaradas en `.mdproject.toml`
+  (`[[composition]]`), con Preview combinado (continuo o paginado) y exportación
+  de un único PDF desde **Project → Preview Composition** y **File → Export
+  Composition PDF**. Enlaces, referencias cruzadas y numeración entre archivos
+  incluidos se resuelven como internos del documento final; los niveles de
+  heading se preservan y `page_break_between_files` separa archivos. Documentación:
+  [Composiciones](docs/COMPOSITIONS.md).
+- Cabeceras y pies de página configurables (`pdf_header`/`pdf_footer`) con las
+  variables `{title}`, `{author}`, `{project}`, `{chapter}`, `{page}`, `{pages}`
+  y `{date}`, posición de número de página en las seis ubicaciones de §32.8 y
+  tamaño de página Custom en mm configurable.
+- Fuentes base incluidas (sans-serif, serif y monoespaciada) sin depender de las
+  fuentes del sistema en PDF, Preview paginado y matemáticas; `{{pagebreak}}`
+  muestra un separador discreto en el modo Visual.
 - Fase 5: ecuaciones LaTeX compuestas, bibliografía BibTeX/CSL local, citas y
   autocompletado, notas al pie, numeración académica y TOC.
 - Preview paginado comparte la composición de páginas, notas y TOC del PDF.

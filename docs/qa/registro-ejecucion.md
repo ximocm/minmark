@@ -116,3 +116,135 @@ La exposición del contenido de Preview a Orca se sigue en
 se sigue en [#40](https://github.com/ximocm/minmark/issues/40), relacionada con
 tipografía de fase 6. No se declara la campaña íntegramente verde; el cierre
 funcional de las tareas #14–#20 conserva ambas incidencias separadas.
+
+## Decisión de alcance — 2026-10-14
+
+El propietario pospone CJK: de momento no necesita esos caracteres. ACA-10
+conserva el fallo histórico, pero deja de ser requisito o bloqueo actual.
+[#40](https://github.com/ximocm/minmark/issues/40) es una mejora futura
+independiente, sin milestone. No se cambia el comportamiento tipográfico.
+
+## Repetición de ACA-09 — investigación de #39, 2026-10-14
+
+**Resultado: no resuelto; se mantiene Parcial.** Controles mínimos Python y
+Rust con las mismas bibliotecas exponen un documento web, headings, fórmulas
+y notas. Se contrastaron HTML académico, contenedor, carga sucesiva e identidad
+de aplicación. Desactivar el sandbox solo en una instancia de QA no resolvió
+el fallo; no se cambia la política del producto.
+
+El código de PreviewPane en un control mínimo deja de exponer el documento
+cuando no se pide foco explícito a WebKit. Pedirlo al presentar el control
+restaura su árbol. Las variantes probadas en Minmark con foco al entrar/pulsar
+Preview y al cambiar de modo no han acreditado la solución: el árbol sigue sin
+exponer el documento. Orca registra referencias a una raíz AT-SPI inexistente.
+No se ha establecido todavía la causa exacta ni se atribuye al motor.
+
+Los parches de foco no verificados se retiraron. Editor, documentos y servicios
+del usuario se conservaron; las instancias privadas se cerraron. Evidencia:
+`evidence/orca39-before-tree.json`, `orca39-control-tree.json`,
+`orca39-repeat-tree.json` y `orca39-repeat-summary.log`. Los controles y los
+logs completos se conservan en `/tmp/minmark-orca39`. La issue #39 sigue abierta.
+
+# Registro de QA — fase 6
+
+Fecha: 2026-10-16 (smoke) y 2026-10-19 (verificación). Alcance:
+[plan #21](https://github.com/ximocm/minmark/issues/21), tareas
+[#22](https://github.com/ximocm/minmark/issues/22)–[#26](https://github.com/ximocm/minmark/issues/26)
+y la revisión del PR #44 (hallazgos B1/B2/S1). Código: PRs #42–#44 integrados
+(`e036abb`); la verificación cubre esa base más las correcciones de la revisión.
+
+## Resultado
+
+**391 pruebas del core y 115 de UI pasan.** Las 3 pruebas de integración
+GTK/WebKit se ejecutan aparte — una por proceso: `gtk4::init()` solo admite
+una inicialización por proceso y libtest ejecuta cada test en su propio hilo —
+y pasan las tres. Clippy de los paquetes del core y de UI pasa con warnings
+preexistentes, ninguno introducido por la fase. `git diff --check` limpio y las
+seis pruebas de política de release pasan. Los casos cubiertos por pruebas no
+se presentan como recorridos manuales completos; solo se usaron copias
+temporales y perfiles aislados.
+
+## Smoke de la interfaz de composiciones — 2026-10-16
+
+Sesión gráfica aislada (Xvfb/X11, perfil de configuración temporal) sobre un
+proyecto de prueba con la composición «Libro» (portada + capítulo).
+
+| Paso | Estado | Evidencia |
+| --- | --- | --- |
+| Ventana principal del proyecto | Pasado | `evidence/phase6-00-ventana-principal.png` |
+| Menú Project con las acciones de composición | Pasado | `evidence/phase6-01-menu-project-abierto.png` |
+| Menú File con Export Composition PDF | Pasado | `evidence/phase6-02-menu-file-abierto.png` |
+| Preview combinado con los archivos en orden | Pasado | `evidence/phase6-03-preview-combinado.png`; informe `orden_texto` |
+| Diálogo de exportación con nombre propuesto | Pasado | `evidence/phase6-04-dialogo-export-composition.png`, `phase6-04b-entry-rellenado.png` |
+| Exporta un único PDF (2 páginas, cabeceras y marcadores) | Pasado | `evidence/phase6-05-tras-aceptar-export.png`; informe `c` |
+| Cancelar no escribe archivos ni toca el PDF previo | Pasado | `evidence/phase6-06-dialogo-antes-de-cancelar.png`, `phase6-07-tras-cancelar.png`; informe `d` |
+| Reexportar pide confirmación y sobrescribe | Pasado | `evidence/phase6-08-dialogo-reexportar.png`, `phase6-09-confirmacion-sobrescritura.png`, `phase6-10-tras-sobrescribir.png`; informe `e` (md5 y mtime cambian) |
+
+Detalle numérico en `evidence/phase6-smoke-informe.json` (fases `0-inicio` a
+`e-sobrescribir`). El Preview combinado a Orca sigue el estado de la fase 5
+(ACA-09/Parcial, issue #39): `preview_texto_atspi_len` es 0 también aquí.
+
+## Correcciones de la revisión del PR #44 — 2026-10-19
+
+- **B2 (§48)**: una entrada de `files` cuyo padre es un symlink que escapa y
+  cuyo fichero final no existe se admitía como dentro del ámbito (la canónica
+  no resolvía) y su buffer abierto entraba en el documento combinado.
+  `fuera_del_ambito` reutiliza ahora `minmark_fs::resolve_in_project`
+  (ancestro existente más cercano). Test unitario
+  `files_bajo_symlink_escapado_sin_fichero_diagnostican_y_no_usan_el_buffer`.
+- **Ciclo de referencias**: `AppCmds` retenía el grupo «win» con referencia
+  fuerte y sus acciones capturan `Rc<AppCmds>`: una ventana cerrada no se
+  liberaba nunca. Retención débil (`glib::WeakRef`); mismo arreglo en el
+  callback de enlaces del Preview combinado.
+- **Comentarios**: la caché de composiciones y la cadena §58 (`load_composition_at`)
+  son lecturas próximas del `.mdproject.toml`, no una misma lectura atómica;
+  el texto afirmaba lo segundo.
+- **Tests B1**: el estado `enabled` se afirma acción a acción (las dos
+  composicionales), en el grupo instalado de la ventana GTK y en el unitario.
+
+## Evidencia
+
+`evidence/phase6-smoke-informe.json`, capturas `evidence/phase6-*.png` (15),
+suite de integración `gtk_integration_tests` de `ui/src/main.rs` y tests
+unitarios de `ui/src/composition.rs`, `ui/src/menus/actions.rs` y
+`ui/src/preview/mod.rs`.
+
+## Comandos reproducibles
+
+```sh
+QA_TARGET=/tmp/minmark-qa-target
+cargo test --locked --offline --manifest-path core/Cargo.toml --workspace \
+  --target-dir "$QA_TARGET" -j 2
+cargo test --locked --offline --manifest-path ui/Cargo.toml \
+  --target-dir "$QA_TARGET" -j 2
+# Integración GTK: una prueba por proceso (gtk4::init() es único por proceso).
+for t in composiciones_se_redescubren_al_cambiar_mdproject_en_caliente \
+         preview_combinado_navega_destinos_internos_con_scroll_in_page \
+         gtk_navigation_outline_completion_and_dirty_buffers; do
+  env XDG_CONFIG_HOME=/tmp/minmark-phase6-qa/config \
+    XDG_DATA_HOME=/tmp/minmark-phase6-qa/data \
+    XDG_STATE_HOME=/tmp/minmark-phase6-qa/state \
+    GDK_BACKEND=x11 GSK_RENDERER=cairo \
+    xvfb-run -a cargo test --locked --offline --manifest-path ui/Cargo.toml \
+    --target-dir "$QA_TARGET" -j 2 "$t" -- --ignored --test-threads=1
+done
+cargo clippy --locked --offline --manifest-path core/Cargo.toml \
+  -p minmark-config -p minmark-document -p minmark-math -p minmark-parser \
+  -p minmark-renderer -p minmark-pdf --all-targets --no-deps \
+  --target-dir "$QA_TARGET" -j 2
+cargo clippy --locked --offline --manifest-path ui/Cargo.toml \
+  --all-targets --no-deps --target-dir "$QA_TARGET" -j 2
+git diff --check
+python3 scripts/test_release.py
+```
+
+## Pendientes de cierre
+
+- Cierre formal de #22–#26 en GitHub: criterios implementados y cubiertos por
+  pruebas y por el smoke; queda la decisión del propietario.
+- Siguiente tarea de la fase: [#27](https://github.com/ximocm/minmark/issues/27)
+  (captions de figuras, tablas y ecuaciones).
+- Los `wiki links` combinados emiten `minmark-wiki:#destino` y el manejador de
+  destinos internos no navega ese caso: es previo a S1 y candidato a issue
+  propia.
+- #39 y #40 conservan las decisiones registradas en la fase 5.

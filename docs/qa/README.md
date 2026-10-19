@@ -20,7 +20,9 @@ confirmación sobre archivos reales.
 
 Orden: ACA-01 → ACA-02 → ACA-03 → ACA-04 → ACA-05 → ACA-06 → ACA-07 → ACA-08.
 Restaurar `academic.md` y los `.bib` de las fixtures antes de cada variante.
-ACA-09 y ACA-10 son comprobaciones adicionales del entorno.
+ACA-09 comprueba accesibilidad. ACA-10 se conserva como observación futura;
+no es requisito actual ni bloquea la fase 5, por decisión del propietario
+del 2026-10-14. Se sigue en #40, sin milestone.
 
 ## Casos
 
@@ -139,6 +141,8 @@ Wayland y servicio de accesibilidad disponibles.
 resultados equivalentes. Si falta el entorno, registrar Bloqueado, nunca Pasado.
 
 ### ACA-10 · Glifos CJK en PDF
+
+**Alcance:** mejora futura pospuesta; no ejecutar como criterio de cierre actual.
 
 **Prioridad:** P2. **Perfil:** usuario local. **Antes:** fixture original.
 
