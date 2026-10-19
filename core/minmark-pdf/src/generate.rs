@@ -11,9 +11,7 @@ use crate::{first_h1_title, page_size_mm, DocumentMeta};
 use minmark_config::{
     FontFamily, Orientation, PageNumberPosition, ParagraphStyle, Settings, TextAlignment,
 };
-use minmark_document::{
-    Align, Ast, Block, BlockKind, CitationItem, Inline, ListItem, Substitution,
-};
+use minmark_document::{Ast, Block, BlockKind, CitationItem, Inline, ListItem, Substitution};
 use minmark_renderer::Palette;
 use std::fmt::Write;
 
@@ -26,15 +24,16 @@ pub fn generate(ast: &Ast, settings: &Settings, meta: &DocumentMeta) -> String {
     let (ast, note_diagnostics) = minmark_renderer::resolve_footnotes(&ast);
     diagnostics.extend(note_diagnostics);
     let labels = minmark_renderer::reference_ids(&ast);
+    let tables = crate::fit::table_identities(&ast);
     let mut out = preamble(&ast, settings, meta);
     for block in &ast.blocks {
         if let BlockKind::FootnoteDefinition { label, blocks } = &block.kind {
             let _ = writeln!(out, "#let mm-note-{label} = [");
-            render_blocks(blocks, settings, &labels, &mut out);
+            render_blocks(blocks, settings, &labels, &tables, &mut out);
             out.push_str("]\n");
         }
     }
-    render_blocks(&ast.blocks, settings, &labels, &mut out);
+    render_blocks(&ast.blocks, settings, &labels, &tables, &mut out);
     for diagnostic in diagnostics {
         out.push_str(&escape_text(&diagnostic));
         out.push_str("\n\n");
@@ -229,10 +228,11 @@ fn render_blocks(
     blocks: &[Block],
     settings: &Settings,
     labels: &std::collections::BTreeSet<String>,
+    tables: &std::collections::BTreeMap<u32, String>,
     out: &mut String,
 ) {
     for block in blocks {
-        render_block(block, settings, labels, out);
+        render_block(block, settings, labels, tables, out);
     }
 }
 
@@ -240,6 +240,7 @@ fn render_block(
     block: &Block,
     settings: &Settings,
     labels: &std::collections::BTreeSet<String>,
+    tables: &std::collections::BTreeMap<u32, String>,
     out: &mut String,
 ) {
     let attrs = match &block.kind {
@@ -317,7 +318,7 @@ fn render_block(
         }
         BlockKind::Quote { blocks } => {
             out.push_str("#quote(block: true)[\n");
-            render_blocks(blocks, settings, labels, out);
+            render_blocks(blocks, settings, labels, tables, out);
             out.push_str("]\n\n");
         }
         BlockKind::List {
@@ -331,7 +332,7 @@ fn render_block(
                 out.push_str("#list(\n");
             }
             for item in items {
-                render_list_item(item, settings, labels, out);
+                render_list_item(item, settings, labels, tables, out);
             }
             out.push_str(")\n\n");
         }
@@ -356,35 +357,13 @@ fn render_block(
             rows,
             ..
         } => {
-            let columns = header.len().max(aligns.len()).max(1);
-            let _ = writeln!(out, "#table(");
-            let _ = writeln!(out, "  columns: {columns},");
-            if !aligns.is_empty() {
-                let aligns: Vec<&str> = aligns
-                    .iter()
-                    .map(|a| match a {
-                        Align::Center => "center",
-                        Align::Right => "right",
-                        Align::Left | Align::None => "left",
-                    })
-                    .collect();
-                let _ = writeln!(out, "  align: ({},),", aligns.join(", "));
-            }
-            out.push_str("  table.header(\n");
-            for cell in header {
-                out.push_str("    [");
-                render_inlines(cell, settings, labels, out);
-                out.push_str("],\n");
-            }
-            out.push_str("  ),\n");
-            for row in rows {
-                for cell in row {
-                    out.push_str("    [");
-                    render_inlines(cell, settings, labels, out);
-                    out.push_str("],\n");
-                }
-            }
-            out.push_str(")\n\n");
+            // §35.2: el envoltorio decide el tamaño en runtime; la identidad
+            // solo la usa el panic de suelo para nombrar la tabla.
+            let identity = tables
+                .get(&block.span.start)
+                .cloned()
+                .unwrap_or_else(|| "tabla sin ID".to_owned());
+            crate::fit::render_table(out, settings, labels, aligns, header, rows, &identity);
         }
         BlockKind::MathBlock { latex, .. } => {
             match minmark_renderer::validated_math(latex) {
@@ -419,8 +398,8 @@ fn render_block(
                 out.push_str(&escape_text(title));
                 out.push_str("*\n");
             }
-            render_blocks(blocks, settings, labels, out);
-            out.push_str("]\n\n");
+            render_blocks(blocks, settings, labels, tables, out);
+            out.push_str("]\n");
         }
         BlockKind::Rule => out.push_str("#line(length: 100%)\n\n"),
     }
@@ -435,14 +414,15 @@ fn render_list_item(
     item: &ListItem,
     settings: &Settings,
     labels: &std::collections::BTreeSet<String>,
+    tables: &std::collections::BTreeMap<u32, String>,
     out: &mut String,
 ) {
     out.push_str("  [\n");
-    render_blocks(&item.blocks, settings, labels, out);
+    render_blocks(&item.blocks, settings, labels, tables, out);
     out.push_str("  ],\n");
 }
 
-fn render_inlines(
+pub(crate) fn render_inlines(
     inlines: &[Inline],
     settings: &Settings,
     labels: &std::collections::BTreeSet<String>,
@@ -619,7 +599,7 @@ fn wrap(
     out.push_str(close);
 }
 
-fn citation_text(items: &[CitationItem]) -> String {
+pub(crate) fn citation_text(items: &[CitationItem]) -> String {
     let mut out = String::from("[");
     for (i, item) in items.iter().enumerate() {
         if i > 0 {
@@ -659,7 +639,7 @@ pub(crate) fn plain_text(inlines: &[Inline]) -> String {
 
 /// Valor hex de un color §23: paleta del proyecto (`custom_colors`) y, si no,
 /// la paleta Light (§32.2: PDF siempre blanco con texto oscuro).
-fn color_hex(name: &str, settings: &Settings) -> String {
+pub(crate) fn color_hex(name: &str, settings: &Settings) -> String {
     if let Some(value) = settings.custom_colors.get(name) {
         if value.starts_with('#') {
             return value.clone();
@@ -673,7 +653,7 @@ fn color_hex(name: &str, settings: &Settings) -> String {
 }
 
 /// Escapa el texto para markup Typst (los caracteres especiales son literales).
-fn escape_text(text: &str) -> String {
+pub(crate) fn escape_text(text: &str) -> String {
     let mut out = String::new();
     for c in text.chars() {
         match c {
@@ -689,7 +669,7 @@ fn escape_text(text: &str) -> String {
 }
 
 /// Escapa un valor para cadena Typst `"..."`.
-fn typst_string(text: &str) -> String {
+pub(crate) fn typst_string(text: &str) -> String {
     let mut out = String::from("\"");
     for c in text.chars() {
         match c {
@@ -873,6 +853,67 @@ mod tests {
         }
     }
 
+    /// §28.2/§28.3 (ISSUE-027): el caption de tabla y el opcional de
+    /// ecuación salen debajo de su bloque, con la etiqueta numerada ya
+    /// expandida («Tabla 1. …», «Ecuación 1. …»), igual que en el Preview.
+    #[test]
+    fn captions_de_tabla_y_ecuacion_debajo_con_su_etiqueta() {
+        let out = source(
+            "| A |\n| - |\n| B |\n{#tbl:results \"Resultados\"}\n\n$$\nE = mc^2\n$$\n{#eq:energy \"Equivalencia\"}\n",
+        );
+        let tabla = out.find("#table(").expect("tabla");
+        // El caption renderizado va tras el envoltorio §35.2 de la tabla; la
+        // misma identidad en el panic de suelo no debe confundirse con él.
+        let cap_tabla = out
+            .find("#align(center)[Tabla 1. Resultados]")
+            .expect("caption de tabla");
+        assert!(
+            tabla < cap_tabla,
+            "el caption va debajo de la tabla:\n{out}"
+        );
+        let math = out.find("$\n").expect("bloque de ecuación");
+        let cap_eq = out
+            .find("Ecuación 1. Equivalencia")
+            .expect("caption de ecuación");
+        assert!(math < cap_eq, "el caption va debajo de la ecuación:\n{out}");
+        assert!(
+            cap_tabla < math,
+            "el orden de los bloques se conserva:\n{out}"
+        );
+    }
+
+    /// §28.3/§28.1 (ISSUE-027): la ecuación con ID y sin caption conserva
+    /// solo su etiqueta debajo; la imagen ordinaria sin `fig:` no gana
+    /// caption ni numeración.
+    #[test]
+    fn ecuacion_sin_caption_solo_etiqueta_e_imagen_ordinaria_intacta() {
+        let out = source("$$\nx\n$$\n{#eq:only}\n\n![Solo alt](icon.svg)\n");
+        assert!(
+            out.contains("Ecuación 1"),
+            "la ecuación con ID lleva su etiqueta: {out}"
+        );
+        assert!(out.contains("#image("), "la imagen se renderiza: {out}");
+        assert!(
+            !out.contains("Figura"),
+            "sin ID de figura no hay etiqueta ni caption: {out}"
+        );
+    }
+
+    /// §26.5/§26.6/§28 + ISSUE-027 (criterio de paridad): las etiquetas de
+    /// caption y su numeración coinciden entre el Preview (HTML) y el PDF
+    /// (fuente Typst) porque ambos pasan por la misma expansión.
+    #[test]
+    fn etiquetas_de_caption_coinciden_entre_preview_y_pdf() {
+        let md = "# Cap\n\n![Esquema](a.svg){#fig:one}\n\n| A |\n| - |\n| B |\n{#tbl:one \"Resultados\"}\n\n$$\nx\n$$\n{#eq:one}\n";
+        let ast = minmark_parser::parse(md);
+        let html = minmark_renderer::render_preview(&ast, md, &Settings::default());
+        let pdf = source(md);
+        for etiqueta in ["Figura 1. Esquema", "Tabla 1. Resultados", "Ecuación 1"] {
+            assert!(html.contains(etiqueta), "Preview sin «{etiqueta}»:\n{html}");
+            assert!(pdf.contains(etiqueta), "PDF sin «{etiqueta}»:\n{pdf}");
+        }
+    }
+
     #[test]
     fn plantillas_de_header_footer_en_preamble_32_9() {
         // §32.9: el state de {chapter} se declara antes de `#set page` y las
@@ -960,5 +1001,88 @@ mod tests {
         );
         assert!(!out.contains("counter(page)"), "{out}");
         assert!(!out.contains("numbering"), "{out}");
+    }
+
+    /// §35.2 (ISSUE-027 criterio 5): toda tabla se emite dentro de
+    /// `#layout(size => ...)` con la decisión de tamaño en runtime, con
+    /// inset/stroke explícitos a tamaño base (5 pt / 1 pt, los valores por
+    /// defecto de Typst) y el caption renderizado fuera del envoltorio.
+    #[test]
+    fn tabla_emite_envoltorio_de_ajuste_35_2() {
+        let out = source("| A |\n| - |\n| B |\n{#tbl:one \"Resultados\"}\n");
+        assert!(out.contains("#layout(size => {"), "{out}");
+        assert!(
+            out.contains("let mm-fit-u = if mm-fit-P + mm-fit-B <= size.width"),
+            "la decisión es en runtime:\n{out}"
+        );
+        assert!(
+            out.contains("set text(size: mm-fit-base * mm-fit-u)"),
+            "el cuerpo solo se reduce (nunca amplía):\n{out}"
+        );
+        assert!(out.contains("inset: 5pt * mm-fit-u"), "{out}");
+        assert!(out.contains("stroke: 1pt * mm-fit-u"), "{out}");
+        assert!(out.contains("measure(["), "los átomos se miden:\n{out}");
+        // La tabla sigue siendo nativa (reparto multipágina) con sus celdas.
+        assert!(out.contains("#table("), "{out}");
+        assert!(out.contains("table.header("), "{out}");
+        assert!(out.contains("columns: 1,"), "{out}");
+        // El caption renderizado queda fuera del envoltorio, tras la tabla.
+        let open = out.find("#layout(").expect("layout");
+        let close = open + out[open..].find("})").expect("cierre del layout");
+        let caption = out
+            .find("#align(center)[Tabla 1. Resultados]")
+            .expect("caption renderizado");
+        assert!(close < caption, "el caption va fuera del layout:\n{out}");
+    }
+
+    /// §35.2: el `panic` de suelo lleva el mensaje con la identidad de la
+    /// tabla (caption expandido, etiqueta del ID o nº de orden) y el valor
+    /// vigente de `table_min_font_pt`.
+    #[test]
+    fn panic_de_suelo_identifica_la_tabla_35_2() {
+        let suelo = "no cabe en el ancho disponible con table_min_font_pt=8pt (§35.2)";
+        // Con caption: manda el caption ya expandido (§28).
+        let out = source("| A |\n| - |\n| B |\n{#tbl:one \"Resultados\"}\n");
+        assert!(
+            out.contains(&format!("panic(\"Tabla 1. Resultados: {suelo}\")")),
+            "{out}"
+        );
+        // Con ID y sin caption: la identidad es la etiqueta numerada.
+        let out = source("| A |\n| - |\n| B |\n{#tbl:one}\n");
+        assert!(
+            out.contains(&format!("panic(\"Tabla 1: {suelo}\")")),
+            "{out}"
+        );
+        // Sin identidad: nº de orden documental (1-based).
+        let out = source("| A |\n| - |\n| B |\n\n| C |\n| - |\n| D |\n");
+        assert!(
+            out.contains(&format!("panic(\"tabla sin ID nº 1: {suelo}\")")),
+            "{out}"
+        );
+        assert!(
+            out.contains(&format!("panic(\"tabla sin ID nº 2: {suelo}\")")),
+            "{out}"
+        );
+    }
+
+    /// §35.2: `table_min_font_pt` alimenta el suelo emitido y el mensaje de
+    /// error; `font_size_pt` es la base que nunca se supera.
+    #[test]
+    fn table_min_font_pt_alimenta_el_suelo_35_2() {
+        let settings = Settings {
+            table_min_font_pt: 30.0,
+            ..Settings::default()
+        };
+        let out = generate(
+            &parse("| A |\n| - |\n| B |\n"),
+            &settings,
+            &DocumentMeta::default(),
+        );
+        assert!(out.contains("let mm-fit-base = 12pt"), "{out}");
+        assert!(out.contains("let mm-fit-floor = 30pt"), "{out}");
+        assert!(out.contains("table_min_font_pt=30pt"), "{out}");
+        let out = source("| A |\n| - |\n| B |\n");
+        assert!(out.contains("let mm-fit-floor = 8pt"), "{out}");
+        assert!(out.contains("table_min_font_pt=8pt"), "{out}");
     }
 }

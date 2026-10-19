@@ -94,6 +94,19 @@ configuración.
   El Preview continuo HTML sigue resolviendo familias genéricas con las
   fuentes del sistema.
 
+## Tablas en PDF (§35.2)
+
+- Las tablas que ya caben se componen sin cambios: nunca se amplían, aunque
+  el cuerpo (`font_size_pt`) esté por debajo de `table_min_font_pt`.
+- Si el ancho mínimo de una tabla no cabe en el contenedor, su tipografía se
+  reduce proporcionalmente hasta el suelo `table_min_font_pt` (defecto 8 pt);
+  el reparto multipágina dentro del envoltorio y el caption debajo (§28) se
+  conservan.
+- Si ni siquiera el suelo cabe, la exportación se detiene (no se recorta) con
+  `error de composición PDF: panicked with: "<tabla>: no cabe en el ancho
+  disponible con table_min_font_pt=8pt (§35.2)"`, identificando la tabla por
+  su caption expandido, su ID o su nº de orden documental.
+
 ## Limitaciones
 
 - El Preview HTML continuo no incrusta las fuentes base; el aspecto base del

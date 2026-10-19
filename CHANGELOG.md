@@ -29,6 +29,15 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
   autocompletado, notas al pie, numeración académica y TOC.
 - Preview paginado comparte la composición de páginas, notas y TOC del PDF.
 - Fixtures, suite y [registro de QA académica](docs/qa/registro-ejecucion.md).
+- Exportación PDF con el ajuste de tablas §35.2 (ISSUE-027): una tabla que no
+  cabe se reduce proporcionalmente hasta `table_min_font_pt` (defecto 8 pt) sin
+  perder el reparto multipágina ni el caption debajo; si ni siquiera el suelo
+  cabe, la exportación se detiene nombrando la tabla problemática —caption
+  expandido, ID o nº de orden— con el mensaje
+  `error de composición PDF: panicked with: "<tabla>: no cabe en el ancho
+  disponible con table_min_font_pt=8pt (§35.2)"` en lugar de recortarla.
+  Una tabla que ya cabe nunca se amplía, aunque el cuerpo esté por debajo del
+  suelo. Documentación: [Composiciones](docs/COMPOSITIONS.md).
 
 ### Corregido
 
