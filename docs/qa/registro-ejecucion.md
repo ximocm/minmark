@@ -248,3 +248,42 @@ python3 scripts/test_release.py
   destinos internos no navega ese caso: es previo a S1 y candidato a issue
   propia.
 - #39 y #40 conservan las decisiones registradas en la fase 5.
+
+## Captions y ajuste de tablas §35.2 — ISSUE-027, 2026-10-19
+
+Criterios de captions (figura con `fig:` y alt como pie debajo, `{#tbl}` y
+`{#eq}` debajo de su bloque, paridad de etiquetas y numeración entre Preview y
+PDF, fuente y escaping conservados, imagen ordinaria intacta) estaban
+implementados desde la fase 5/6 mediante la expansión compartida
+`resolve_cross_references`; se acreditan ahora con pruebas nuevas del lado PDF:
+`captions_de_tabla_y_ecuacion_debajo_con_su_etiqueta`,
+`ecuacion_sin_caption_solo_etiqueta_e_imagen_ordinaria_intacta` y
+`etiquetas_de_caption_coinciden_entre_preview_y_pdf`.
+
+El criterio §35.2 no estaba implementado: `table_min_font_pt` se parseaba pero
+nadie lo consumía y la tabla PDF salía con su tipografía natural (una palabra
+de 120 caracteres medía 939 pt frente a 453 pt de cuerpo). Se implementó el
+ajuste en el motor PDF (módulo `fit` de `minmark-pdf`), reutilizando el layout
+existente:
+
+- La tabla sigue siendo nativa y partible entre páginas; el caption va fuera
+  del ajuste, debajo, con su tipografía propia.
+- Una tabla que ya cabe no se toca (nunca se amplía, aunque el cuerpo esté por
+  debajo del suelo).
+- Si su ancho mínimo no cabe, la tipografía se reduce proporcionalmente hasta
+  el suelo `table_min_font_pt` (8 pt por defecto), con inset/stroke
+  proporcionales.
+- Si ni el suelo cabe, la exportación se detiene nombrando la tabla (caption
+  expandido, `#id` o nº de orden), con la superficie de error
+  `error de composición PDF: panicked with: "<tabla>: no cabe en el ancho
+  disponible con table_min_font_pt=8pt (§35.2)"`.
+
+Ambigüedades del SRS interpretadas: «cabe» es ajuste horizontal, no a una
+página; el suelo aplica a la tipografía base de la tabla; las tablas que ya
+caben no se amplían. Verificación: 44 pruebas de `minmark-pdf` (12 nuevas: prosa
+que se ajusta por quiebre sin reducir, reducción acotada al suelo, error que
+nombra la tabla, consumo de `table_min_font_pt`, tabla larga con caption
+repartida en varias páginas, alcance del tamaño reducido y geometría de
+contenedor), 406 del core y 115 de UI en verde; clippy sin avisos nuevos y
+`scripts/test_release.py` 6/6. La sonda Typst desechable usada para diseñar se
+eliminó.
