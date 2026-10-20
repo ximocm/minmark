@@ -47,8 +47,12 @@ dependencias Rust; no hace falta instalar un ejecutable `typst`.
 
   La primera compilación tarda bastante. Después añade
   `C:\gtk-build\gtk\x64\release\bin` al `PATH` y define
-  `PKG_CONFIG_PATH=C:\gtk-build\gtk\x64\release\lib\pkgconfig` para que
-  Cargo encuentre GTK mediante `pkg-config`.
+  `PKG_CONFIG_PATH=C:\gtk-build\gtk\x64\release\lib\pkgconfig` y
+  `PKG_CONFIG_ALLOW_SYSTEM_LIBS=1` para que Cargo encuentre GTK mediante
+  `pkg-config`. La segunda variable es imprescindible: `pkgconf` recorta el
+  `-L` de sus propios directorios de sistema — y el prefijo de gvsbuild lo
+  es — y sin ella los crates `-sys` no dan la ruta a `link.exe`
+  (`LNK1181: cannot open input file 'gtk-4.lib'`).
 - Para generar el instalador: .NET SDK (instala WiX como herramienta `dotnet`)
   y el instalador offline del WebView2 Evergreen; ver «Empaquetado».
 

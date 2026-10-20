@@ -142,6 +142,11 @@ jobs:
         run: |
           echo "C:\\gtk-build\\gtk\\x64\\release\\bin" >> "$GITHUB_PATH"
           echo "PKG_CONFIG_PATH=C:\\gtk-build\\gtk\\x64\\release\\lib\\pkgconfig" >> "$GITHUB_ENV"
+          # pkgconf recorta el -L de sus propios directorios de sistema y el
+          # prefijo de gvsbuild lo es: sin esta variable los -sys no emiten
+          # cargo:rustc-link-search y link.exe no encuentra gtk-4.lib
+          # (LNK1181).
+          echo "PKG_CONFIG_ALLOW_SYSTEM_LIBS=1" >> "$GITHUB_ENV"
       - name: Build Windows desktop
         if: runner.os == 'Windows'
         run: cargo build --locked --release --manifest-path ui/Cargo.toml
