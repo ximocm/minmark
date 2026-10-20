@@ -365,7 +365,7 @@ glib::wrapper! {
     /// y el `ScrolledWindow` le da el viewport, con el scroll real dentro de
     /// la `WKWebView`); la vista nativa se superpone desde los vfuncs de
     /// [`imp::PreviewHostObj`].
-    struct PreviewHost(ObjectSubclass<imp::PreviewHostObj>) @extends gtk::Box, gtk::Widget;
+    pub struct PreviewHost(ObjectSubclass<imp::PreviewHostObj>) @extends gtk::Box, gtk::Widget;
 }
 
 /// Motor del Preview sobre WKWebView: comparte [`Inner`] con el widget
