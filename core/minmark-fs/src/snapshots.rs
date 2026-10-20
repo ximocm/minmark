@@ -310,14 +310,7 @@ mod tests {
 
     impl TestDir {
         fn new() -> Self {
-            let nanos = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos();
-            let path =
-                std::env::temp_dir().join(format!("minmark-fs-{}-{}", std::process::id(), nanos));
-            fs::create_dir_all(&path).unwrap();
-            Self(path)
+            Self(crate::test_dir::crear("minmark-snapshots"))
         }
 
         fn file(&self, name: &str) -> PathBuf {

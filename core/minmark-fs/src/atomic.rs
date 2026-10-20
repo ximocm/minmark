@@ -147,20 +147,13 @@ fn copiar_permisos_si_existe(target: &Path, tmp: &Path) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     /// Directorio temporal de test, eliminado al salir.
     struct TestDir(PathBuf);
 
     impl TestDir {
         fn new() -> Self {
-            let nanos = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos();
-            let path = std::env::temp_dir().join(format!("minmark-fs-{}-{}", std::process::id(), nanos));
-            fs::create_dir_all(&path).unwrap();
-            Self(path)
+            Self(crate::test_dir::crear("minmark-atomic"))
         }
 
         fn file(&self, name: &str) -> PathBuf {

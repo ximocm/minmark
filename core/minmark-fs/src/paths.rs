@@ -264,7 +264,6 @@ pub fn walk_tree(root: &Path) -> Result<Vec<TreeEntry>, FsError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     /// Symlink portable para tests: en Windows distingue fichero de carpeta
     /// (`symlink_file`/`symlink_dir`) y devuelve `Err` cuando el sistema no
@@ -295,14 +294,7 @@ mod tests {
 
     impl TestDir {
         fn new() -> Self {
-            let nanos = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos();
-            let path =
-                std::env::temp_dir().join(format!("minmark-fs-{}-{}", std::process::id(), nanos));
-            fs::create_dir_all(&path).unwrap();
-            Self(path)
+            Self(crate::test_dir::crear("minmark-paths"))
         }
 
         fn file(&self, name: &str) -> PathBuf {

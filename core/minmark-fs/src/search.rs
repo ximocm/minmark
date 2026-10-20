@@ -634,7 +634,7 @@ mod tests {
     use super::*;
     use minmark_document::SearchOptions;
     use std::sync::mpsc::channel;
-    use std::time::{Instant, SystemTime, UNIX_EPOCH};
+    use std::time::Instant;
 
     /// Directorio temporal de test, eliminado al salir (mismo patrón que
     /// [`crate::paths`]).
@@ -642,14 +642,7 @@ mod tests {
 
     impl TestDir {
         fn new() -> Self {
-            let nanos = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos();
-            let path =
-                std::env::temp_dir().join(format!("minmark-search-{}-{}", std::process::id(), nanos));
-            std::fs::create_dir_all(&path).unwrap();
-            Self(path)
+            Self(crate::test_dir::crear("minmark-search"))
         }
 
         fn write(&self, rel: &str, content: impl AsRef<[u8]>) {

@@ -568,17 +568,7 @@ mod tests {
     }
 
     fn temp_tree(tag: &str) -> PathBuf {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let dir = std::env::temp_dir().join(format!(
-            "minmark-resolve-{tag}-{}-{nanos}",
-            std::process::id()
-        ));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        dir
+        crate::test_dir::crear(&format!("minmark-resolve-{tag}"))
     }
 
     /// Proyecto base: `index.md` con enlaces, `cap/a.md` y `cap/mi archivo.md`.
@@ -1106,9 +1096,7 @@ mod object_target_tests {
     use super::*;
     #[test]
     fn objetos_indexados_y_duplicados_comparten_resolucion() {
-        let root =
-            std::env::temp_dir().join(format!("minmark-object-targets-{}", std::process::id()));
-        std::fs::create_dir_all(&root).unwrap();
+        let root = crate::test_dir::crear("minmark-object-targets");
         let source = "![x](x.svg){#fig:a}\n\n| A |\n| - |\n| B |\n{#tbl:a}\n\n$$\nx\n$$\n{#eq:a}";
         std::fs::write(root.join("doc.md"), source).unwrap();
         let mut index = ProjectIndex::new(root.clone());

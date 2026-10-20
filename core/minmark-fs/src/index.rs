@@ -422,16 +422,7 @@ mod tests {
     use std::fs;
 
     fn temp_tree(tag: &str) -> PathBuf {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let dir = std::env::temp_dir().join(format!(
-            "minmark-index-{tag}-{}-{nanos}",
-            std::process::id()
-        ));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
+        let dir = crate::test_dir::crear(&format!("minmark-index-{tag}"));
         // Namespace canónico una sola vez: en macOS `temp_dir()` es
         // `/var/folders/…` (enlace) y `parse` compara la cabecera `root`
         // contra `canonicalize` (`/private/var/folders/…`); serializar ya en

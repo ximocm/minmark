@@ -25,6 +25,8 @@ mod paths;
 pub mod resolve;
 pub mod search;
 mod snapshots;
+#[cfg(test)]
+mod test_dir;
 #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 mod watch;
 

@@ -111,7 +111,7 @@ mod tests {
     use super::*;
     use std::fs;
     use std::thread;
-    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+    use std::time::{Duration, Instant};
 
     /// Cota total de espera de eventos: inotify entrega ya en el primer `poll`
     /// y los backends de Windows/macOS entregan desde su hilo nativo casi de
@@ -128,17 +128,7 @@ mod tests {
 
     impl TestDir {
         fn new() -> Self {
-            let nanos = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos();
-            let path = std::env::temp_dir().join(format!(
-                "minmark-watch-{}-{}",
-                std::process::id(),
-                nanos
-            ));
-            fs::create_dir_all(&path).unwrap();
-            Self(path)
+            Self(crate::test_dir::crear("minmark-watch"))
         }
 
         fn file(&self, name: &str) -> PathBuf {
