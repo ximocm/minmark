@@ -44,9 +44,9 @@ use gtk4 as gtk;
 use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::subclass::prelude::*;
-use objc2::MainThreadMarker;
 use objc2::rc::{autoreleasepool, Retained};
 use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol, ProtocolObject};
+use objc2::MainThreadMarker;
 use objc2::{define_class, msg_send, ClassType, DefinedClass, MainThreadOnly};
 use objc2_app_kit::{
     NSBitmapImageFileType, NSBitmapImageRep, NSBitmapImageRepPropertyKey, NSImage, NSWindow,
@@ -191,7 +191,11 @@ impl Inner {
         let configuration = unsafe { WKWebViewConfiguration::new(mtm) };
         let controller = unsafe { configuration.userContentController() };
         let web_view = unsafe {
-            WKWebView::initWithFrame_configuration(WKWebView::alloc(mtm), CGRect::ZERO, &configuration)
+            WKWebView::initWithFrame_configuration(
+                WKWebView::alloc(mtm),
+                CGRect::ZERO,
+                &configuration,
+            )
         };
 
         // El mismo puente objeta la política de navegación (veto + fin de
