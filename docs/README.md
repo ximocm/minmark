@@ -29,6 +29,8 @@ GitHub Issues, con milestones para las fases del desarrollo.
 - [ADR-001: tecnología de UI](adr/001-tecnologia-ui.md).
 - [ADR-002: LaTeX a Typst](adr/002-latex-a-typst.md).
 - [ADR-003: motor bibliográfico](adr/003-motor-bibliografico.md).
+- [ADR-004: anclas y resolución de destinos](adr/004-anclas-y-resolucion-de-enlaces.md).
+- [ADR-005: preview multiplataforma](adr/005-preview-multiplataforma.md).
 
 ## Seguimiento
 

@@ -5,12 +5,15 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import struct
 import subprocess
 import sys
 import tarfile
 import tempfile
 import unittest
 from unittest.mock import patch
+import plistlib
+from xml.dom import minidom
 
 SCRIPTS = Path(__file__).resolve().parent
 
@@ -104,6 +107,251 @@ class LinuxPackage(unittest.TestCase):
                 self.assertEqual(tar.extractfile(prefix + "third-party/typst-assets-0.13.1/NOTICE").read(),
                                  b"font license and copyright")
                 self.assertIn(prefix + "INSTALL.txt", tar.getnames())
+
+
+def load_script(name, filename):
+    spec = importlib.util.spec_from_file_location(name, SCRIPTS / filename)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def notices_fixture(root):
+    """Dependencias falsas (con licencias) y su metadata de cargo."""
+    dep = root / "dependency"
+    dep.mkdir()
+    (dep / "LICENSE").write_text("dependency license")
+    typst = root / "typst-assets"
+    typst.mkdir()
+    (typst / "NOTICE").write_text("font license and copyright")
+    metadata = {"packages": [
+        {"name": "dependency", "version": "1.0.0",
+         "source": "registry+https://example.invalid",
+         "manifest_path": str(dep / "Cargo.toml"), "license": "MIT",
+         "repository": "https://example.invalid/dependency"},
+        {"name": "typst-assets", "version": "0.13.1",
+         "source": "registry+https://example.invalid",
+         "manifest_path": str(typst / "Cargo.toml"),
+         "license": "Apache-2.0"},
+        {"name": "minmark-ui", "version": "0.1.0", "source": None,
+         "manifest_path": str(root / "ui" / "Cargo.toml"),
+         "license": "Apache-2.0"},
+    ]}
+    return metadata
+
+
+def minimal_pe():
+    """PE x64 mínimo con una tabla de importaciones y otra de delay-import."""
+    e_lfanew = 0x80
+    coff = e_lfanew + 4
+    opt = coff + 20
+    size_opt = 240
+    header = opt + size_opt
+    raw_ptr, raw_size, va = 0x200, 0x400, 0x1000
+    data = bytearray(0x600)
+    data[0:2] = b"MZ"
+    struct.pack_into("<I", data, 0x3C, e_lfanew)
+    data[e_lfanew:e_lfanew + 4] = b"PE\0\0"
+    struct.pack_into("<HHIIIHH", data, coff, 0x8664, 1, 0, 0, 0, size_opt, 0x22)
+    struct.pack_into("<H", data, opt, 0x20B)
+    struct.pack_into("<I", data, opt + 108, 16)
+    struct.pack_into("<II", data, opt + 120, va, 0x60)
+    struct.pack_into("<II", data, opt + 112 + 13 * 8, va + 0x40, 0x40)
+    data[header:header + 8] = b".rdata\0\0"
+    struct.pack_into("<IIII", data, header + 8, raw_size, va, raw_size, raw_ptr)
+    struct.pack_into("<IIIII", data, 0x200, 0, 0, 0, 0x1100, 0)
+    struct.pack_into("<IIIII", data, 0x214, 0, 0, 0, 0x1110, 0)
+    struct.pack_into("<IIIIIIII", data, 0x240, 1, 0x1120, 0, 0, 0, 0, 0, 0)
+    data[0x300:0x30D] = b"TESTDLL1.dll\0"
+    data[0x310:0x31D] = b"TESTDLL2.dll\0"
+    data[0x320:0x32B] = b"DELAY1.dll\0"
+    return bytes(data)
+
+
+class PeImportParsing(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.module = load_script("package_windows", "package-windows.py")
+
+    def test_reads_import_and_delay_import_tables(self):
+        with tempfile.TemporaryDirectory() as temp:
+            pe = Path(temp) / "fake.exe"
+            pe.write_bytes(minimal_pe())
+            self.assertEqual(set(self.module.parse_pe_imports(pe)),
+                             {"TESTDLL1.dll", "TESTDLL2.dll", "DELAY1.dll"})
+
+    def test_rejects_non_pe_file(self):
+        with tempfile.TemporaryDirectory() as temp:
+            plain = Path(temp) / "plain.bin"
+            plain.write_bytes(b"not an executable")
+            with self.assertRaises(ValueError):
+                self.module.parse_pe_imports(plain)
+
+
+class WindowsPackage(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.module = load_script("package_windows", "package-windows.py")
+
+    def test_msi_wxs_is_valid_xml_with_expected_authoring(self):
+        source = self.module.msi_wxs(
+            "0.1.0", Path(r"C:\stage\minmark-0.1.0-windows-x86_64"))
+        minidom.parseString(source)
+        self.assertIn('UpgradeCode="{39C00825-AAA6-5B48-9A1E-76E2B66F043C}"', source)
+        self.assertIn('Scope="perMachine"', source)
+        self.assertIn('Include="C:\\stage\\minmark-0.1.0-windows-x86_64\\**"', source)
+        self.assertIn('Target="[INSTALLFOLDER]minmark.exe"', source)
+        self.assertIn('<MediaTemplate EmbedCab="yes" />', source)
+
+    def test_bundle_wxs_detects_webview2_and_embeds_payloads(self):
+        source = self.module.bundle_wxs(
+            "0.1.0", Path(r"C:\stage\minmark-0.1.0-windows-x86_64.msi"),
+            Path(r"C:\cache\MicrosoftEdgeWebView2RuntimeInstallerX64.exe"))
+        minidom.parseString(source)
+        self.assertIn('UpgradeCode="{1B534783-AC47-59D1-9C70-FE73D65FDEB5}"', source)
+        self.assertIn("{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}", source)
+        self.assertIn('DetectCondition="WebView2RuntimeInstalled"', source)
+        self.assertIn('InstallArguments="/silent /install"', source)
+        self.assertIn('Permanent="yes"', source)
+        self.assertIn('Theme="hyperlinkLicense"', source)
+        self.assertIn('Compressed="yes"', source)
+
+    def test_system_dll_classification(self):
+        with tempfile.TemporaryDirectory() as temp:
+            system32 = Path(temp)
+            (system32 / "kernel32.dll").write_bytes(b"")
+            (system32 / "vcruntime140.dll").write_bytes(b"")
+            self.assertTrue(self.module.is_system_dll("kernel32.dll", system32))
+            self.assertTrue(
+                self.module.is_system_dll("api-ms-win-core-l1-1-0.dll", system32))
+            # El runtime de VC++ se empaqueta aunque exista en System32.
+            self.assertFalse(self.module.is_system_dll("vcruntime140.dll", system32))
+            self.assertFalse(self.module.is_system_dll("libgtk-4-1.dll", system32))
+
+    def test_install_text_documents_requirements_and_privacy(self):
+        text = self.module.install_text("0.1.0")
+        self.assertIn("Windows 10 or 11", text)
+        self.assertIn("WebView2", text)
+        self.assertIn("no telemetry", text)
+        self.assertIn("minmark-0.1.0-windows-x86_64.exe", text)
+
+    def test_stage_notices_inventory(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            metadata = notices_fixture(root)
+            stage = root / "stage"
+            stage.mkdir()
+            self.module.stage_notices(stage, metadata)
+            self.assertEqual(
+                (stage / "third-party/dependency-1.0.0/LICENSE").read_text(),
+                "dependency license")
+            self.assertEqual(
+                (stage / "third-party/typst-assets-0.13.1/NOTICE").read_text(),
+                "font license and copyright")
+            inventory = json.loads(
+                (stage / "third-party/inventory.json").read_text())
+            self.assertEqual([entry["name"] for entry in inventory],
+                             ["dependency", "typst-assets"])
+
+    def test_stage_notices_requires_font_notice(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            dep = root / "dependency"
+            dep.mkdir()
+            (dep / "LICENSE").write_text("dependency license")
+            metadata = {"packages": [
+                {"name": "dependency", "version": "1.0.0",
+                 "source": "registry+https://example.invalid",
+                 "manifest_path": str(dep / "Cargo.toml"), "license": "MIT"},
+            ]}
+            stage = root / "stage"
+            stage.mkdir()
+            with self.assertRaises(SystemExit):
+                self.module.stage_notices(stage, metadata)
+
+
+class MacosPackage(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.module = load_script("package_macos", "package-macos.py")
+
+    def test_parse_otool_deps(self):
+        text = ("minmark.o:\n"
+                "\t/opt/homebrew/opt/gtk4/lib/libgtk-4.1.dylib "
+                "(compat version 804.0.0, current version 804.0.0)\n"
+                "\t/usr/lib/libSystem.B.dylib "
+                "(compat version 1.0.0, current version 1400.0.0)\n"
+                "\t@executable_path/../Frameworks/libglib-2.0-0.dylib "
+                "(compat version 0.0.0, current version 0.0.0)\n")
+        self.assertEqual(self.module.parse_otool_deps(text), [
+            "/opt/homebrew/opt/gtk4/lib/libgtk-4.1.dylib",
+            "/usr/lib/libSystem.B.dylib",
+            "@executable_path/../Frameworks/libglib-2.0-0.dylib",
+        ])
+
+    def test_rewrite_plan_keeps_system_paths(self):
+        deps = ["/opt/homebrew/opt/gtk4/lib/libgtk-4.1.dylib",
+                "/usr/lib/libSystem.B.dylib",
+                "/System/Library/Frameworks/Foundation.framework/Foundation",
+                "@executable_path/../Frameworks/libyaud.dylib",
+                "@rpath/libfoo.dylib"]
+        self.assertEqual(
+            self.module.rewrite_plan(deps, "@executable_path/../Frameworks/"),
+            [("/opt/homebrew/opt/gtk4/lib/libgtk-4.1.dylib",
+              "@executable_path/../Frameworks/libgtk-4.1.dylib"),
+             ("@rpath/libfoo.dylib",
+              "@executable_path/../Frameworks/libfoo.dylib")])
+        self.assertEqual(
+            self.module.rewrite_plan(deps, "@loader_path/"),
+            [("/opt/homebrew/opt/gtk4/lib/libgtk-4.1.dylib",
+              "@loader_path/libgtk-4.1.dylib"),
+             ("@rpath/libfoo.dylib", "@loader_path/libfoo.dylib")])
+
+    def test_parse_otool_rpaths(self):
+        text = """\
+minmark:
+Load command 8
+      cmd LC_RPATH
+  cmdsize 48
+         path /opt/homebrew/lib (offset 12)
+Load command 9
+      cmd LC_LOAD_DYLIB
+  cmdsize 56
+         name /usr/lib/libSystem.B.dylib (offset 24)
+"""
+        self.assertEqual(self.module.parse_otool_rpaths(text),
+                         ["/opt/homebrew/lib"])
+
+    def test_info_plist_round_trips(self):
+        plist = self.module.info_plist("0.1.0")
+        self.assertEqual(plist["CFBundleExecutable"], "minmark")
+        self.assertEqual(plist["CFBundleIdentifier"], "app.minmark")
+        self.assertEqual(plist["CFBundleShortVersionString"], "0.1.0")
+        restored = plistlib.loads(plistlib.dumps(plist))
+        self.assertEqual(restored, plist)
+
+    def test_install_text_notes_ad_hoc_signing(self):
+        text = self.module.install_text("0.1.0")
+        self.assertIn("Apple Silicon", text)
+        self.assertIn("ad-hoc signed in CI", text)
+        self.assertIn("Developer ID signing and notarization", text)
+        self.assertIn("Gatekeeper", text)
+        self.assertIn("WKWebView", text)
+
+    def test_stage_notices_inventory(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            metadata = notices_fixture(root)
+            stage = root / "stage"
+            stage.mkdir()
+            self.module.stage_notices(stage, metadata)
+            self.assertEqual(
+                (stage / "third-party/typst-assets-0.13.1/NOTICE").read_text(),
+                "font license and copyright")
+            inventory = json.loads(
+                (stage / "third-party/inventory.json").read_text())
+            self.assertEqual([entry["name"] for entry in inventory],
+                             ["dependency", "typst-assets"])
 
 
 if __name__ == "__main__":

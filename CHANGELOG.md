@@ -16,6 +16,28 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 - [Documento de demostración](docs/SHOWCASE.md) con todo el dialecto: énfasis,
   listas y tareas, tablas, imágenes, colores inline, callouts, matemáticas,
   citas y bibliografía, notas, referencias cruzadas y front matter.
+- Portabilidad del core a Windows y macOS: los siete crates del core compilan
+  y pasan sus tests en los tres sistemas operativos. `minmark-fs` vigila con
+  `inotify` en Linux, con `ReadDirectoryChangesW`/FSEvents vía `notify` en
+  Windows/macOS (§46: notificaciones nativas, sin rescaneo) y adapta symlinks,
+  permisos y papelera (XDG en Linux; Papelera de reciclaje y `~/.Trash` vía
+  `trash` en Windows/macOS). El descubrimiento de directorios por SO vive en
+  `minmark_config::dirs`, con las ubicaciones XDG de Linux byte-idénticas. La
+  matriz de CI ejecuta ahora el workspace completo del core también en
+  Windows y en macOS 15 ([CI](docs/CI.md),
+  [BUILDING](BUILDING.md)).
+- Preview multiplataforma
+  ([ADR-005](docs/adr/005-preview-multiplataforma.md)): el motor del Preview
+  se oculta tras `PreviewEngine` con tres implementaciones — WebKitGTK en
+  Linux (sin cambio de comportamiento), WebView2 en Windows y WKWebView en
+  macOS — con el mismo HTML/CSS, los mismos scripts de actualización y la
+  misma política de enlaces y navegación.
+- Ejecutables por sistema operativo en cada release (§50.2): `.tar.gz`
+  (Linux), MSI y ZIP portable (Windows 10/11 x86-64, con el prerrequisito
+  WebView2 en el bundle) y `.app` en `.dmg`/`.tar.gz` (macOS arm64), con
+  `SHA256SUMS` común. Los paquetes se construyen en los runners de GitHub y
+  la disponibilidad y sus límites se documentan en [CI](docs/CI.md) y
+  [BUILDING](BUILDING.md).
 
 ### Corregido
 
