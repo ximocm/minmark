@@ -46,6 +46,14 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 
 ### Corregido
 
+- La exportación PDF se detenía con «No se puede resolver la imagen: …» cuando
+  el documento referenciaba un recurso por su ruta absoluta del filesystem
+  (p. ej. `/home/…/imagen.png`), aunque el Preview la mostraba bien: el
+  resolutor interpreta ahora una ruta absoluta que cae dentro del proyecto
+  como su path relativo (§17/§48, symlinks incluidos) y sigue marcando
+  `Missing` todo lo que sale de la raíz. La lectura `/x` = `x` desde la raíz
+  del proyecto conserva su prioridad; navegación y diagnósticos de enlaces
+  aplican el mismo criterio que Preview y PDF.
 - El autocompletado expone la sugerencia seleccionada al lector de pantalla,
   conserva el foco del editor y restaura su nombre accesible al cerrar el popup.
 - Tabla PDF de varias columnas, composición de fracciones y aislamiento de

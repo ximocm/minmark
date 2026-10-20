@@ -5,7 +5,9 @@
 //! wiki links y referencias cruzadas. Reglas:
 //!
 //! - los destinos relativos resuelven desde el archivo que contiene la
-//!   referencia (§17); los absolutos (`/ruta`) desde la raíz del proyecto;
+//!   referencia (§17); los absolutos (`/ruta`) desde la raíz del proyecto y,
+//!   en su defecto, como ruta absoluta del filesystem si cae dentro del
+//!   proyecto (§17/§48: tolerancia a rutas reales);
 //! - `#fragmento` y `archivo.md#fragmento` resuelven contra las anclas del
 //!   documento destino con la política única de
 //!   [`minmark_document::document_anchors`] — la misma que emite la Preview,
@@ -147,6 +149,18 @@ impl<'a> Resolver<'a> {
         for rel in path_candidates(path_part, from_rel) {
             if let Some(target) = self.resolve_file(&rel, fragment) {
                 return target;
+            }
+        }
+        // Tolerancia §17: una ruta absoluta del filesystem que cae dentro del
+        // proyecto (p. ej. la que deja pegar una imagen desde otro programa)
+        // resuelve a su path relativo; sale del proyecto ⇒ sigue `Missing`
+        // (§48). Se prueba DESPUÉS de las candidatas para no cambiar la
+        // lectura `/x` = `x` desde la raíz del proyecto.
+        if path_part.starts_with('/') {
+            for rel in absolute_candidates(self.index.root(), path_part) {
+                if let Some(target) = self.resolve_file(&rel, fragment) {
+                    return target;
+                }
             }
         }
         LinkTarget::missing(fragment_owned)
@@ -409,6 +423,46 @@ fn path_candidates(path_part: &str, from_rel: &str) -> Vec<String> {
             .map(str::to_owned)
             .collect();
         if let Some(rel) = normalize_rel(if absolute { "" } else { &base }, &raw) {
+            if !out.contains(&rel) {
+                out.push(rel);
+            }
+        }
+    }
+    out
+}
+
+/// Interpretaciones tolerantes §17 de un destino absoluto del filesystem:
+/// cada forma —percent-encoded primero, literal después— cuya canónica cae
+/// dentro de la raíz del proyecto (§48, symlinks incluidos) se devuelve como
+/// su path relativo posix; lo que sale del proyecto se descarta aquí mismo.
+/// Que el archivo exista lo decide [`Resolver::resolve_file`], de modo que una
+/// forma que no resuelve no tapa a la siguiente (p. ej. un fichero llamado
+/// `a%20b.png` literal frente a un `a b.png` decodificado que no existe). Es
+/// la forma que dejan rutas reales (`/home/…/img.png`) y la que el Preview ya
+/// mostraba vía `file://`; así PDF, navegación y diagnósticos aplican el
+/// mismo criterio.
+fn absolute_candidates(root: &Path, path_part: &str) -> Vec<String> {
+    let Ok(root_canon) = std::fs::canonicalize(root) else {
+        return Vec::new();
+    };
+    let decoded: String = path_part
+        .split('/')
+        .map(|c| percent_decode(c).unwrap_or_else(|| c.to_owned()))
+        .collect::<Vec<_>>()
+        .join("/");
+    let mut out = Vec::new();
+    for candidate in [decoded, path_part.to_owned()] {
+        let Ok(resolved) = resolve_in_project(root, Path::new(&candidate)) else {
+            continue;
+        };
+        let Ok(rel) = resolved.strip_prefix(&root_canon) else {
+            continue;
+        };
+        if let Some(rel) = rel
+            .to_str()
+            .filter(|rel| !rel.is_empty())
+            .map(|rel| rel.replace('\\', "/"))
+        {
             if !out.contains(&rel) {
                 out.push(rel);
             }
@@ -743,6 +797,70 @@ mod tests {
         assert_eq!(
             r.resolve("imagen.png#titulo", "index.md").kind,
             TargetKind::Missing
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn rutas_absolutas_del_filesystem_dentro_del_proyecto_17() {
+        let root = project("absoluta-fs");
+        let index = ProjectIndex::new(root.clone());
+        let open = OpenBuffers::new();
+        let r = resolver(&index, &open);
+
+        // La ruta real del archivo (p. ej. la que deja pegar una imagen desde
+        // otro programa) resuelve a su relativa dentro del proyecto.
+        let real = root.join("cap/mi archivo.md").to_string_lossy().into_owned();
+        let target = r.resolve(&real, "index.md");
+        assert_eq!(target.kind, TargetKind::Local);
+        assert_eq!(target.rel_path.as_deref(), Some("cap/mi archivo.md"));
+        // Forma percent-encoded de la misma ruta.
+        let encoded = real.replace(' ', "%20");
+        assert_eq!(
+            r.resolve(&encoded, "index.md").rel_path.as_deref(),
+            Some("cap/mi archivo.md")
+        );
+
+        // Un fichero cuyo nombre contiene `%20` literal: la forma decodificada
+        // (`bruta x.png`) no existe y no debe tapar a la literal.
+        fs::write(root.join("cap/bruta%20x.png"), [0x89, 0x50]).unwrap();
+        let real_bruta = root
+            .join("cap/bruta%20x.png")
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(
+            r.resolve(&real_bruta, "index.md").rel_path.as_deref(),
+            Some("cap/bruta%20x.png")
+        );
+
+        // Un archivo que EXISTE fuera del proyecto nunca se resuelve (§48):
+        // el motor no lee fuera de la raíz.
+        let fuera = temp_tree("absoluta-fuera");
+        fs::write(fuera.join("secreto.png"), [0x89]).unwrap();
+        let real_fuera = fuera
+            .join("secreto.png")
+            .to_string_lossy()
+            .into_owned();
+        assert!(
+            std::path::Path::new(&real_fuera).is_file(),
+            "el archivo exterior existe"
+        );
+        assert_eq!(
+            r.resolve(&real_fuera, "index.md").kind,
+            TargetKind::Missing,
+            "§48"
+        );
+        let _ = fs::remove_dir_all(&fuera);
+        assert_eq!(
+            r.resolve("/etc/passwd", "index.md").kind,
+            TargetKind::Missing,
+            "§48"
+        );
+        // `/x` sigue leyéndose primero como `x` desde la raíz del proyecto.
+        assert_eq!(
+            r.resolve("/cap/a.md", "index.md").rel_path.as_deref(),
+            Some("cap/a.md"),
+            "§17: prioridad de la lectura desde la raíz"
         );
         let _ = fs::remove_dir_all(&root);
     }
