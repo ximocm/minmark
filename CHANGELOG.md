@@ -9,7 +9,12 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 
 ## [Unreleased]
 
-Sin cambios pendientes de publicación.
+### Corregido
+
+- El parser interpretaba `::: tipo` y `$$` dentro de fences de código como
+  callouts y ecuaciones de bloque, en contra de §7.4.1 («código primero»). Los
+  fences de `` ` `` y `~` protegen ahora su contenido también frente a las
+  extensiones de bloque.
 
 ## [0.3.0] — 2026-10-20
 
