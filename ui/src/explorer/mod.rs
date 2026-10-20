@@ -96,7 +96,7 @@ impl ExplorerPane {
         on_open: Rc<dyn Fn(PathBuf)>,
         on_action: Rc<dyn Fn(ExplorerAction, Option<PathBuf>)>,
     ) -> Self {
-        let root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+        let root = minmark_fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
         let model: Arc<Mutex<TreeModel>> = Arc::new(Mutex::new(TreeModel::new(root.clone())));
         let store = gtk::gio::ListStore::new::<glib::BoxedAnyObject>();
 

@@ -220,7 +220,7 @@ fn fecha_local_iso() -> String {
 /// proyecto, porque `compose` rebasa los destinos a rutas relativas a ella
 /// (§20.4).
 pub fn base_uri(root: &Path) -> String {
-    let canonica = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let canonica = minmark_fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     format!(
         "{}/",
         gtk4::gio::File::for_path(canonica)
@@ -232,7 +232,7 @@ pub fn base_uri(root: &Path) -> String {
 /// Ruta comparable: canónica si se resuelve y la propia si no (dos grafías
 /// de un mismo fichero son el mismo fichero, §12.7).
 fn comparable(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    minmark_fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 /// Frontera §48 (B2, revisión PR #44): ¿`rel` — declarada en

@@ -284,7 +284,7 @@ impl SearchPanel {
     /// Fija la raíz del proyecto (§14.1). Al cambiar de raíz se limpian
     /// resultados e historial (las rutas relativas son de esa raíz, §17).
     pub fn set_root(&self, root: &Path) {
-        let root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+        let root = minmark_fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
         let cambio = self.core.root.borrow().as_ref() != Some(&root);
         *self.core.root.borrow_mut() = Some(root);
         if cambio {

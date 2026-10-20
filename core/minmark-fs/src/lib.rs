@@ -36,7 +36,7 @@ pub use ops::{
     apply_path_change, create_folder, create_markdown, duplicate, import_markdown, move_entry,
     plan_path_change, relative_path, trash, trash_to, wiki_links_active, ChangeOptions, PathChange,
 };
-pub use paths::{read_dir_entries, resolve_in_project, walk_tree, TreeEntry};
+pub use paths::{canonicalize, read_dir_entries, resolve_in_project, walk_tree, TreeEntry};
 pub use resolve::{LinkTarget, OpenBuffers, Resolver, TargetKind};
 pub use snapshots::{default_dir, SnapshotStore};
 #[cfg(target_os = "linux")]

@@ -41,6 +41,7 @@
 //! desde el hilo nativo del SO (§12.7: notificar, nunca recargar).
 
 use super::{coalesce, ChangeEvent, ChangeKind, Watcher};
+use crate::paths::canonicalize;
 use crate::FsError;
 use notify::event::{EventKind, ModifyKind};
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher as _};
@@ -102,7 +103,7 @@ impl NotifyWatcher {
             Some(p) if !p.as_os_str().is_empty() => p,
             _ => Path::new("."),
         };
-        let dir = std::fs::canonicalize(padre)?;
+        let dir = canonicalize(padre)?;
         Ok((dir.join(nombre), dir))
     }
 
@@ -289,7 +290,7 @@ impl Watcher for NotifyWatcher {
     }
 
     fn watch_tree(&mut self, root: &Path) -> Result<(), FsError> {
-        let raiz = std::fs::canonicalize(root).map_err(|source| FsError::Io {
+        let raiz = canonicalize(root).map_err(|source| FsError::Io {
             path: root.to_path_buf(),
             source,
         })?;
@@ -338,7 +339,7 @@ fn canonica_con_cola(ruta: &Path) -> Option<PathBuf> {
     let mut cola: Vec<std::ffi::OsString> = Vec::new();
     let mut actual = ruta;
     loop {
-        match std::fs::canonicalize(actual) {
+        match canonicalize(actual) {
             Ok(mut base) => {
                 for parte in cola.iter().rev() {
                     base.push(parte);

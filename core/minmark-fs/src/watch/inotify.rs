@@ -15,6 +15,7 @@
 //! [`crate::LocalFs::changed_externally`] (§48).
 
 use super::{coalesce, ChangeEvent, ChangeKind, Watcher};
+use crate::paths::canonicalize;
 use crate::FsError;
 use std::collections::{HashMap, HashSet};
 use std::ffi::{c_char, CString, OsString};
@@ -124,7 +125,7 @@ impl InotifyWatcher {
             Some(p) if !p.as_os_str().is_empty() => p,
             _ => Path::new("."),
         };
-        let dir = std::fs::canonicalize(parent)?;
+        let dir = canonicalize(parent)?;
         Ok((dir.join(&name), name, dir))
     }
 
@@ -148,7 +149,7 @@ impl InotifyWatcher {
     /// Los fallos puntuales (permisos, carreras de borrado) se ignoran: un
     /// directorio ilegible simplemente no emite.
     fn add_tree_dir_recursive(&mut self, dir: &Path) {
-        let Ok(dir) = std::fs::canonicalize(dir) else {
+        let Ok(dir) = canonicalize(dir) else {
             return;
         };
         if self.tree_dirs.contains_key(&dir) {
@@ -338,7 +339,7 @@ impl Watcher for InotifyWatcher {
     }
 
     fn watch_tree(&mut self, root: &Path) -> Result<(), FsError> {
-        let root = std::fs::canonicalize(root).map_err(|source| FsError::Io {
+        let root = canonicalize(root).map_err(|source| FsError::Io {
             path: root.to_path_buf(),
             source,
         })?;

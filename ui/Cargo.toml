@@ -29,7 +29,7 @@ webkit6 = "0.4"
 # de la vista nativa de GTK. `gdk4-macos` da la NSWindow de la superficie
 # (`v4_8` → `gdk_macos_surface_get_native_window`); el resto son los bindings
 # Objective-C de WebKit/AppKit y `block2` para los callbacks.
-[target.'cfg(macos)'.dependencies]
+[target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-foundation = "0.3"
 objc2-core-foundation = "0.3"

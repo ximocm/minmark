@@ -26,7 +26,7 @@
 
 use crate::index::ProjectIndex;
 use crate::ignore::IgnorePatterns;
-use crate::paths::walk_tree;
+use crate::paths::{canonicalize, walk_tree};
 use crate::{relative_path, resolve_in_project, write_atomic, FsError};
 use minmark_document::{Matcher, TextMatch};
 use std::collections::BTreeSet;
@@ -241,7 +241,7 @@ fn drive(
     cancel: &AtomicBool,
     mut emit: impl FnMut(SearchEvent) -> bool,
 ) -> Result<SearchStats, FsError> {
-    let root = std::fs::canonicalize(root).map_err(|source| FsError::Io {
+    let root = canonicalize(root).map_err(|source| FsError::Io {
         path: root.to_path_buf(),
         source,
     })?;
@@ -471,7 +471,7 @@ pub fn plan_replace(
     template: &str,
     files: &[ReplaceFile],
 ) -> Result<ReplacePlan, ReplaceError> {
-    let root = std::fs::canonicalize(root).map_err(|source| ReplaceError::Io {
+    let root = canonicalize(root).map_err(|source| ReplaceError::Io {
         path: root.to_path_buf(),
         source,
     })?;

@@ -29,7 +29,7 @@
 //! que usa la Preview: índice y Preview producen los mismos destinos.
 
 use crate::ignore::IgnorePatterns;
-use crate::paths::walk_tree;
+use crate::paths::{canonicalize, walk_tree};
 use crate::{relative_path, write_atomic, FsError};
 use minmark_document::find_markdown_references;
 use std::collections::{BTreeMap, BTreeSet};
@@ -122,7 +122,7 @@ impl ProjectIndex {
     /// deriva de la raíz canónica.
     pub fn default_path(root: &Path) -> Result<PathBuf, FsError> {
         let base = data_base()?;
-        let canon = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+        let canon = canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
         let key = canon.to_string_lossy();
         let mut hash: u64 = 0xcbf2_9ce4_8422_2325; // FNV-1a: std-only, estable.
         for byte in key.bytes() {
@@ -208,7 +208,7 @@ impl ProjectIndex {
         if lines.next() != Some(SIGNATURE) {
             return None;
         }
-        let root_canon = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+        let root_canon = canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
         for line in lines.by_ref() {
             if let Some(encoded) = line.strip_prefix("root ") {
                 if pct_decode(encoded) != root_canon.to_string_lossy() {
@@ -271,7 +271,7 @@ impl ProjectIndex {
     /// Los archivos no UTF-8 o ilegibles se omiten del índice (§12.5: no son
     /// documentos abribles; el índice nunca es la única copia §45).
     pub fn refresh(&mut self) -> Result<RefreshStats, FsError> {
-        let root = std::fs::canonicalize(&self.root).map_err(|source| FsError::Io {
+        let root = canonicalize(&self.root).map_err(|source| FsError::Io {
             path: self.root.clone(),
             source,
         })?;
@@ -436,7 +436,7 @@ mod tests {
         // `/var/folders/…` (enlace) y `parse` compara la cabecera `root`
         // contra `canonicalize` (`/private/var/folders/…`); serializar ya en
         // ese namespace mantiene el roundtrip. En Linux es byte-idéntico.
-        fs::canonicalize(&dir).unwrap()
+        canonicalize(&dir).unwrap()
     }
 
     fn project(tag: &str) -> PathBuf {

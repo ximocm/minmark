@@ -299,7 +299,7 @@ struct AppCmds {
     sidebar: Option<Rc<Sidebar>>,
     /// Watcher del subárbol del proyecto (ISSUE-026, §46); `None` en
     /// standalone.
-    watcher: Option<Rc<RefCell<minmark_fs::InotifyWatcher>>>,
+    watcher: Option<Rc<RefCell<minmark_fs::NativeWatcher>>>,
     /// Composiciones del `.mdproject.toml` de la raíz (§20, ISSUE-022);
     /// vacías en ventanas standalone, donde las acciones de composición
     /// quedan deshabilitadas. Se redescubren al cambiar `.mdproject.toml`
@@ -1925,7 +1925,7 @@ impl Commands for AppCmds {
 /// Ruta comparable: canónica si se resuelve y la propia si no (§12.7: dos
 /// grafías de un mismo fichero son el mismo fichero).
 fn ruta_comparable(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    minmark_fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 /// Diálogo de error modal (§3.7: acciones observables).
@@ -2272,7 +2272,7 @@ fn build_window(app: &Application, scope: WindowScope, open_paths: &[PathBuf]) -
     let watcher = match &scope {
         WindowScope::Project(root) => {
             spawn_index_refresh(root.clone(), slot.clone());
-            match minmark_fs::InotifyWatcher::new() {
+            match minmark_fs::NativeWatcher::new() {
                 Ok(mut watcher) => {
                     if let Err(err) = minmark_fs::Watcher::watch_tree(&mut watcher, root) {
                         eprintln!("minmark: sin watching de proyecto: {err}");

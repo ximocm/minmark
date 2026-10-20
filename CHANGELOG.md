@@ -53,6 +53,17 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
   (macOS: `/var/folders/…` frente a `/private/var/folders/…`), incluida la
   síntesis de bajas cuando un directorio desaparece. Las ubicaciones y el
   comportamiento de Linux siguen siendo byte-idénticos.
+- Rutas de proyecto en Windows y compilación de la UI en Windows/macOS:
+  `minmark-fs` normaliza el namespace canónico eliminando el prefijo verbatim
+  de Windows (`\\?\C:\…` → `C:\…`, `\\?\UNC\…` → `\\servidor\…`), de modo que
+  las comparaciones por prefijo dejan de clasificar rutas internas del
+  proyecto como ajenas (§48); toda canonicalización del core y de la UI pasa
+  por esa vía única. El resolutor admite las rutas absolutas de Windows
+  (`C:\…`, `\\servidor\…`) como internas del filesystem y `has_scheme` ya no
+  toma la unidad `X:` por un esquema de URL. En la UI el watcher pasa a ser el
+  nativo multiplataforma, la tabla de dependencias de macOS se activa de verdad
+  (`cfg(target_os = "macos")`) y el host de WKWebView implementa el
+  subclaseado GTK y los marcadores de hilo principal que exige objc2.
 
 ## [0.3.0] — 2026-10-20
 

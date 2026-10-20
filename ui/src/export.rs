@@ -103,7 +103,7 @@ pub fn export_composed(
     root: &std::path::Path,
     meta: &DocumentMeta,
 ) -> Result<Vec<u8>, PdfError> {
-    let root = std::fs::canonicalize(root).map_err(PdfError::Io)?;
+    let root = minmark_fs::canonicalize(root).map_err(PdfError::Io)?;
     let assets = ast_assets(&mut ast, &root, &root)?;
     let ast = crate::academic::prepare_pdf(&ast, settings);
     TypstEngine.export_with_assets(&ast, settings, assets, meta)
@@ -119,7 +119,7 @@ pub fn paginated_preview_composed(
     root: &std::path::Path,
     meta: &DocumentMeta,
 ) -> Result<String, PdfError> {
-    let root = std::fs::canonicalize(root).map_err(PdfError::Io)?;
+    let root = minmark_fs::canonicalize(root).map_err(PdfError::Io)?;
     let mut copia = ast.clone();
     let assets = ast_assets(&mut copia, &root, &root)?;
     let copia = crate::academic::prepare_pdf(&copia, settings);
@@ -251,13 +251,13 @@ fn document_assets(
             std::collections::BTreeMap::new(),
         ));
     };
-    let base = std::fs::canonicalize(if base.as_os_str().is_empty() {
+    let base = minmark_fs::canonicalize(if base.as_os_str().is_empty() {
         std::path::Path::new(".")
     } else {
         base
     })
     .map_err(PdfError::Io)?;
-    let root = std::fs::canonicalize(root.unwrap_or(&base)).map_err(PdfError::Io)?;
+    let root = minmark_fs::canonicalize(root.unwrap_or(&base)).map_err(PdfError::Io)?;
     let mut ast = minmark_parser::parse_with(
         source,
         &minmark_parser::ParseOptions {

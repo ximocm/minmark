@@ -21,7 +21,7 @@
 //! de cita en TOML/YAML.
 
 use crate::ignore::IgnorePatterns;
-use crate::paths::{resolve_in_project, walk_tree};
+use crate::paths::{canonicalize, resolve_in_project, walk_tree};
 use crate::resolve::{has_scheme, split_fragment, wiki_name_matches};
 use crate::{write_atomic, FsError};
 use minmark_document::{
@@ -170,7 +170,7 @@ pub fn relative_path(from_dir: &Path, target: &Path) -> String {
 /// - colisión de nombres → renombrado `base-2.ext` (§18.3), nunca
 ///   sobrescritura (§3.7).
 pub fn import_markdown(root: &Path, src: &Path, dest_dir: &Path) -> Result<PathBuf, FsError> {
-    let src = std::fs::canonicalize(src).map_err(|source| FsError::Io {
+    let src = canonicalize(src).map_err(|source| FsError::Io {
         path: src.to_path_buf(),
         source,
     })?;
@@ -182,7 +182,7 @@ pub fn import_markdown(root: &Path, src: &Path, dest_dir: &Path) -> Result<PathB
             reason: "Import Markdown solo admite archivos .md/.markdown (§15)",
         });
     }
-    let root = std::fs::canonicalize(root).map_err(|source| FsError::Io {
+    let root = canonicalize(root).map_err(|source| FsError::Io {
         path: root.to_path_buf(),
         source,
     })?;
@@ -249,7 +249,7 @@ pub fn trash_to(trash_root: &Path, path: &Path) -> Result<(), FsError> {
     let target = numbered_path(&trash_root.join("files"), &stem, ext.as_deref());
     let trash_name = file_name_str(&target);
 
-    let absolute = std::fs::canonicalize(path).map_err(|source| FsError::Io {
+    let absolute = canonicalize(path).map_err(|source| FsError::Io {
         path: path.to_path_buf(),
         source,
     })?;
@@ -405,7 +405,7 @@ pub fn plan_path_change(
     to: &Path,
     options: ChangeOptions,
 ) -> Result<PathChange, FsError> {
-    let root = std::fs::canonicalize(root).map_err(|source| FsError::Io {
+    let root = canonicalize(root).map_err(|source| FsError::Io {
         path: root.to_path_buf(),
         source,
     })?;
@@ -848,7 +848,7 @@ mod tests {
         // `/var/folders/…` (enlace) y las operaciones devuelven
         // `/private/var/folders/…`; las expectativas se construyen sobre
         // esta raíz. En Linux es byte-idéntico.
-        fs::canonicalize(&dir).unwrap()
+        canonicalize(&dir).unwrap()
     }
 
     #[test]

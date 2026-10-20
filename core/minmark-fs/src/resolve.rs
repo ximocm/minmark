@@ -29,7 +29,7 @@
 
 use crate::ignore::IgnorePatterns;
 use crate::index::{IndexHeading, ProjectIndex};
-use crate::paths::resolve_in_project;
+use crate::paths::{canonicalize, resolve_in_project};
 use minmark_document::{find_anchor, find_link_definitions, normalize_label, Anchor};
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -145,6 +145,19 @@ impl<'a> Resolver<'a> {
         if path_part.is_empty() {
             // Fragmento del propio documento (§19.2).
             return self.resolve_in_doc(from_rel, fragment);
+        }
+        // Rutas absolutas del filesystem sin barra inicial (`C:\…`,
+        // `\\servidor\…` en Windows): no admiten interpretación relativa, se
+        // van directo a la tolerancia §17/§48 de abajo. En Unix esta rama no
+        // se activa (`is_absolute` ⟺ empieza por `/`), de modo que `/x` sigue
+        // probándose primero como `x` desde la raíz del proyecto.
+        if !path_part.starts_with('/') && Path::new(path_part).is_absolute() {
+            for rel in absolute_candidates(self.index.root(), path_part) {
+                if let Some(target) = self.resolve_file(&rel, fragment) {
+                    return target;
+                }
+            }
+            return LinkTarget::missing(fragment_owned);
         }
         for rel in path_candidates(path_part, from_rel) {
             if let Some(target) = self.resolve_file(&rel, fragment) {
@@ -356,10 +369,20 @@ pub fn split_fragment(dest: &str) -> (&str, &str) {
 }
 
 /// ¿Tiene esquema de URL (`https:`, `mailto:`…)? No es ruta interna.
+///
+/// Una sola letra antes de los dos puntos es la unidad de disco de Windows
+/// (`C:\ruta`, `C:/ruta`), no un esquema de URL: en Windows esas rutas son
+/// internas del filesystem (§17/§48), igual que `/ruta` en Unix.
 pub fn has_scheme(dest: &str) -> bool {
     let Some((prefix, _)) = dest.split_once(':') else {
         return false;
     };
+    // Unidad de Windows (`C:`…`Z:`): ningún esquema de URL tiene una sola
+    // letra; clasificarla como externa mandaría al resolutor una ruta real
+    // del filesystem a `External` en Windows.
+    if prefix.len() == 1 {
+        return false;
+    }
     !prefix.is_empty()
         && prefix
             .chars()
@@ -442,7 +465,7 @@ fn path_candidates(path_part: &str, from_rel: &str) -> Vec<String> {
 /// mostraba vía `file://`; así PDF, navegación y diagnósticos aplican el
 /// mismo criterio.
 fn absolute_candidates(root: &Path, path_part: &str) -> Vec<String> {
-    let Ok(root_canon) = std::fs::canonicalize(root) else {
+    let Ok(root_canon) = canonicalize(root) else {
         return Vec::new();
     };
     let decoded: String = path_part

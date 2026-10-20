@@ -142,10 +142,10 @@ fn resource_paths(layer: &mut ConfigLayer, base: Option<&Path>, boundary: Option
                     return;
                 };
                 let joined = base.join(&*text);
-                let resolved = std::fs::canonicalize(&joined).unwrap_or(joined);
+                let resolved = minmark_fs::canonicalize(&joined).unwrap_or(joined);
                 if let (Ok(root), Ok(file)) = (
-                    std::fs::canonicalize(boundary.unwrap_or(base)),
-                    std::fs::canonicalize(&resolved),
+                    minmark_fs::canonicalize(boundary.unwrap_or(base)),
+                    minmark_fs::canonicalize(&resolved),
                 ) {
                     if !file.starts_with(root) {
                         *text = format!("blocked://recurso fuera del ámbito: {text}");

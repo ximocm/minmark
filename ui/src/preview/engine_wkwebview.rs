@@ -44,7 +44,7 @@ use gtk4 as gtk;
 use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::subclass::prelude::*;
-use objc2::main_thread_marker::MainThreadMarker;
+use objc2::MainThreadMarker;
 use objc2::rc::{autoreleasepool, Retained};
 use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol, ProtocolObject};
 use objc2::{define_class, msg_send, ClassType, DefinedClass, MainThreadOnly};
@@ -179,7 +179,7 @@ impl Inner {
             eprintln!("minmark: WKWebView sin NSWindow de GTK; se reintenta en map/size-allocate");
             return;
         };
-        let Some(content) = window.content_view() else {
+        let Some(content) = window.contentView() else {
             eprintln!(
                 "minmark: WKWebView sin contentView de GTK; se reintenta en map/size-allocate"
             );
@@ -191,13 +191,13 @@ impl Inner {
         let configuration = unsafe { WKWebViewConfiguration::new(mtm) };
         let controller = unsafe { configuration.userContentController() };
         let web_view = unsafe {
-            WKWebView::initWithFrame_configuration(WKWebView::alloc(), CGRect::ZERO, &configuration)
+            WKWebView::initWithFrame_configuration(WKWebView::alloc(mtm), CGRect::ZERO, &configuration)
         };
 
         // El mismo puente objeta la política de navegación (veto + fin de
         // carga) y el canal de mensajes de enlaces.
-        let bridge = PreviewBridge::new(self.id);
-        unsafe { web_view.setNavigationDelegate(Some(ProtocolObject::from_ref(&bridge))) };
+        let bridge = PreviewBridge::new(self.id, mtm);
+        unsafe { web_view.setNavigationDelegate(Some(ProtocolObject::from_ref(&*bridge))) };
         // Nace oculta: el toplevel todavía no ha hecho `map`.
         web_view.setHidden(true);
         content.addSubview(&web_view);
@@ -309,6 +309,11 @@ mod imp {
     }
 
     impl ObjectImpl for PreviewHostObj {}
+
+    // Requerido por `ParentType = gtk::Box`: glib exige
+    // `gtk::Box: IsSubclassable<PreviewHostObj>` y esa impl solo existe para
+    // `T: BoxImpl` (paridad con `imp::Host` de `engine_webview2.rs`).
+    impl BoxImpl for PreviewHostObj {}
 
     impl WidgetImpl for PreviewHostObj {
         fn realize(&self) {
@@ -436,7 +441,7 @@ impl PreviewEngine for WkwebviewEngine {
         // WKWebView no expone captura «full document», diferencia conocida de
         // la evidencia de QA en macOS).
         let block: RcBlock<dyn Fn(*mut NSImage, *mut NSError)> =
-            RcBlock::new(move |image, error| {
+            RcBlock::new(move |image: *mut NSImage, error: *mut NSError| {
                 if image.is_null() || !error.is_null() {
                     eprintln!("minmark: takeSnapshot sin imagen");
                     return;
@@ -466,7 +471,7 @@ impl PreviewEngine for WkwebviewEngine {
         // Un fallo no panic dentro del bloque (paniquear atraviesa frames
         // ObjC); `done` queda false y la prueba lo detecta por su espera.
         let block: RcBlock<dyn Fn(*mut AnyObject, *mut NSError)> =
-            RcBlock::new(move |_value, error| {
+            RcBlock::new(move |_value: *mut AnyObject, error: *mut NSError| {
                 flag.set(error.is_null());
             });
         evaluate(&view, script, Some(&block));
@@ -483,7 +488,7 @@ impl PreviewEngine for WkwebviewEngine {
         // Paridad con `engine.rs`: número ⇒ Some(valor); error ⇒ panic allí y
         // None aquí (ver comentario de `eval_ok`).
         let block: RcBlock<dyn Fn(*mut AnyObject, *mut NSError)> =
-            RcBlock::new(move |value, error| {
+            RcBlock::new(move |value: *mut AnyObject, error: *mut NSError| {
                 if !error.is_null() || value.is_null() {
                     cell.set(None);
                     return;
@@ -572,7 +577,7 @@ fn place_view(view: &WKWebView, host: &PreviewHost) {
     let Some(window) = gtk_ns_window(host) else {
         return;
     };
-    let Some(content) = window.content_view() else {
+    let Some(content) = window.contentView() else {
         return;
     };
     let x = f64::from(bounds.x());
@@ -655,6 +660,10 @@ fn ns_to_string(value: &NSString) -> String {
 /// documento y solo en el marco principal, como `engine.rs`) en el controller
 /// compartido con la vista.
 fn install_link_bridge(controller: &WKUserContentController, bridge: &PreviewBridge) {
+    // `WKUserScript::alloc` exige el marcador de hilo principal, igual que la
+    // propia vista: el puente solo se instala desde el hilo de GTK.
+    let mtm = MainThreadMarker::new()
+        .expect("minmark: el puente de enlaces debe instalarse en el hilo principal");
     let name = NSString::from_str(LINK_HANDLER_NAME);
     // Quitar antes de añadir: repetir el nombre lanza una excepción ObjC.
     unsafe { controller.removeScriptMessageHandlerForName(&name) };
@@ -662,7 +671,7 @@ fn install_link_bridge(controller: &WKUserContentController, bridge: &PreviewBri
     let script = NSString::from_str(LINK_INTERCEPTION_SCRIPT);
     let user_script = unsafe {
         WKUserScript::initWithSource_injectionTime_forMainFrameOnly(
-            WKUserScript::alloc(),
+            WKUserScript::alloc(mtm),
             &script,
             WKUserScriptInjectionTime::AtDocumentEnd,
             true,
@@ -767,9 +776,10 @@ struct BridgeIvars {
 }
 
 impl PreviewBridge {
-    /// Instancia e inicializa el puente con la id de su [`Inner`].
-    fn new(inner_id: u64) -> Retained<Self> {
-        let this = Self::alloc().set_ivars(BridgeIvars { inner_id });
+    /// Instancia e inicializa el puente con la id de su [`Inner`]. Como toda
+    /// clase `MainThreadOnly`, `alloc` exige el [`MainThreadMarker`].
+    fn new(inner_id: u64, mtm: MainThreadMarker) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(BridgeIvars { inner_id });
         unsafe { msg_send![super(this), init] }
     }
 }
