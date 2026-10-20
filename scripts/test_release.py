@@ -273,8 +273,8 @@ class WindowsPackage(unittest.TestCase):
 
 
     def test_zip_member_clamps_pre_1980_timestamps(self):
-        # El formato ZIP no admite fechas anteriores a 1980 y los artefactos
-        # del toolchain pueden traerlas: se acotan sin romper el empaquetado.
+        # El formato ZIP no admite fechas anteriores a 1980 y los LICENSE del
+        # registro de crates las traen: se acotan sin romper el empaquetado.
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "raro.dll"
             path.write_bytes(b"contenido")

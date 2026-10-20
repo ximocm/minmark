@@ -359,9 +359,9 @@ def ensure_wix_extension(wix, name, version):
                 f"Cannot add WiX extension {ref}:\n{add.stdout}\n{add.stderr}")
 
 
-# El formato ZIP no admite fechas anteriores a 1980 y algunos artefactos del
-# toolchain las traen (p. ej. los DLL del árbol de gvsbuild, que `shutil.copy2`
-# copia conservando su mtime).
+# El formato ZIP no admite fechas anteriores a 1980 y el stage puede traerlas:
+# los LICENSE de crates.io llegan con mtimes de 1970/1973 (se copian con
+# `shutil.copy2`, que conserva la fecha de origen).
 ZIP_FECHA_MINIMA = (1980, 1, 1, 0, 0, 0)
 
 
