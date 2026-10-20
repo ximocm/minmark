@@ -10,8 +10,10 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
+import zipfile
 import plistlib
 from xml.dom import minidom
 
@@ -268,6 +270,27 @@ class WindowsPackage(unittest.TestCase):
             stage.mkdir()
             with self.assertRaises(SystemExit):
                 self.module.stage_notices(stage, metadata)
+
+
+    def test_zip_member_clamps_pre_1980_timestamps(self):
+        # El formato ZIP no admite fechas anteriores a 1980 y los artefactos
+        # del toolchain pueden traerlas: se acotan sin romper el empaquetado.
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "raro.dll"
+            path.write_bytes(b"contenido")
+            os.utime(path, (0, 0))
+            info, data = self.module.zip_member(path, "pkg/raro.dll")
+        self.assertEqual(info.date_time, (1980, 1, 1, 0, 0, 0))
+        self.assertEqual(info.compress_type, zipfile.ZIP_DEFLATED)
+        self.assertEqual(data, b"contenido")
+
+    def test_zip_member_keeps_current_timestamps(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "normal.dll"
+            path.write_bytes(b"ok")
+            info, _ = self.module.zip_member(path, "pkg/normal.dll")
+            self.assertEqual(info.date_time,
+                             time.localtime(path.stat().st_mtime)[:6])
 
 
 class MacosPackage(unittest.TestCase):

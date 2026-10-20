@@ -359,6 +359,28 @@ def ensure_wix_extension(wix, name, version):
                 f"Cannot add WiX extension {ref}:\n{add.stdout}\n{add.stderr}")
 
 
+# El formato ZIP no admite fechas anteriores a 1980 y algunos artefactos del
+# toolchain las traen (p. ej. los DLL del árbol de gvsbuild, que `shutil.copy2`
+# copia conservando su mtime).
+ZIP_FECHA_MINIMA = (1980, 1, 1, 0, 0, 0)
+
+
+def zip_member(path, arcname):
+    """(ZipInfo, contenido) de un archivo del stage, con la fecha acotada."""
+    st = path.stat()
+    try:
+        fecha = time.localtime(st.st_mtime)[:6]
+    except (OSError, ValueError, OverflowError):
+        fecha = ZIP_FECHA_MINIMA
+    if fecha < ZIP_FECHA_MINIMA:
+        print(f"Warning: {arcname} has timestamp {fecha}; using 1980-01-01")
+        fecha = ZIP_FECHA_MINIMA
+    info = zipfile.ZipInfo(arcname, fecha)
+    info.compress_type = zipfile.ZIP_DEFLATED
+    info.external_attr = (st.st_mode & 0xFFFF) << 16
+    return info, path.read_bytes()
+
+
 def wix_build(wix, args, cwd):
     result = subprocess.run([wix, "build", *args], cwd=str(cwd),
                             capture_output=True, text=True)
@@ -406,7 +428,9 @@ def main():
         with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zipped:
             for path in sorted(stage.rglob("*")):
                 if path.is_file():
-                    zipped.write(path, arcname=f"{name}/{path.relative_to(stage).as_posix()}")
+                    info, data = zip_member(
+                        path, f"{name}/{path.relative_to(stage).as_posix()}")
+                    zipped.writestr(info, data)
 
         installer = webview2_installer()
         wix = find_wix()
