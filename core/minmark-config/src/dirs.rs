@@ -103,8 +103,9 @@ pub fn config_dir_from(layout: Layout, env: &Env) -> Option<PathBuf> {
 /// [`data_dir`] con layout y entorno inyectados (§45.1: solo absolutos).
 pub fn data_dir_from(layout: Layout, env: &Env) -> Option<PathBuf> {
     match layout {
-        Layout::Xdg => absolute(env.xdg_data_home.clone())
-            .or_else(|| absolute(env.home.clone()).map(|home| home.join(".local").join("share"))),
+        Layout::Xdg => xdg_absolute(env.xdg_data_home.clone()).or_else(|| {
+            xdg_absolute(env.home.clone()).map(|home| home.join(".local").join("share"))
+        }),
         Layout::Windows => absolute(env.local_app_data.clone()),
         Layout::MacOs => application_support(&env.home),
     }
@@ -116,7 +117,7 @@ pub fn data_dir_from(layout: Layout, env: &Env) -> Option<PathBuf> {
 /// el comportamiento histórico byte-idéntico de `ui.ini`.
 pub fn state_dir_from(layout: Layout, env: &Env) -> Option<PathBuf> {
     match layout {
-        Layout::Xdg => absolute(env.xdg_state_home.clone()).or_else(|| {
+        Layout::Xdg => xdg_absolute(env.xdg_state_home.clone()).or_else(|| {
             env.home
                 .clone()
                 .map(|home| PathBuf::from(home).join(".local").join("state"))
@@ -127,9 +128,23 @@ pub fn state_dir_from(layout: Layout, env: &Env) -> Option<PathBuf> {
 }
 
 /// Valor de variable convertido a ruta solo si es absoluta (§45.1: una base
-/// relativa caería dentro del proyecto).
+/// relativa caería dentro del proyecto). Absolutitud según el host: la usan
+/// las ramas Windows y macOS, que sí corren en el host.
 fn absolute(value: Option<OsString>) -> Option<PathBuf> {
     value.map(PathBuf::from).filter(|path| path.is_absolute())
+}
+
+/// Absolutitud con semántica XDG (§45.1) para las ramas `Layout::Xdg`: la
+/// lógica XDG es POSIX, donde absoluta es «empieza por `/`», así que el
+/// comportamiento no depende del host (`Path::is_absolute` de Windows
+/// rechazaría `/home/ana`). `is_absolute` cubre además las rutas nativas del
+/// host con que los tests ejercitan la rama (`C:\tmp\…` en Windows); en
+/// Linux y macOS `/…` ya es absoluto, de modo que la rama sigue siendo
+/// byte-idéntica al comportamiento histórico.
+fn xdg_absolute(value: Option<OsString>) -> Option<PathBuf> {
+    value
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute() || path.starts_with("/"))
 }
 
 /// `~/Library/Application Support` en macOS, con `HOME` absoluto (§45.1).

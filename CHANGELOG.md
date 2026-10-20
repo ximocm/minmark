@@ -45,6 +45,14 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
   callouts y ecuaciones de bloque, en contra de §7.4.1 («código primero»). Los
   fences de `` ` `` y `~` protegen ahora su contenido también frente a las
   extensiones de bloque.
+- Portabilidad del core a Windows y macOS: la rama XDG de
+  `minmark_config::dirs` evalúa la absolutitud con semántica POSIX («empieza
+  por `/`») en cualquier host — antes `Path::is_absolute` de Windows rechazaba
+  bases XDG como `/home/ana` —, y `minmark-fs` fija el namespace canónico de
+  las raíces vigiladas y de las claves de evento del backend `notify`
+  (macOS: `/var/folders/…` frente a `/private/var/folders/…`), incluida la
+  síntesis de bajas cuando un directorio desaparece. Las ubicaciones y el
+  comportamiento de Linux siguen siendo byte-idénticos.
 
 ## [0.3.0] — 2026-10-20
 

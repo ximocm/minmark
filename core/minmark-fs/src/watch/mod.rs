@@ -113,10 +113,16 @@ mod tests {
     use std::thread;
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-    /// Cota de espera de eventos: inotify entrega ya en el primer `poll` y
-    /// los backends de Windows/macOS entregan desde su hilo nativo casi de
-    /// inmediato (latencia FSEvents 0); el margen cubre cargas de CI.
-    const ESPERA: Duration = Duration::from_secs(10);
+    /// Cota total de espera de eventos: inotify entrega ya en el primer `poll`
+    /// y los backends de Windows/macOS entregan desde su hilo nativo casi de
+    /// inmediato (latencia FSEvents 0); el margen cubre cargas de CI, donde
+    /// FSEvents puede arrastrar la entrega más de lo habitual. Siempre
+    /// finita: ningún test duerme sin cota.
+    const ESPERA: Duration = Duration::from_secs(20);
+
+    /// Cota de cada intento de [`esperar_reintentando`]; el resto de la cota
+    /// total `ESPERA` queda para los reintentos.
+    const INTENTO: Duration = Duration::from_secs(5);
 
     struct TestDir(PathBuf);
 
@@ -152,6 +158,28 @@ mod tests {
         events[0].kind
     }
 
+    /// Un intento de espera hasta `limite`: acumula (coalescidos por ruta
+    /// como en un `poll`) hasta que `espera` se cumple o se agota la cota,
+    /// con lo acumulado y si se cumplió.
+    fn intento(
+        watcher: &mut NativeWatcher,
+        limite: Instant,
+        espera: impl Fn(&[ChangeEvent]) -> bool,
+    ) -> (Vec<ChangeEvent>, bool) {
+        let mut acumulados: Vec<ChangeEvent> = Vec::new();
+        loop {
+            acumulados.extend(watcher.poll().unwrap());
+            acumulados = coalesce(acumulados);
+            if espera(&acumulados) {
+                return (acumulados, true);
+            }
+            if Instant::now() >= limite {
+                return (acumulados, false);
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
     /// `poll` hasta que `espera` se cumple sobre los eventos acumulados
     /// (coalescidos por ruta como en un `poll`), o falla con lo acumulado.
     ///
@@ -162,19 +190,40 @@ mod tests {
         watcher: &mut NativeWatcher,
         espera: impl Fn(&[ChangeEvent]) -> bool,
     ) -> Vec<ChangeEvent> {
+        let (acumulados, cumplida) = intento(watcher, Instant::now() + ESPERA, espera);
+        assert!(
+            cumplida,
+            "sin los eventos esperados; acumulados: {acumulados:?}"
+        );
+        acumulados
+    }
+
+    /// Como [`esperar`] pero con reintento acotado de `operacion`: en
+    /// macOS/FSEvents puede arrastrarse un `Created` tardío de la operación
+    /// anterior y `coalesce` lo fundiría con el `Modified` posterior (el alta
+    /// gana, §12.7/ISSUE-026), en cuyo caso ni ampliar la espera bastaría.
+    /// Cada intento descarta sus acumulados — lo tardío queda consumido — y
+    /// repite la operación, siempre dentro de la cota total `ESPERA`
+    /// (acotado, sin esperas libres).
+    fn esperar_reintentando(
+        watcher: &mut NativeWatcher,
+        mut operacion: impl FnMut(),
+        espera: impl Fn(&[ChangeEvent]) -> bool,
+    ) -> Vec<ChangeEvent> {
         let fin = Instant::now() + ESPERA;
-        let mut acumulados: Vec<ChangeEvent> = Vec::new();
         loop {
-            acumulados.extend(watcher.poll().unwrap());
-            acumulados = coalesce(acumulados);
-            if espera(&acumulados) {
+            operacion();
+            let (acumulados, cumplida) =
+                intento(watcher, (Instant::now() + INTENTO).min(fin), &espera);
+            if cumplida {
                 return acumulados;
             }
             assert!(
                 Instant::now() < fin,
                 "sin los eventos esperados; acumulados: {acumulados:?}"
             );
-            thread::sleep(Duration::from_millis(10));
+            // Cota del intento agotada: se consume lo tardío y se repite.
+            drenar(watcher);
         }
     }
 
@@ -327,11 +376,18 @@ mod tests {
         );
         drenar(&mut watcher);
 
-        fs::write(&path, "cambiado\n").unwrap();
-        let events = esperar(&mut watcher, |evs| {
-            evs.iter()
-                .any(|e| e.kind == ChangeKind::Modified && e.path.ends_with("nuevo.md"))
-        });
+        // Reintento acotado: un `Created` tardío de la creación se fundiría
+        // con este `Modified` en `coalesce` (el alta gana, ISSUE-026), así
+        // que, si una cota de intento se agota, se repite la escritura con
+        // acumulados propios. La primera escritura la hace el propio helper.
+        let events = esperar_reintentando(
+            &mut watcher,
+            || fs::write(&path, "cambiado\n").unwrap(),
+            |evs| {
+                evs.iter()
+                    .any(|e| e.kind == ChangeKind::Modified && e.path.ends_with("nuevo.md"))
+            },
+        );
         assert!(
             events
                 .iter()

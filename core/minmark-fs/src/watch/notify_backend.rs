@@ -26,6 +26,17 @@
 //!   inotify: la red de seguridad de §12.7/§48 es la huella de
 //!   [`crate::LocalFs::changed_externally`].
 //!
+//! Namespace de rutas: al crear un watch (`watch`, `watch_tree`) la raíz se
+//! canónica (`std::fs::canonicalize`), y la clave de cada evento se
+//! normaliza a ese mismo namespace aunque el directorio del evento ya no
+//! exista (ancestro existente más profundo + cola perdida). Así la síntesis
+//! de bajas cuando un directorio vigilado desaparece (`Remove` sobre un
+//! directorio) y la protección de la raíz de un árbol en `unwatch` comparan
+//! siempre canónico contra canónico, sea cual sea el namespace que el
+//! llamante o el backend pasaran — en macOS `temp_dir()` es `/var/folders/…`
+//! (enlace) y `std::fs::canonicalize`/FSEvents resuelven
+//! `/private/var/folders/…`.
+//!
 //! `poll` solo drena lo disponible en el canal sin bloquear: la entrega llega
 //! desde el hilo nativo del SO (§12.7: notificar, nunca recargar).
 
@@ -100,9 +111,13 @@ impl NotifyWatcher {
         self.arboles.iter().any(|raiz| ruta.starts_with(raiz))
     }
 
-    /// Clave canónica de una ruta de evento (si el directorio padre ya no
-    /// existe, se usa la ruta tal cual: los backends entregan rutas ya
-    /// canónicas en ese caso).
+    /// Clave canónica de una ruta de evento: directorio padre resuelto al
+    /// namespace canónico + nombre, el mismo namespace en que se registró el
+    /// watch al crearse. Si el padre ya no existe (borrado en cascada), se
+    /// resuelve el ancestro existente más profundo y se re-appenda la cola
+    /// ([`canonica_con_cola`]), en vez de dejar la ruta tal cual, para que la
+    /// clave siga coincidiendo con las de registro sin importar el namespace
+    /// que el backend entregue.
     fn clave_de(ruta: &Path) -> PathBuf {
         let Some(nombre) = ruta.file_name() else {
             return ruta.to_path_buf();
@@ -111,9 +126,9 @@ impl NotifyWatcher {
             Some(p) if !p.as_os_str().is_empty() => p,
             _ => return ruta.to_path_buf(),
         };
-        match std::fs::canonicalize(padre) {
-            Ok(dir) => dir.join(nombre),
-            Err(_) => ruta.to_path_buf(),
+        match canonica_con_cola(padre) {
+            Some(dir) => dir.join(nombre),
+            None => ruta.to_path_buf(),
         }
     }
 
@@ -313,4 +328,27 @@ impl Watcher for NotifyWatcher {
 /// con la semántica de error de E/S del resto de la interfaz (§46).
 fn io_error(source: notify::Error) -> io::Error {
     io::Error::other(source)
+}
+
+/// Resuelve `ruta` al namespace canónico (`std::fs::canonicalize`) aunque ya
+/// no exista: canónica el ancestro existente más profundo y re-appenda la
+/// cola perdida (mismo criterio que `crate::paths` para destinos aún
+/// inexistentes). `None` si no hay ancestro canónico (p. ej. relativa).
+fn canonica_con_cola(ruta: &Path) -> Option<PathBuf> {
+    let mut cola: Vec<std::ffi::OsString> = Vec::new();
+    let mut actual = ruta;
+    loop {
+        match std::fs::canonicalize(actual) {
+            Ok(mut base) => {
+                for parte in cola.iter().rev() {
+                    base.push(parte);
+                }
+                return Some(base);
+            }
+            Err(_) => {
+                cola.push(actual.file_name()?.to_os_string());
+                actual = actual.parent()?;
+            }
+        }
+    }
 }

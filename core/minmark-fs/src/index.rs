@@ -432,7 +432,11 @@ mod tests {
         ));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
-        dir
+        // Namespace canónico una sola vez: en macOS `temp_dir()` es
+        // `/var/folders/…` (enlace) y `parse` compara la cabecera `root`
+        // contra `canonicalize` (`/private/var/folders/…`); serializar ya en
+        // ese namespace mantiene el roundtrip. En Linux es byte-idéntico.
+        fs::canonicalize(&dir).unwrap()
     }
 
     fn project(tag: &str) -> PathBuf {

@@ -844,7 +844,11 @@ mod tests {
             std::env::temp_dir().join(format!("minmark-ops-{tag}-{}-{nanos}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
-        dir
+        // Namespace canónico una sola vez: en macOS `temp_dir()` es
+        // `/var/folders/…` (enlace) y las operaciones devuelven
+        // `/private/var/folders/…`; las expectativas se construyen sobre
+        // esta raíz. En Linux es byte-idéntico.
+        fs::canonicalize(&dir).unwrap()
     }
 
     #[test]
