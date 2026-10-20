@@ -11,13 +11,57 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 
 ### Añadido
 
+- Fase 6: composiciones multiarchivo declaradas en `.mdproject.toml`
+  (`[[composition]]`), con Preview combinado (continuo o paginado) y exportación
+  de un único PDF desde **Project → Preview Composition** y **File → Export
+  Composition PDF**. Enlaces, referencias cruzadas y numeración entre archivos
+  incluidos se resuelven como internos del documento final; los niveles de
+  heading se preservan y `page_break_between_files` separa archivos. Documentación:
+  [Composiciones](docs/COMPOSITIONS.md).
+- Cabeceras y pies de página configurables (`pdf_header`/`pdf_footer`) con las
+  variables `{title}`, `{author}`, `{project}`, `{chapter}`, `{page}`, `{pages}`
+  y `{date}`, posición de número de página en las seis ubicaciones de §32.8 y
+  tamaño de página Custom en mm configurable.
+- Fuentes base incluidas (sans-serif, serif y monoespaciada) sin depender de las
+  fuentes del sistema en PDF, Preview paginado y matemáticas; `{{pagebreak}}`
+  muestra un separador discreto en el modo Visual.
 - Fase 5: ecuaciones LaTeX compuestas, bibliografía BibTeX/CSL local, citas y
   autocompletado, notas al pie, numeración académica y TOC.
 - Preview paginado comparte la composición de páginas, notas y TOC del PDF.
 - Fixtures, suite y [registro de QA académica](docs/qa/registro-ejecucion.md).
+- Exportación PDF con el ajuste de tablas §35.2 (ISSUE-027): una tabla que no
+  cabe se reduce proporcionalmente hasta `table_min_font_pt` (defecto 8 pt) sin
+  perder el reparto multipágina ni el caption debajo; si ni siquiera el suelo
+  cabe, la exportación se detiene nombrando la tabla problemática —caption
+  expandido, ID o nº de orden por orden de documento— con el mensaje
+  `error de composición PDF: panicked with: "<tabla>: no cabe en el ancho
+  disponible con table_min_font_pt=8pt (§35.2)"` en lugar de recortarla.
+  Una tabla que ya cabe nunca se amplía, aunque el cuerpo esté por debajo del
+  suelo. Los anchos se miden siempre a la tipografía del cuerpo (sin heredar
+  la medida de notas al pie) y como runs sin quiebre que solo parten en
+  espacio/tab ASCII; el reparto de columnas se emite con anchos calculados en
+  Typst que respetan la mínima por columna (Typst 0.13.1 no admite `minmax`),
+  de modo que ningún token inseparable sale del área de texto. Documentación:
+  [Composiciones](docs/COMPOSITIONS.md).
+
+### Cambiado
+
+- El editor ajusta visualmente las líneas largas al ancho de la vista
+  (`WrapMode::WordChar`): el texto se parte solo en pantalla, sin insertar
+  saltos de línea en el documento y sin scroll horizontal. Es un cambio solo
+  visual sobre el `wrap-mode` `GTK_WRAP_NONE` de §34.2 en la vista de edición;
+  Preview y PDF no cambian.
 
 ### Corregido
 
+- La exportación PDF se detenía con «No se puede resolver la imagen: …» cuando
+  el documento referenciaba un recurso por su ruta absoluta del filesystem
+  (p. ej. `/home/…/imagen.png`), aunque el Preview la mostraba bien: el
+  resolutor interpreta ahora una ruta absoluta que cae dentro del proyecto
+  como su path relativo (§17/§48, symlinks incluidos) y sigue marcando
+  `Missing` todo lo que sale de la raíz. La lectura `/x` = `x` desde la raíz
+  del proyecto conserva su prioridad; navegación y diagnósticos de enlaces
+  aplican el mismo criterio que Preview y PDF.
 - El autocompletado expone la sugerencia seleccionada al lector de pantalla,
   conserva el foco del editor y restaura su nombre accesible al cerrar el popup.
 - Tabla PDF de varias columnas, composición de fracciones y aislamiento de

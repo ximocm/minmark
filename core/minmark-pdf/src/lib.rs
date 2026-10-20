@@ -13,6 +13,7 @@
 //! - Math: LaTeX → Typst con el subconjunto de ADR-002 ([`minmark_math`]);
 //!   fuera del subconjunto, marcador visible (NFR-026).
 
+mod fit;
 mod generate;
 mod world;
 

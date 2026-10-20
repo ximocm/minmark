@@ -1,0 +1,1405 @@
+[
+  {
+    "showing": false,
+    "path": [],
+    "role": "application",
+    "name": "minmark",
+    "focused": false,
+    "selected": false
+  },
+  {
+    "showing": true,
+    "path": [
+      0
+    ],
+    "role": "frame",
+    "name": "academic.md — minmark · fixture",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      1450,
+      930
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0
+    ],
+    "role": "panel",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      1450,
+      930
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0
+    ],
+    "role": "menu bar",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      1450,
+      26
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "role": "menu item",
+    "name": "File",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      40,
+      26
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "role": "label",
+    "name": "File",
+    "focused": false,
+    "selected": false,
+    "text": "File",
+    "caret": 0,
+    "rect": [
+      0,
+      0,
+      24,
+      18
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      1
+    ],
+    "role": "menu item",
+    "name": "Edit",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      43,
+      26
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      1,
+      0
+    ],
+    "role": "label",
+    "name": "Edit",
+    "focused": false,
+    "selected": false,
+    "text": "Edit",
+    "caret": 0,
+    "rect": [
+      0,
+      0,
+      27,
+      18
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      2
+    ],
+    "role": "menu item",
+    "name": "View",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      49,
+      26
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      2,
+      0
+    ],
+    "role": "label",
+    "name": "View",
+    "focused": false,
+    "selected": false,
+    "text": "View",
+    "caret": 0,
+    "rect": [
+      0,
+      0,
+      33,
+      18
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      3
+    ],
+    "role": "menu item",
+    "name": "Help",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      47,
+      26
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      3,
+      0
+    ],
+    "role": "label",
+    "name": "Help",
+    "focused": false,
+    "selected": false,
+    "text": "Help",
+    "caret": 0,
+    "rect": [
+      0,
+      0,
+      31,
+      18
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      1
+    ],
+    "role": "panel",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      1450,
+      34
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      1,
+      0
+    ],
+    "role": "push button",
+    "name": "Sin título 1",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      105,
+      34
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      1,
+      0,
+      0
+    ],
+    "role": "label",
+    "name": "Sin título 1",
+    "focused": false,
+    "selected": false,
+    "text": "Sin título 1",
+    "caret": 0,
+    "rect": [
+      0,
+      0,
+      71,
+      24
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      1,
+      1
+    ],
+    "role": "push button",
+    "name": "academic.md",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      124,
+      34
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      1,
+      1,
+      0
+    ],
+    "role": "label",
+    "name": "academic.md",
+    "focused": false,
+    "selected": false,
+    "text": "academic.md",
+    "caret": 0,
+    "rect": [
+      0,
+      0,
+      90,
+      24
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2
+    ],
+    "role": "panel",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      1450,
+      870
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      0
+    ],
+    "role": "panel",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      419,
+      870
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      0,
+      0
+    ],
+    "role": "panel",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      419,
+      870
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      0,
+      0,
+      0
+    ],
+    "role": "panel",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      407,
+      26
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      0,
+      0,
+      0,
+      0
+    ],
+    "role": "check box",
+    "name": "Show All Files",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      118,
+      26
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "role": "panel",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      16,
+      16
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      0,
+      0,
+      0,
+      0,
+      1
+    ],
+    "role": "label",
+    "name": "Show All Files",
+    "focused": false,
+    "selected": false,
+    "text": "Show All Files",
+    "caret": 0,
+    "rect": [
+      0,
+      0,
+      90,
+      18
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      0,
+      0,
+      0,
+      1
+    ],
+    "role": "check box",
+    "name": "Show Hidden Files",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      148,
+      26
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      0,
+      0,
+      0,
+      1,
+      0
+    ],
+    "role": "panel",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      16,
+      16
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      0,
+      0,
+      0,
+      1,
+      1
+    ],
+    "role": "label",
+    "name": "Show Hidden Files",
+    "focused": false,
+    "selected": false,
+    "text": "Show Hidden Files",
+    "caret": 0,
+    "rect": [
+      0,
+      0,
+      120,
+      18
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      0,
+      0,
+      1
+    ],
+    "role": "scroll pane",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      419,
+      836
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      0,
+      0,
+      1,
+      0
+    ],
+    "role": "list",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      419,
+      836
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      0,
+      0,
+      1,
+      0,
+      0
+    ],
+    "role": "list item",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      419,
+      38
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0
+    ],
+    "role": "push button",
+    "name": "  academic.md",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      415,
+      34
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0
+    ],
+    "role": "label",
+    "name": "  academic.md",
+    "focused": false,
+    "selected": false,
+    "text": "  academic.md",
+    "caret": 0,
+    "rect": [
+      0,
+      0,
+      395,
+      24
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      0,
+      0,
+      1,
+      0,
+      1
+    ],
+    "role": "list item",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      419,
+      38
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      0,
+      0,
+      1,
+      0,
+      1,
+      0
+    ],
+    "role": "push button",
+    "name": "  author-year.csl",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      415,
+      34
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      0,
+      0,
+      1,
+      0,
+      1,
+      0,
+      0
+    ],
+    "role": "label",
+    "name": "  author-year.csl",
+    "focused": false,
+    "selected": false,
+    "text": "  author-year.csl",
+    "caret": 0,
+    "rect": [
+      0,
+      0,
+      395,
+      24
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      0,
+      0,
+      1,
+      0,
+      2
+    ],
+    "role": "list item",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      419,
+      38
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      0,
+      0,
+      1,
+      0,
+      2,
+      0
+    ],
+    "role": "push button",
+    "name": "  beta.md",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      415,
+      34
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      0,
+      0,
+      1,
+      0,
+      2,
+      0,
+      0
+    ],
+    "role": "label",
+    "name": "  beta.md",
+    "focused": false,
+    "selected": false,
+    "text": "  beta.md",
+    "caret": 0,
+    "rect": [
+      0,
+      0,
+      395,
+      24
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      0,
+      0,
+      1,
+      0,
+      3
+    ],
+    "role": "list item",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      419,
+      38
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      0,
+      0,
+      1,
+      0,
+      3,
+      0
+    ],
+    "role": "push button",
+    "name": "  bravo.md",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      415,
+      34
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      0,
+      0,
+      1,
+      0,
+      3,
+      0,
+      0
+    ],
+    "role": "label",
+    "name": "  bravo.md",
+    "focused": false,
+    "selected": false,
+    "text": "  bravo.md",
+    "caret": 0,
+    "rect": [
+      0,
+      0,
+      395,
+      24
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      0,
+      0,
+      1,
+      0,
+      4
+    ],
+    "role": "list item",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      419,
+      38
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      0,
+      0,
+      1,
+      0,
+      4,
+      0
+    ],
+    "role": "push button",
+    "name": "  extra.bib",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      415,
+      34
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      0,
+      0,
+      1,
+      0,
+      4,
+      0,
+      0
+    ],
+    "role": "label",
+    "name": "  extra.bib",
+    "focused": false,
+    "selected": false,
+    "text": "  extra.bib",
+    "caret": 0,
+    "rect": [
+      0,
+      0,
+      395,
+      24
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      0,
+      0,
+      1,
+      0,
+      5
+    ],
+    "role": "list item",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      419,
+      38
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      0,
+      0,
+      1,
+      0,
+      5,
+      0
+    ],
+    "role": "push button",
+    "name": "  main.md",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      415,
+      34
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      0,
+      0,
+      1,
+      0,
+      5,
+      0,
+      0
+    ],
+    "role": "label",
+    "name": "  main.md",
+    "focused": false,
+    "selected": false,
+    "text": "  main.md",
+    "caret": 0,
+    "rect": [
+      0,
+      0,
+      395,
+      24
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      0,
+      0,
+      1,
+      0,
+      6
+    ],
+    "role": "list item",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      419,
+      38
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      0,
+      0,
+      1,
+      0,
+      6,
+      0
+    ],
+    "role": "push button",
+    "name": "  references.bib",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      415,
+      34
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      0,
+      0,
+      1,
+      0,
+      6,
+      0,
+      0
+    ],
+    "role": "label",
+    "name": "  references.bib",
+    "focused": false,
+    "selected": false,
+    "text": "  references.bib",
+    "caret": 0,
+    "rect": [
+      0,
+      0,
+      395,
+      24
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      1
+    ],
+    "role": "panel",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      5,
+      870
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      2
+    ],
+    "role": "panel",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      1026,
+      870
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      2,
+      0
+    ],
+    "role": "panel",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      640,
+      870
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      2,
+      0,
+      0
+    ],
+    "role": "scroll pane",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      640,
+      870
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      2,
+      0,
+      0,
+      0
+    ],
+    "role": "text",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "text": "---\nbibliography: [references.bib, extra.bib]\nheading_numbering: true\ncounter_numbering: by_chapter\ntoc_max_level: 3\nlanguage: es\n---\n{{toc}}\n\n# Energía {#energy}\n\nCita simple [@smith2025], múltiple [@smith2025; @jones2024] y locator [@smit",
+    "caret": 0,
+    "rect": [
+      0,
+      0,
+      640,
+      870
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      2,
+      0,
+      0,
+      1
+    ],
+    "role": "scroll bar",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      640,
+      6
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      2,
+      0,
+      0,
+      1,
+      0
+    ],
+    "role": "panel",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      640,
+      5
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      2,
+      0,
+      0,
+      2
+    ],
+    "role": "scroll bar",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      6,
+      870
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      2,
+      0,
+      0,
+      2,
+      0
+    ],
+    "role": "panel",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      5,
+      870
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      2,
+      1
+    ],
+    "role": "panel",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      4,
+      870
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      2,
+      2
+    ],
+    "role": "scroll pane",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      382,
+      870
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      2,
+      2,
+      0
+    ],
+    "role": "panel",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      382,
+      870
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      2,
+      2,
+      0,
+      0
+    ],
+    "role": "panel",
+    "name": "",
+    "focused": true,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      382,
+      870
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      2,
+      2,
+      2,
+      0,
+      0,
+      0
+    ],
+    "role": "text",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "text": "\t",
+    "caret": 1,
+    "rect": [
+      0,
+      0,
+      0,
+      0
+    ]
+  }
+]

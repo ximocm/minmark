@@ -31,9 +31,13 @@ Windows está planificado; macOS no es una plataforma soportada actualmente.
 - Componer ecuaciones LaTeX, usar bibliografía `.bib` y CSL, completar citas,
   generar TOC y notas al pie en Preview continuo/paginado y PDF.
   Consulta [Academic](docs/ACADEMIC.md) y su [registro de QA](docs/qa/registro-ejecucion.md).
+- Combinar varios `.md` en una composición con Preview completo, referencias y
+  numeración entre archivos, cabeceras/pies y un único PDF. Consulta
+  [Composiciones](docs/COMPOSITIONS.md).
 
-La exportación PDF está disponible en **File → Export PDF** (`Ctrl+E`).
-Las composiciones de varios documentos y otras
+La exportación PDF está disponible en **File → Export PDF** (`Ctrl+E`) y la de
+composiciones en **File → Export Composition PDF**, con su Preview en
+**Project → Preview Composition**. Otras
 funciones de la especificación siguen pendientes. Consulta el
 [changelog](CHANGELOG.md) para conocer los cambios implementados y la pestaña
 [Issues de GitHub](https://github.com/ximocm/minmark/issues) para seguir el trabajo pendiente.

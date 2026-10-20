@@ -366,19 +366,16 @@ fn dispatch(cmd: Command, host: &dyn Commands) {
     }
 }
 
-/// Conecta `gio::SimpleAction`s de la ventana con `host` y fija los aceleradores.
+/// Construye el grupo de acciones `win.*` de la ventana: cada comando se
+/// registra sin parámetro en un [`gio::SimpleActionGroup`] insertado con el
+/// prefijo «win» (los `action_id` §36 son nombres de acción detallados
+/// `win.*`).
 ///
-/// Cada comando se registra sin parámetro en un `gio::SimpleActionGroup`
-/// insertado con el prefijo «win» (los `action_id` §36 son nombres de acción
-/// detallados `win.*`). `View(ViewMode)` usa tres acciones simples
-/// `win.view-editor|split|preview` (forma simple verificada en gtk4 0.9; la
-/// variante con target sobre `glib::Variant` no aporta nada aquí). Los
-/// aceleradores §39 se fijan con `gtk::Application::set_accels_for_action`.
-pub fn install_actions<W: IsA<gtk::Window>>(
-    window: &W,
-    app: &gtk::Application,
-    host: Rc<dyn Commands>,
-) {
+/// §20/ISSUE-022: sin proyecto con composiciones el ítem queda deshabilitado
+/// (también en la paleta §38: la misma acción `win.*`). Aislado de la
+/// ventana para poder construirlo y verificarlo sin display (patrón
+/// [`build_menubar`]); [`install_actions`] lo inserta en la ventana.
+pub fn action_group(host: &Rc<dyn Commands>) -> gio::SimpleActionGroup {
     let group = gio::SimpleActionGroup::new();
     for &cmd in ALL_COMMANDS {
         let name = cmd
@@ -386,21 +383,58 @@ pub fn install_actions<W: IsA<gtk::Window>>(
             .strip_prefix("win.")
             .expect("los action_id usan el prefijo «win.» (§36)");
         let action = gio::SimpleAction::new(name, None);
-        // §20/ISSUE-022: sin proyecto con composiciones el ítem queda
-        // deshabilitado (también en la paleta §38: la misma acción `win.*`).
         if cmd.requires_composition() {
             action.set_enabled(host.compositions_available());
         }
-        let host = Rc::clone(&host);
+        let host = Rc::clone(host);
         action.connect_activate(move |_, _| dispatch(cmd, &*host));
         group.add_action(&action);
     }
+    group
+}
+
+/// Reevalúa el estado `enabled` de las acciones que exigen composiciones
+/// (§20, ISSUE-022) sobre `group` — el grupo «win» que `AppCmds` conserva
+/// del [`install_actions`] — cuando cambia la lista de composiciones de la
+/// ventana (B1, revisión PR #44: el watcher redescubre al cambiar
+/// `.mdproject.toml` y las acciones no pueden quedarse con el estado de la
+/// instalación). El resto de acciones no se toca.
+pub fn refresh_composition_actions(group: &gio::SimpleActionGroup, disponible: bool) {
+    for cmd in ALL_COMMANDS.iter().filter(|cmd| cmd.requires_composition()) {
+        let name = cmd
+            .action_id()
+            .strip_prefix("win.")
+            .expect("los action_id usan el prefijo «win.» (§36)");
+        if let Some(action) = group.lookup_action(name) {
+            if let Ok(action) = action.downcast::<gio::SimpleAction>() {
+                action.set_enabled(disponible);
+            }
+        }
+    }
+}
+
+/// Conecta `gio::SimpleAction`s de la ventana con `host` y fija los aceleradores.
+///
+/// `View(ViewMode)` usa tres acciones simples `win.view-editor|split|preview`
+/// (forma simple verificada en gtk4 0.9; la variante con target sobre
+/// `glib::Variant` no aporta nada aquí). Los aceleradores §39 se fijan con
+/// `gtk::Application::set_accels_for_action`. Devuelve el grupo insertado
+/// para que `AppCmds` pueda refrescar el `enabled` de las composiciones
+/// (B1) guardándolo en referencia débil: las acciones capturan `host` y una
+/// retención fuerte cerraría un ciclo con `AppCmds`.
+pub fn install_actions<W: IsA<gtk::Window>>(
+    window: &W,
+    app: &gtk::Application,
+    host: Rc<dyn Commands>,
+) -> gio::SimpleActionGroup {
+    let group = action_group(&host);
     window
         .upcast_ref::<gtk::Window>()
         .insert_action_group("win", Some(&group));
     for &(action_id, accel) in ACCELERATORS {
         app.set_accels_for_action(action_id, &[accel]);
     }
+    group
 }
 
 #[cfg(test)]
@@ -650,5 +684,85 @@ mod tests {
         ] {
             assert!(!accel_es_valido(malo), "{malo:?} no debería validar");
         }
+    }
+
+    /// B1 (revisión PR #44, #22): el `enabled` de las acciones de
+    /// composición se reevalúa con la disponibilidad de la lista — el grupo
+    /// «win» que la ventana conserva de [`install_actions`] — sin tocar al
+    /// resto de acciones. La instalación parte del mismo criterio.
+    #[test]
+    fn acciones_de_composicion_se_habilitan_y_deshabilitan_acorde() {
+        /// Receptor sin operación: solo aporta `compositions_available`.
+        struct Hoste(bool);
+        impl Commands for Hoste {
+            fn new(&self) {}
+            fn new_window(&self) {}
+            fn open(&self) {}
+            fn quick_open(&self) {}
+            fn open_folder(&self) {}
+            fn import_markdown(&self) {}
+            fn save(&self) {}
+            fn save_as(&self) {}
+            fn export_pdf(&self) {}
+            fn close_tab(&self) {}
+            fn undo(&self) {}
+            fn redo(&self) {}
+            fn find(&self) {}
+            fn replace(&self) {}
+            fn project_search(&self) {}
+            fn toggle_mode(&self) {}
+            fn toggle_visual_syntax(&self) {}
+            fn toggle_explorer(&self) {}
+            fn set_view(&self, _mode: ViewMode) {}
+            fn about(&self) {}
+            fn shortcuts(&self) {}
+            fn compositions_available(&self) -> bool {
+                self.0
+            }
+        }
+        const COMPOSICION: [&str; 2] = ["preview-composition", "export-composition-pdf"];
+        /// Estado `enabled` de cada acción compositiva, en orden: la
+        /// aserción va acción a acción (B1 — probar «al menos una» no
+        /// acredita que las dos sigan a la lista).
+        fn estados_compositivas(group: &gio::SimpleActionGroup) -> [bool; 2] {
+            COMPOSICION.map(|id| {
+                group
+                    .lookup_action(id)
+                    .unwrap_or_else(|| panic!("falta la acción {id}"))
+                    .is_enabled()
+            })
+        }
+
+        // Instalación: el estado inicial sigue a `compositions_available`.
+        let sin: Rc<dyn Commands> = Rc::new(Hoste(false));
+        let sin = action_group(&sin);
+        assert_eq!(
+            estados_compositivas(&sin),
+            [false, false],
+            "sin composiciones, las dos deshabilitadas (§20)"
+        );
+        assert!(sin.lookup_action("save").expect("save").is_enabled());
+
+        let con: Rc<dyn Commands> = Rc::new(Hoste(true));
+        let con = action_group(&con);
+        assert_eq!(
+            estados_compositivas(&con),
+            [true, true],
+            "con composiciones, las dos habilitadas (§20)"
+        );
+
+        // Refresco tras redescubrir (B1): el estado sigue a la lista.
+        refresh_composition_actions(&con, false);
+        assert_eq!(
+            estados_compositivas(&con),
+            [false, false],
+            "B1: al quitar la lista, las dos"
+        );
+        assert!(
+            con.lookup_action("save").expect("save").is_enabled(),
+            "el resto de acciones no se toca"
+        );
+        refresh_composition_actions(&con, true);
+        assert_eq!(estados_compositivas(&con), [true, true], "B1: al volver");
     }
 }

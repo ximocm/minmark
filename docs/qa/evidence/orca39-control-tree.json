@@ -1,0 +1,2662 @@
+[
+  {
+    "showing": false,
+    "path": [],
+    "role": "application",
+    "name": "python3",
+    "focused": false,
+    "selected": false
+  },
+  {
+    "showing": true,
+    "path": [
+      0
+    ],
+    "role": "frame",
+    "name": "WebKit accessibility control",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      1450,
+      930
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0
+    ],
+    "role": "scroll pane",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      1450,
+      930
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0
+    ],
+    "role": "panel",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      1450,
+      930
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "role": "panel",
+    "name": "",
+    "focused": true,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      1450,
+      930
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "role": "panel",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      1450,
+      930
+    ]
+  },
+  {
+    "showing": false,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "role": "filler",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      1450,
+      930
+    ]
+  },
+  {
+    "showing": false,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "role": "scroll pane",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      1450,
+      930
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "role": "document web",
+    "name": "minmark",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      0,
+      0,
+      1450,
+      1575
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "role": "landmark",
+    "name": "Tabla de contenidos",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      325,
+      32,
+      800,
+      118
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "role": "list",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      342,
+      41,
+      766,
+      100
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "role": "list item",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "text": "￼",
+    "caret": -1,
+    "rect": [
+      342,
+      41,
+      766,
+      25
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "role": "link",
+    "name": "1 Energía",
+    "focused": false,
+    "selected": false,
+    "text": "1 Energía",
+    "caret": -1,
+    "rect": [
+      342,
+      42,
+      71,
+      22
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1
+    ],
+    "role": "list item",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "text": "￼",
+    "caret": -1,
+    "rect": [
+      358,
+      66,
+      750,
+      25
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0
+    ],
+    "role": "link",
+    "name": "1.1 Resultados",
+    "focused": false,
+    "selected": false,
+    "text": "1.1 Resultados",
+    "caret": -1,
+    "rect": [
+      358,
+      67,
+      109,
+      22
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      2
+    ],
+    "role": "list item",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "text": "￼",
+    "caret": -1,
+    "rect": [
+      374,
+      91,
+      734,
+      25
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      2,
+      0
+    ],
+    "role": "link",
+    "name": "1.1.1 Detalle",
+    "focused": false,
+    "selected": false,
+    "text": "1.1.1 Detalle",
+    "caret": -1,
+    "rect": [
+      374,
+      92,
+      93,
+      22
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      3
+    ],
+    "role": "list item",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "text": "￼",
+    "caret": -1,
+    "rect": [
+      342,
+      116,
+      766,
+      25
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      3,
+      0
+    ],
+    "role": "link",
+    "name": "2 Segundo capítulo",
+    "focused": false,
+    "selected": false,
+    "text": "2 Segundo capítulo",
+    "caret": -1,
+    "rect": [
+      342,
+      117,
+      145,
+      22
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1
+    ],
+    "role": "heading",
+    "name": "1 Energía",
+    "focused": false,
+    "selected": false,
+    "text": "1 Energía",
+    "caret": -1,
+    "rect": [
+      325,
+      171,
+      800,
+      52
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      2
+    ],
+    "role": "paragraph",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "text": "Cita simple [1], múltiple [1], [2] y locator [1, p. 42].",
+    "caret": -1,
+    "rect": [
+      325,
+      243,
+      800,
+      26
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      3
+    ],
+    "role": "paragraph",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "text": "La energía es  . Fracción  y raíz  .",
+    "caret": -1,
+    "rect": [
+      325,
+      284,
+      800,
+      33
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      3,
+      0
+    ],
+    "role": "math",
+    "name": "E = mc^2",
+    "focused": false,
+    "selected": false,
+    "text": " ",
+    "caret": -1,
+    "rect": [
+      428,
+      287,
+      68,
+      23
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      3,
+      0,
+      0
+    ],
+    "role": "image",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      429,
+      296,
+      13,
+      12
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      3,
+      0,
+      1
+    ],
+    "role": "image",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      446,
+      301,
+      12,
+      5
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      3,
+      0,
+      2
+    ],
+    "role": "image",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      463,
+      300,
+      14,
+      8
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      3,
+      0,
+      3
+    ],
+    "role": "image",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      477,
+      300,
+      7,
+      8
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      3,
+      0,
+      4
+    ],
+    "role": "image",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      484,
+      294,
+      6,
+      8
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      3,
+      1
+    ],
+    "role": "math",
+    "name": "\\frac{1}{2}",
+    "focused": false,
+    "selected": false,
+    "text": " ",
+    "caret": -1,
+    "rect": [
+      570,
+      283,
+      16,
+      34
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      3,
+      1,
+      0
+    ],
+    "role": "image",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      573,
+      284,
+      7,
+      12
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      3,
+      1,
+      1
+    ],
+    "role": "image",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      573,
+      306,
+      7,
+      12
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      3,
+      2
+    ],
+    "role": "math",
+    "name": "\\sqrt[3]{x}",
+    "focused": false,
+    "selected": false,
+    "text": " ",
+    "caret": -1,
+    "rect": [
+      629,
+      287,
+      28,
+      23
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      3,
+      2,
+      0
+    ],
+    "role": "image",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      634,
+      294,
+      5,
+      6
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      3,
+      2,
+      1
+    ],
+    "role": "image",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      631,
+      293,
+      14,
+      17
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      3,
+      2,
+      2
+    ],
+    "role": "image",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      644,
+      299,
+      9,
+      8
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      4
+    ],
+    "role": "section",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "text": "",
+    "caret": -1,
+    "rect": [
+      325,
+      333,
+      800,
+      48
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      4,
+      0
+    ],
+    "role": "math",
+    "name": "\\int_0^\\infty e^{-x} dx",
+    "focused": false,
+    "selected": false,
+    "text": "",
+    "caret": -1,
+    "rect": [
+      687,
+      333,
+      75,
+      46
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      4,
+      0,
+      0
+    ],
+    "role": "image",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      688,
+      334,
+      15,
+      36
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      4,
+      0,
+      1
+    ],
+    "role": "image",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      704,
+      333,
+      12,
+      6
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      4,
+      0,
+      2
+    ],
+    "role": "image",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      697,
+      365,
+      6,
+      9
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      4,
+      0,
+      3
+    ],
+    "role": "image",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      720,
+      348,
+      7,
+      9
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      4,
+      0,
+      4
+    ],
+    "role": "image",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      728,
+      347,
+      8,
+      1
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      4,
+      0,
+      5
+    ],
+    "role": "image",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      736,
+      345,
+      7,
+      6
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      4,
+      0,
+      6
+    ],
+    "role": "image",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      745,
+      344,
+      8,
+      13
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      4,
+      0,
+      7
+    ],
+    "role": "image",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      753,
+      348,
+      9,
+      9
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      5
+    ],
+    "role": "section",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "text": "Ecuación 1.1. Integral impropia",
+    "caret": 0,
+    "rect": [
+      325,
+      396,
+      800,
+      24
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      6
+    ],
+    "role": "paragraph",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "text": "Ver ￼. Una nota.￼ La misma nota otra vez.￼\n\n",
+    "caret": -1,
+    "rect": [
+      325,
+      435,
+      800,
+      29
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      6,
+      0
+    ],
+    "role": "link",
+    "name": "Ecuación 1.1",
+    "focused": false,
+    "selected": false,
+    "text": "Ecuación 1.1",
+    "caret": -1,
+    "rect": [
+      354,
+      439,
+      94,
+      23
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      6,
+      1
+    ],
+    "role": "superscript",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "text": "￼",
+    "caret": -1,
+    "rect": [
+      529,
+      436,
+      8,
+      19
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      6,
+      1,
+      0
+    ],
+    "role": "link",
+    "name": "1",
+    "focused": false,
+    "selected": false,
+    "text": "1",
+    "caret": -1,
+    "rect": [
+      529,
+      436,
+      8,
+      19
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      6,
+      2
+    ],
+    "role": "superscript",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "text": "￼",
+    "caret": -1,
+    "rect": [
+      720,
+      436,
+      7,
+      19
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      6,
+      2,
+      0
+    ],
+    "role": "link",
+    "name": "1",
+    "focused": false,
+    "selected": false,
+    "text": "1",
+    "caret": -1,
+    "rect": [
+      720,
+      436,
+      7,
+      19
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      7
+    ],
+    "role": "heading",
+    "name": "1.1 Resultados",
+    "focused": false,
+    "selected": false,
+    "text": "1.1 Resultados",
+    "caret": -1,
+    "rect": [
+      325,
+      483,
+      800,
+      39
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      8
+    ],
+    "role": "table",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      325,
+      541,
+      131,
+      76
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      8,
+      0
+    ],
+    "role": "table row",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      325,
+      541,
+      130,
+      38
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      8,
+      0,
+      0
+    ],
+    "role": "column header",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "text": "Caso",
+    "caret": -1,
+    "rect": [
+      325,
+      541,
+      63,
+      38
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      8,
+      0,
+      1
+    ],
+    "role": "column header",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "text": "Valor",
+    "caret": -1,
+    "rect": [
+      387,
+      541,
+      68,
+      38
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      8,
+      1
+    ],
+    "role": "table row",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      325,
+      578,
+      130,
+      38
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      8,
+      1,
+      0
+    ],
+    "role": "table cell",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "text": "A",
+    "caret": -1,
+    "rect": [
+      325,
+      578,
+      63,
+      38
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      8,
+      1,
+      1
+    ],
+    "role": "table cell",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "text": "10",
+    "caret": -1,
+    "rect": [
+      387,
+      578,
+      68,
+      38
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      9
+    ],
+    "role": "section",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "text": "Tabla 1.1. Valores",
+    "caret": -1,
+    "rect": [
+      325,
+      616,
+      800,
+      24
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      10
+    ],
+    "role": "paragraph",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "text": "Ver ￼.",
+    "caret": -1,
+    "rect": [
+      325,
+      655,
+      800,
+      26
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      10,
+      0
+    ],
+    "role": "link",
+    "name": "Tabla 1.1",
+    "focused": false,
+    "selected": false,
+    "text": "Tabla 1.1",
+    "caret": -1,
+    "rect": [
+      354,
+      656,
+      66,
+      23
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      11
+    ],
+    "role": "heading",
+    "name": "1.1.1 Detalle",
+    "focused": false,
+    "selected": false,
+    "text": "1.1.1 Detalle",
+    "caret": -1,
+    "rect": [
+      325,
+      699,
+      800,
+      30
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      12
+    ],
+    "role": "paragraph",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "text": "Texto con énfasis y Unicode: áéíóú, β, 東京.",
+    "caret": -1,
+    "rect": [
+      325,
+      747,
+      800,
+      26
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      13
+    ],
+    "role": "heading",
+    "name": "1.1.1.1 Fuera del TOC por defecto",
+    "focused": false,
+    "selected": false,
+    "text": "1.1.1.1 Fuera del TOC por defecto",
+    "caret": -1,
+    "rect": [
+      325,
+      793,
+      800,
+      26
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      14
+    ],
+    "role": "paragraph",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "text": "Esta sección aparece con toc_max_level: 6.",
+    "caret": -1,
+    "rect": [
+      325,
+      839,
+      800,
+      26
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      14,
+      0
+    ],
+    "role": "section",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "text": "toc_max_level: 6",
+    "caret": -1,
+    "rect": [
+      516,
+      844,
+      133,
+      18
+    ]
+  },
+  {
+    "showing": false,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      15
+    ],
+    "role": "heading",
+    "name": "2 Segundo capítulo",
+    "focused": false,
+    "selected": false,
+    "text": "2 Segundo capítulo",
+    "caret": -1,
+    "rect": [
+      325,
+      929,
+      800,
+      52
+    ]
+  },
+  {
+    "showing": false,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      16
+    ],
+    "role": "section",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "text": "",
+    "caret": -1,
+    "rect": [
+      325,
+      1002,
+      800,
+      46
+    ]
+  },
+  {
+    "showing": false,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      16,
+      0
+    ],
+    "role": "math",
+    "name": "\\begin{pmatrix}1 & 2 \\\\ 3 & 4\\end{pmatrix}",
+    "focused": false,
+    "selected": false,
+    "text": "",
+    "caret": -1,
+    "rect": [
+      701,
+      1002,
+      48,
+      44
+    ]
+  },
+  {
+    "showing": false,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      16,
+      0,
+      0
+    ],
+    "role": "image",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      704,
+      1002,
+      9,
+      39
+    ]
+  },
+  {
+    "showing": false,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      16,
+      0,
+      1
+    ],
+    "role": "image",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      714,
+      1005,
+      6,
+      11
+    ]
+  },
+  {
+    "showing": false,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      16,
+      0,
+      2
+    ],
+    "role": "image",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      713,
+      1024,
+      8,
+      12
+    ]
+  },
+  {
+    "showing": false,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      16,
+      0,
+      3
+    ],
+    "role": "image",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      729,
+      1005,
+      8,
+      11
+    ]
+  },
+  {
+    "showing": false,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      16,
+      0,
+      4
+    ],
+    "role": "image",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      729,
+      1024,
+      8,
+      11
+    ]
+  },
+  {
+    "showing": false,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      16,
+      0,
+      5
+    ],
+    "role": "image",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      737,
+      1002,
+      9,
+      39
+    ]
+  },
+  {
+    "showing": false,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      17
+    ],
+    "role": "section",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "text": "Ecuación 2.1. Matriz",
+    "caret": -1,
+    "rect": [
+      325,
+      1063,
+      800,
+      24
+    ]
+  },
+  {
+    "showing": false,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      18
+    ],
+    "role": "paragraph",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "text": "Ver ￼.",
+    "caret": -1,
+    "rect": [
+      325,
+      1102,
+      800,
+      26
+    ]
+  },
+  {
+    "showing": false,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      18,
+      0
+    ],
+    "role": "link",
+    "name": "Ecuación 2.1",
+    "focused": false,
+    "selected": false,
+    "text": "Ecuación 2.1",
+    "caret": -1,
+    "rect": [
+      354,
+      1103,
+      94,
+      23
+    ]
+  },
+  {
+    "showing": false,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      19
+    ],
+    "role": "paragraph",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "text": "Otra nota.￼\n\n",
+    "caret": -1,
+    "rect": [
+      325,
+      1143,
+      800,
+      29
+    ]
+  },
+  {
+    "showing": false,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      19,
+      0
+    ],
+    "role": "superscript",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "text": "￼",
+    "caret": -1,
+    "rect": [
+      401,
+      1144,
+      8,
+      19
+    ]
+  },
+  {
+    "showing": false,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      19,
+      0,
+      0
+    ],
+    "role": "link",
+    "name": "2",
+    "focused": false,
+    "selected": false,
+    "text": "2",
+    "caret": -1,
+    "rect": [
+      401,
+      1144,
+      8,
+      19
+    ]
+  },
+  {
+    "showing": false,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      20
+    ],
+    "role": "paragraph",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "text": "[@smith2025] $\\frac{1}{2}$ {{toc}} [^literal]",
+    "caret": -1,
+    "rect": [
+      325,
+      1187,
+      800,
+      26
+    ]
+  },
+  {
+    "showing": false,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      20,
+      0
+    ],
+    "role": "section",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "text": "[@smith2025] $\\frac{1}{2}$ {{toc}} [^literal]",
+    "caret": -1,
+    "rect": [
+      325,
+      1192,
+      360,
+      18
+    ]
+  },
+  {
+    "showing": false,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      21
+    ],
+    "role": "paragraph",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "text": "{{toc}} y [@smith2025] se conservan literalmente.",
+    "caret": -1,
+    "rect": [
+      325,
+      1228,
+      800,
+      26
+    ]
+  },
+  {
+    "showing": false,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      22
+    ],
+    "role": "heading",
+    "name": "Bibliografía",
+    "focused": false,
+    "selected": false,
+    "text": "Bibliografía",
+    "caret": -1,
+    "rect": [
+      325,
+      1273,
+      800,
+      39
+    ]
+  },
+  {
+    "showing": false,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      23
+    ],
+    "role": "section",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "text": "[1]",
+    "caret": -1,
+    "rect": [
+      325,
+      1328,
+      20,
+      23
+    ]
+  },
+  {
+    "showing": false,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      24
+    ],
+    "role": "section",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "text": "A. Smith, Energy Research. Madrid: QA Press, 2025.",
+    "caret": -1,
+    "rect": [
+      352,
+      1328,
+      773,
+      23
+    ]
+  },
+  {
+    "showing": false,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      25
+    ],
+    "role": "section",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "text": "[2]",
+    "caret": -1,
+    "rect": [
+      325,
+      1344,
+      20,
+      23
+    ]
+  },
+  {
+    "showing": false,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      26
+    ],
+    "role": "section",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "text": "B. Jones and A. García, “Local Scientific Editing,” QA Journal, vol. 2, pp. 10–20, 2024.",
+    "caret": -1,
+    "rect": [
+      352,
+      1344,
+      773,
+      23
+    ]
+  },
+  {
+    "showing": false,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      27
+    ],
+    "role": "landmark",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      325,
+      1379,
+      800,
+      149
+    ]
+  },
+  {
+    "showing": false,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      27,
+      0
+    ],
+    "role": "list",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      325,
+      1379,
+      800,
+      149
+    ]
+  },
+  {
+    "showing": false,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      27,
+      0,
+      0
+    ],
+    "role": "list item",
+    "name": "Nota de energía con negrita y cita [2].",
+    "focused": false,
+    "selected": false,
+    "text": "￼Nota de energía con negrita y cita [2].\n\n￼\n",
+    "caret": -1,
+    "rect": [
+      365,
+      1379,
+      760,
+      67
+    ]
+  },
+  {
+    "showing": false,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      27,
+      0,
+      0,
+      0
+    ],
+    "role": "text",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "text": "1. ",
+    "caret": -1,
+    "rect": [
+      342,
+      1380,
+      19,
+      23
+    ]
+  },
+  {
+    "showing": false,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      27,
+      0,
+      0,
+      1
+    ],
+    "role": "paragraph",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "text": "Nota de energía con negrita y cita [2].",
+    "caret": -1,
+    "rect": [
+      365,
+      1379,
+      760,
+      26
+    ]
+  },
+  {
+    "showing": false,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      27,
+      0,
+      0,
+      2
+    ],
+    "role": "link",
+    "name": "Volver a la referencia",
+    "focused": false,
+    "selected": false,
+    "text": "↩",
+    "caret": -1,
+    "rect": [
+      365,
+      1421,
+      14,
+      23
+    ]
+  },
+  {
+    "showing": false,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      27,
+      0,
+      1
+    ],
+    "role": "list item",
+    "name": "Nota del segundo capítulo.",
+    "focused": false,
+    "selected": false,
+    "text": "￼Nota del segundo capítulo.\n\n￼",
+    "caret": -1,
+    "rect": [
+      365,
+      1461,
+      760,
+      67
+    ]
+  },
+  {
+    "showing": false,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      27,
+      0,
+      1,
+      0
+    ],
+    "role": "text",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "text": "2. ",
+    "caret": -1,
+    "rect": [
+      342,
+      1462,
+      19,
+      23
+    ]
+  },
+  {
+    "showing": false,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      27,
+      0,
+      1,
+      1
+    ],
+    "role": "paragraph",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "text": "Nota del segundo capítulo.",
+    "caret": -1,
+    "rect": [
+      365,
+      1461,
+      760,
+      26
+    ]
+  },
+  {
+    "showing": false,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      27,
+      0,
+      1,
+      2
+    ],
+    "role": "link",
+    "name": "Volver a la referencia",
+    "focused": false,
+    "selected": false,
+    "text": "↩",
+    "caret": -1,
+    "rect": [
+      365,
+      1503,
+      14,
+      23
+    ]
+  },
+  {
+    "showing": false,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1
+    ],
+    "role": "scroll bar",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "rect": [
+      1429,
+      0,
+      21,
+      930
+    ]
+  },
+  {
+    "showing": true,
+    "path": [
+      0,
+      0,
+      0,
+      0,
+      1
+    ],
+    "role": "text",
+    "name": "",
+    "focused": false,
+    "selected": false,
+    "text": "",
+    "caret": 0,
+    "rect": [
+      0,
+      0,
+      0,
+      0
+    ]
+  }
+]

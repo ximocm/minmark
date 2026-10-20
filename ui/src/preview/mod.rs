@@ -169,6 +169,18 @@ impl PreviewPane {
     pub fn follow_edit(&self, byte: u32) {
         self.request_scroll(byte, true);
     }
+    /// Destino interno `#fragmento` (S1, ISSUE-024, revisión PR #44):
+    /// desplaza in-page hasta el elemento con ese `id` (§26), con el mismo
+    /// patrón que el `#mm-note-` del listener inyectado, sin salir del
+    /// documento. Los enlaces que no son fragmentos no hacen nada (enlaces a
+    /// archivos: fuera de alcance, §3.4). Devuelve si era un fragmento.
+    pub fn scroll_to_fragment(&self, destination: &str) -> bool {
+        let Some(script) = fragment_script(destination) else {
+            return false;
+        };
+        Self::run_script(&self.webview, &script);
+        true
+    }
     fn request_scroll(&self, byte: u32, follow: bool) {
         if self.webview.is_loading() {
             self.scroll_byte.set(Some((byte, follow)));
@@ -319,6 +331,23 @@ fn js_string(value: &str) -> String {
             .collect::<String>()
     )
 }
+
+/// Script del scroll in-page a un destino `#fragmento` (S1, ISSUE-024,
+/// revisión PR #44): `getElementById` + `scrollIntoView`, con el id pasado
+/// por [`js_string`] (§7.2: nada del documento crudo en el script). `None`
+/// si `destination` no es un fragmento (los enlaces a archivos quedan como
+/// estaban: fuera de alcance, §3.4).
+fn fragment_script(destination: &str) -> Option<String> {
+    let id = destination.strip_prefix('#')?;
+    if id.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "{{ const target = document.getElementById({}); if (target) target.scrollIntoView({{block: 'center'}}); }}",
+        js_string(id)
+    ))
+}
+
 fn scroll_script(byte: u32, follow: bool) -> String {
     format!(
         r#"{{
@@ -415,5 +444,27 @@ mod tests {
         assert_eq!(ViewMode::Editor.label(), "Editor");
         assert_eq!(ViewMode::Split.label(), "Split");
         assert_eq!(ViewMode::Preview.label(), "Preview");
+    }
+
+    /// S1/ISSUE-024 (revisión PR #44): un destino `#fragmento` genera el
+    /// script de scroll in-page (`getElementById` + `scrollIntoView`, §26)
+    /// con el id escapado (§7.2); lo que no es fragmento no genera script
+    /// (los enlaces a archivos quedan como estaban, §3.4).
+    #[test]
+    fn fragmento_interno_genera_scroll_in_page() {
+        let script = fragment_script("#destino").expect("fragmento con id");
+        assert!(script.contains("getElementById"));
+        assert!(script.contains("scrollIntoView"));
+        assert!(
+            script.contains(&js_string("destino")),
+            "el id no viaja al getElementById: {script}"
+        );
+        // §7.2: un id hostil no puede romper la cadena del script.
+        let hostil = fragment_script("#x\");alert(1);//").expect("fragmento hostil");
+        assert!(!hostil.contains("alert"), "el id va escapado: {hostil}");
+        // No-fragmento ⇒ sin script (fuera de alcance, §3.4).
+        assert!(fragment_script("capitulo.md").is_none());
+        assert!(fragment_script("capitulo.md#destino").is_none());
+        assert!(fragment_script("#").is_none());
     }
 }

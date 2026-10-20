@@ -293,6 +293,11 @@ impl EditorPane {
 
         let buffer = TextBuffer::new(Some(&table));
         let text_view = TextView::builder().buffer(&buffer).monospace(true).build();
+        // Ajuste visual de líneas largas: `WordChar` parte la línea solo en
+        // pantalla —el buffer sigue siendo el documento §6.1, sin saltos
+        // insertados— para ver todo el texto escrito sin scroll horizontal
+        // (sustituye al `wrap-mode` `GTK_WRAP_NONE` de §34.2 en el editor).
+        text_view.set_wrap_mode(gtk::WrapMode::WordChar);
 
         // Marcado de búsqueda (§40.1): discreto para todas las coincidencias
         // y distinto para la activa; colores de la [`Palette`] (§23).

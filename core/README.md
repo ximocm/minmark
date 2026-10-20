@@ -41,6 +41,11 @@ El grafo de producción no tiene ciclos.
   produce; `minmark-renderer` y `minmark-pdf` la consumen. Cada `Block` lleva
   su `Span` (offsets de byte en el fuente) para fidelidad (§6.2) y
   sincronización por posición semántica (§9.1).
+- **`minmark_config::parse_compositions`** lee las tablas `[[composition]]` de
+  `.mdproject.toml` (§20) y **`minmark_document::compose`** construye el
+  documento lógico combinado (AST + fuente virtual con spans consistentes),
+  reescribiendo los destinos entre archivos incluidos a anclas internas (§20.4)
+  y preservando los niveles de heading (§20.2).
 - **`minmark_config::Settings`** es el modelo único de ajustes; la resolución
   de la cadena documento → composición → proyecto → global → defecto es
   `minmark_config::resolve` (§58.1). Claves desconocidas, niveles no

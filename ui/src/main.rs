@@ -44,7 +44,7 @@ mod tabs;
 use editor::{EditSink, EditorPane};
 use explorer::{load_state, save_state, ExplorerAction, ExplorerPane, ExplorerState};
 use find::{FindAction, FindBar};
-use menus::{dialogs, install_actions, Commands};
+use menus::{actions, dialogs, install_actions, Commands};
 use preview::{PreviewPane, ViewMode};
 use quickopen::QuickOpen;
 use search::{ReplaceSummary, SearchPanel};
@@ -302,8 +302,16 @@ struct AppCmds {
     watcher: Option<Rc<RefCell<minmark_fs::InotifyWatcher>>>,
     /// Composiciones del `.mdproject.toml` de la raíz (§20, ISSUE-022);
     /// vacías en ventanas standalone, donde las acciones de composición
-    /// quedan deshabilitadas.
+    /// quedan deshabilitadas. Se redescubren al cambiar `.mdproject.toml`
+    /// (B1, revisión PR #44) vía [`AppCmds::refresh_compositions`].
     compositions: RefCell<Vec<Composition>>,
+    /// Grupo «win» insertado por `install_actions` (B1), en referencia
+    /// DÉBIL: sus acciones capturan `Rc<dyn Commands>` de esta ventana, así
+    /// que una referencia fuerte cerraría el ciclo `AppCmds → grupo →
+    /// acciones → AppCmds` y la ventana no se liberaría al cerrarse. La
+    /// referencia fuerte la retiene la propia ventana (`insert_action_group`);
+    /// `None` hasta `install_actions`.
+    action_group: RefCell<Option<gtk4::glib::WeakRef<gtk4::gio::SimpleActionGroup>>>,
     /// Ventana temporal del Preview combinado (§20.4, ISSUE-023),
     /// reutilizable con el patrón Outline/Backlinks.
     composition_preview: RefCell<Option<Rc<CompositionPreview>>>,
@@ -1333,6 +1341,10 @@ impl AppCmds {
             .any(|e| e.path.file_name().is_some_and(|n| n == ".mdproject.toml"))
         {
             self.refresh_now();
+            // B1 (revisión PR #44, #22): la lista de composiciones de la
+            // ventana no se congela en la apertura: se redescubre y las
+            // acciones quedan acordes (§20).
+            self.refresh_compositions();
         }
         if let Some(root) = self.scope.project_root() {
             spawn_index_refresh(root, self.slot.clone());
@@ -1399,6 +1411,30 @@ impl AppCmds {
             .collect()
     }
 
+    /// Redescubre las composiciones del proyecto (B1, revisión PR #44, #22):
+    /// relée `.mdproject.toml` y reevalúa el `enabled` de
+    /// `win.preview-composition` / `win.export-composition-pdf` (§20). Lo
+    /// pide el watcher al cambiar ese archivo; al abrir la ventana ya
+    /// descubre `build_window`. `build` vuelve a leer `.mdproject.toml` para
+    /// la cadena §58 (`load_composition_at`), de modo que `files` y
+    /// `overrides` son de lecturas próximas —eventualmente consistentes con
+    /// el watcher—, no de una misma lectura atómica.
+    fn refresh_compositions(&self) {
+        let root = match &self.scope {
+            WindowScope::Project(root) => Some(root.as_path()),
+            WindowScope::Standalone => None,
+        };
+        let disponible = composition::refresh(&mut self.compositions.borrow_mut(), root);
+        let grupo = self
+            .action_group
+            .borrow()
+            .as_ref()
+            .and_then(|grupo| grupo.upgrade());
+        if let Some(group) = grupo {
+            actions::refresh_composition_actions(&group, disponible);
+        }
+    }
+
     /// Ejecuta `then` con la composición elegida (ISSUE-022): con una sola
     /// no hay diálogo; con varias se presenta la selección (§20.1). Sin
     /// composiciones no hace nada (la acción está deshabilitada).
@@ -1451,8 +1487,19 @@ impl AppCmds {
             .build();
         let pane = Rc::new(PreviewPane::new());
         // El clic en un enlace no navega fuera del documento combinado
-        // (§3.4: la WebView conserva la página, igual que el Preview normal).
-        pane.connect_link_activation(Rc::new(|_| {}));
+        // (§3.4: la WebView conserva la página, igual que el Preview normal);
+        // un destino interno `#fragmento` (S1, ISSUE-024, revisión PR #44) sí
+        // desplaza in-page hasta su elemento (§26).
+        // Captura DÉBIL: el gestor de contenido de la WebView retiene este
+        // callback y `pane` retiene la WebView, así que una captura fuerte
+        // cerraría el ciclo y la ventana del Preview no se liberaría al
+        // cerrarse (misma razón que el grupo «win», B1).
+        let pane_interna = Rc::downgrade(&pane);
+        pane.connect_link_activation(Rc::new(move |destino| {
+            if let Some(pane) = pane_interna.upgrade() {
+                pane.scroll_to_fragment(&destino);
+            }
+        }));
         window.set_child(Some(&pane.widget()));
         {
             let on_escape = window.clone();
@@ -2296,11 +2343,10 @@ fn build_window(app: &Application, scope: WindowScope, open_paths: &[PathBuf]) -
 
     // §20 (ISSUE-022): composiciones del `.mdproject.toml` de la raíz del
     // proyecto activo; en standalone la lista queda vacía y `install_actions`
-    // deshabilita las acciones de composición (`compositions_available`).
-    let compositions = match &scope {
-        WindowScope::Project(root) => composition::discover(root),
-        WindowScope::Standalone => Vec::new(),
-    };
+    // deshabilita las acciones de composición (`compositions_available`). El
+    // redescubrimiento en caliente (B1) usa el mismo `composition::refresh`.
+    let mut compositions = Vec::new();
+    composition::refresh(&mut compositions, scope.project_root().as_deref());
 
     let cmds = Rc::new(AppCmds {
         app: app.clone(),
@@ -2327,6 +2373,7 @@ fn build_window(app: &Application, scope: WindowScope, open_paths: &[PathBuf]) -
         sidebar,
         watcher,
         compositions: RefCell::new(compositions),
+        action_group: RefCell::new(None),
         composition_preview: RefCell::new(None),
         self_ops: Rc::new(SelfOps::default()),
         settings: RefCell::new(settings),
@@ -2337,7 +2384,10 @@ fn build_window(app: &Application, scope: WindowScope, open_paths: &[PathBuf]) -
         slot: slot.clone(),
     });
     *slot.borrow_mut() = Some(Rc::downgrade(&cmds));
-    install_actions(&window, app, cmds.clone());
+    // B1: la ventana conserva una referencia DÉBIL al grupo para reevaluar
+    // el `enabled` de las acciones de composiciones cuando la lista cambie
+    // (§20) sin cerrar el ciclo de referencias con `cmds`.
+    *cmds.action_group.borrow_mut() = Some(install_actions(&window, app, cmds.clone()).downgrade());
 
     // ISSUE-026 (§46): bucle de eventos del watcher en el hilo de UI. Se detiene
     // con la ventana.
@@ -2881,6 +2931,219 @@ mod gtk_integration_tests {
         );
         cmds.window.destroy();
         academic_workflow(&app, &root.join("academic"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Evalúa `script` en la WebView y devuelve el número observado.
+    fn eval_js(pane: &PreviewPane, script: &str) -> f64 {
+        let result = Rc::new(Cell::new(None));
+        pane.test_eval_number(script, result.clone());
+        pump_until(|| result.get().is_some());
+        result.get().unwrap()
+    }
+
+    /// Repite la evaluación hasta observar `esperado`; con plazo, para que un
+    /// fallo real acabe en timeout descriptivo y no en un bucle infinito.
+    fn espera_js(pane: &PreviewPane, script: &str, esperado: f64) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(8);
+        loop {
+            let valor = eval_js(pane, script);
+            if valor == esperado {
+                return;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "timeout GTK esperando {esperado} de: {script} (último {valor})"
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    fn nombres_de(cmds: &AppCmds) -> Vec<String> {
+        cmds.compositions
+            .borrow()
+            .iter()
+            .map(|comp| comp.name.clone())
+            .collect()
+    }
+
+    /// Estado `enabled` de las acciones compositivas del grupo «win»
+    /// instalado en la ventana (B1): acción a acción — probar «al menos una»
+    /// no acredita que las dos sigan a la lista. Pasa por la referencia
+    /// débil de `AppCmds`, que es la vía real de [`AppCmds::refresh_compositions`].
+    fn acciones_compositivas(cmds: &AppCmds) -> [bool; 2] {
+        let grupo = cmds
+            .action_group
+            .borrow()
+            .as_ref()
+            .and_then(|grupo| grupo.upgrade())
+            .expect("grupo «win» vivo mientras la ventana existe (retención débil)");
+        ["preview-composition", "export-composition-pdf"].map(|id| {
+            grupo
+                .lookup_action(id)
+                .unwrap_or_else(|| panic!("falta la acción {id}"))
+                .is_enabled()
+        })
+    }
+
+    /// B1 (revisión PR #44, #22): el watcher redescubre las composiciones
+    /// cuando cambia `.mdproject.toml` en caliente — la ventana no se queda
+    /// congelada con la lista de apertura — y `compositions_available`
+    /// (origen del `enabled` de las acciones §20) queda acorde: la nueva
+    /// composición aparece, quitarlas deshabilita y volver a declararlas
+    /// habilita.
+    #[test]
+    #[ignore = "requiere sesión gráfica GTK/WebKit"]
+    fn composiciones_se_redescubren_al_cambiar_mdproject_en_caliente() {
+        gtk4::init().expect("GTK display");
+        ensure_webkit_sandbox_usable();
+        let root =
+            std::env::temp_dir().join(format!("minmark-gtk-redescubre-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("uno.md"), "# Uno\n").unwrap();
+        std::fs::write(root.join("dos.md"), "# Dos\n").unwrap();
+        std::fs::write(
+            root.join(".mdproject.toml"),
+            "[[composition]]\nname = \"A\"\nfiles = [\"uno.md\"]\n",
+        )
+        .unwrap();
+        let app = Application::builder()
+            .application_id("app.minmark.test.redescubre")
+            .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk4::gio::Cancellable>).unwrap();
+        let uno = root.join("uno.md");
+        let cmds = build_window(
+            &app,
+            WindowScope::Project(root.clone()),
+            std::slice::from_ref(&uno),
+        );
+        assert_eq!(nombres_de(&cmds), ["A"], "descubrimiento al abrir");
+        assert!(cmds.compositions_available());
+        assert_eq!(
+            acciones_compositivas(&cmds),
+            [true, true],
+            "instalación: las dos habilitadas (§20)"
+        );
+
+        // Añade una composición en caliente: la ventana la redescubre.
+        std::fs::write(
+            root.join(".mdproject.toml"),
+            "[[composition]]\nname = \"A\"\nfiles = [\"uno.md\"]\n[[composition]]\nname = \"B\"\nfiles = [\"dos.md\"]\n",
+        )
+        .unwrap();
+        pump_until(|| nombres_de(&cmds).iter().any(|n| n == "B"));
+        assert_eq!(
+            acciones_compositivas(&cmds),
+            [true, true],
+            "siguen habilitadas con la lista ampliada"
+        );
+
+        // Quita todas: `compositions_available` habilita/deshabilita acorde.
+        std::fs::write(root.join(".mdproject.toml"), "pagination = false\n").unwrap();
+        pump_until(|| !cmds.compositions_available());
+        assert_eq!(
+            acciones_compositivas(&cmds),
+            [false, false],
+            "B1: al vaciar la lista, las DOS acciones deshabilitadas"
+        );
+
+        // Y al volver a declararlas se habilitan de nuevo.
+        std::fs::write(
+            root.join(".mdproject.toml"),
+            "[[composition]]\nname = \"A\"\nfiles = [\"uno.md\"]\n",
+        )
+        .unwrap();
+        pump_until(|| cmds.compositions_available());
+        assert_eq!(nombres_de(&cmds), ["A"]);
+        assert_eq!(
+            acciones_compositivas(&cmds),
+            [true, true],
+            "B1: al volver la lista, las DOS acciones habilitadas"
+        );
+
+        cmds.window.destroy();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// S1/ISSUE-024 (revisión PR #44, aceptación de #24): en la ventana del
+    /// Preview combinado, pulsar un enlace `#fragmento` (incluidas las
+    /// referencias cruzadas resueltas por `compose`) hace scroll in-page
+    /// hasta su elemento (§26) sin salir del documento.
+    #[test]
+    #[ignore = "requiere sesión gráfica GTK/WebKit"]
+    fn preview_combinado_navega_destinos_internos_con_scroll_in_page() {
+        gtk4::init().expect("GTK display");
+        ensure_webkit_sandbox_usable();
+        let root = std::env::temp_dir().join(format!(
+            "minmark-gtk-destino-interno-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join(".mdproject.toml"),
+            "[[composition]]\nname = \"Libro\"\nfiles = [\"uno.md\", \"dos.md\"]\n",
+        )
+        .unwrap();
+        // El destino queda muy por debajo del pliegue del viewport: sin el
+        // scroll in-page no puede entrar en pantalla.
+        let mut uno = String::from("[Ir al destino](#destino)\n\n");
+        for n in 0..150 {
+            uno.push_str(&format!("Párrafo {n}.\n\n"));
+        }
+        std::fs::write(root.join("uno.md"), uno).unwrap();
+        std::fs::write(root.join("dos.md"), "## Destino {#destino}\n").unwrap();
+        let app = Application::builder()
+            .application_id("app.minmark.test.destino-interno")
+            .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk4::gio::Cancellable>).unwrap();
+        let uno_path = root.join("uno.md");
+        let cmds = build_window(
+            &app,
+            WindowScope::Project(root.clone()),
+            std::slice::from_ref(&uno_path),
+        );
+        cmds.preview_composition();
+        let pane = {
+            let preview = cmds.composition_preview.borrow();
+            Rc::clone(
+                &preview
+                    .as_ref()
+                    .expect("ventana del Preview combinado")
+                    .pane,
+            )
+        };
+        const EN_VISIBLE: &str = "(() => { const e = document.getElementById('destino'); if (!e) return -1; const r = e.getBoundingClientRect(); return (r.top >= 0 && r.top < innerHeight) ? 1 : 0; })()";
+        // El HTML combinado llega con el enlace y con su ancla.
+        espera_js(
+            &pane,
+            "document.querySelector('a[href=\\\"#destino\\\"]') ? 1 : 0",
+            1.0,
+        );
+        assert_eq!(
+            eval_js(&pane, "document.getElementById('destino') ? 1 : 0"),
+            1.0
+        );
+        // Antes de pulsar, el destino está fuera del viewport.
+        assert_eq!(
+            eval_js(&pane, EN_VISIBLE),
+            0.0,
+            "el destino ya era visible: el test no probaría nada"
+        );
+        // Pulsar el enlace interno desplaza hasta el elemento.
+        assert_eq!(
+            eval_js(
+                &pane,
+                "(() => { const a = document.querySelector('a[href=\\\"#destino\\\"]'); if (!a) return 0; a.click(); return 1; })()"
+            ),
+            1.0
+        );
+        espera_js(&pane, EN_VISIBLE, 1.0);
+
+        cmds.window.destroy();
         let _ = std::fs::remove_dir_all(root);
     }
 

@@ -87,3 +87,6 @@ se comparten entre HTML y PDF. Las fuentes embebidas no contienen todos los glif
 y Preview continuo conservan `東京`, pero paginado/PDF puede mostrar glifos
 ausentes. La accesibilidad con lector de pantalla y Wayland requiere un entorno
 con esos servicios; el registro distingue esas comprobaciones de las realizadas.
+
+La ampliación de cobertura CJK es una [mejora futura pospuesta](https://github.com/ximocm/minmark/issues/40),
+sin milestone y fuera de los requisitos actuales del propietario.

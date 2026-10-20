@@ -79,7 +79,8 @@ figura numerado (por ejemplo, «Figura 1. Esquema») en Preview y PDF, con el
 mismo idioma y ámbito de numeración que sus referencias.
 El modo Visual conserva los tokens editables. Reordenar el documento recalcula
 las etiquetas sin escribir números en el fuente. Las referencias entre archivos
-compuestos y su numeración combinada siguen perteneciendo a la fase 6.
+compuestos y su numeración combinada están implementadas desde la fase 6:
+véase [Composiciones](COMPOSITIONS.md).
 
 El PDF recibe las imágenes locales como recursos en memoria con rutas virtuales;
 Typst no obtiene acceso libre al disco ni a la red. Las rutas se validan contra
