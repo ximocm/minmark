@@ -83,6 +83,16 @@ def info_plist(version):
     }
 
 
+def bundle_layout(app):
+    """Rutas del `.app`: `Contents`, la carpeta de dylibs y el binario.
+
+    `FRAMEWORKS_SUBDIR` es relativo a la raíz del bundle (no a `Contents`),
+    que es donde resuelve `EXECUTABLE_PREFIX` visto desde `MacOS/`.
+    """
+    contents = app / "Contents"
+    return contents, app / FRAMEWORKS_SUBDIR, contents / "MacOS" / "minmark"
+
+
 def stage_notices(stage, metadata):
     """Inventario de licencias de dependencias (mismo criterio que package-linux)."""
     notices = stage / "third-party"
@@ -288,18 +298,17 @@ def main():
     name = f"minmark-{version}-macos-aarch64"
     with tempfile.TemporaryDirectory(prefix="minmark-package-") as temp:
         stage = Path(temp) / name
-        contents = stage / "minmark.app" / "Contents"
+        app = stage / "minmark.app"
+        contents, frameworks, app_binary = bundle_layout(app)
         (contents / "MacOS").mkdir(parents=True)
-        frameworks = contents / FRAMEWORKS_SUBDIR
         frameworks.mkdir()
         (contents / "Resources").mkdir()
-        app_binary = contents / "MacOS" / "minmark"
         shutil.copy2(binary, app_binary)
         (contents / "Info.plist").write_bytes(
             plistlib.dumps(info_plist(version)))
         collect_and_rewrite(app_binary, frameworks)
         verify_bundle_paths(app_binary, frameworks)
-        sign_ad_hoc(stage / "minmark.app", app_binary, frameworks)
+        sign_ad_hoc(app, app_binary, frameworks)
         for filename in ["LICENSE", "NOTICE", "README.md", "BUILDING.md",
                          "CHANGELOG.md"]:
             shutil.copy2(ROOT / filename, stage / filename)

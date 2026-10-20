@@ -353,6 +353,19 @@ Load command 9
             self.assertEqual([entry["name"] for entry in inventory],
                              ["dependency", "typst-assets"])
 
+    def test_bundle_layout_matches_executable_prefix(self):
+        # Las dylibs deben quedar donde resuelve el install name reescrito
+        # (@executable_path/../Frameworks visto desde Contents/MacOS) y donde
+        # dice INSTALL.txt: minmark.app/Contents/Frameworks.
+        app = Path("/tmp/package/minmark.app")
+        contents, frameworks, binary = self.module.bundle_layout(app)
+        self.assertEqual(frameworks, app / "Contents" / "Frameworks")
+        self.assertEqual(contents, app / "Contents")
+        resolved = Path(os.path.normpath(
+            binary.parent /
+            self.module.EXECUTABLE_PREFIX[len("@executable_path/"):]))
+        self.assertEqual(resolved, frameworks)
+
 
 if __name__ == "__main__":
     unittest.main()
