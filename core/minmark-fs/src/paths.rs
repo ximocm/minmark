@@ -56,7 +56,12 @@ pub fn resolve_in_project(root: &Path, path: &Path) -> Result<PathBuf, FsError> 
             // ancestro existente más cercano (§48).
             resolve_missing_tail(&candidate)?
         }
-        Err(source) => return Err(FsError::Io { path: candidate, source }),
+        Err(source) => {
+            return Err(FsError::Io {
+                path: candidate,
+                source,
+            })
+        }
     };
     if !resolved.starts_with(&root_canon) {
         return Err(FsError::PathOutsideProject { path: resolved });
@@ -172,8 +177,7 @@ pub fn walk_tree(root: &Path) -> Result<Vec<TreeEntry>, FsError> {
     let mut visited: HashSet<PathBuf> = HashSet::new();
     visited.insert(root.clone());
     let mut out = Vec::new();
-    let mut stack: Vec<std::vec::IntoIter<TreeEntry>> =
-        vec![read_dir_entries(&root)?.into_iter()];
+    let mut stack: Vec<std::vec::IntoIter<TreeEntry>> = vec![read_dir_entries(&root)?.into_iter()];
     while !stack.is_empty() {
         let next = stack.last_mut().and_then(|frame| frame.next());
         let Some(entry) = next else {
@@ -199,8 +203,31 @@ pub fn walk_tree(root: &Path) -> Result<Vec<TreeEntry>, FsError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::unix::fs::symlink;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    /// Symlink portable para tests: en Windows distingue fichero de carpeta
+    /// (`symlink_file`/`symlink_dir`) y devuelve `Err` cuando el sistema no
+    /// permite crear symlinks (sin privilegio ni Developer Mode). Los tests
+    /// tratan ese error como «este escenario no aplica en esta máquina» y
+    /// terminan sin aserciones.
+    #[cfg(unix)]
+    fn symlink(original: impl AsRef<Path>, link: impl AsRef<Path>) -> std::io::Result<()> {
+        std::os::unix::fs::symlink(original, link)
+    }
+
+    #[cfg(windows)]
+    fn symlink(original: impl AsRef<Path>, link: impl AsRef<Path>) -> std::io::Result<()> {
+        let original = original.as_ref();
+        let link = link.as_ref();
+        // El destino relativo se resuelve contra la carpeta del enlace.
+        let base = link.parent().unwrap_or_else(|| Path::new(""));
+        let es_carpeta = base.join(original).is_dir();
+        if es_carpeta {
+            std::os::windows::fs::symlink_dir(original, link)
+        } else {
+            std::os::windows::fs::symlink_file(original, link)
+        }
+    }
 
     /// Directorio temporal de test, eliminado al salir.
     struct TestDir(PathBuf);
@@ -211,7 +238,8 @@ mod tests {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_nanos();
-            let path = std::env::temp_dir().join(format!("minmark-fs-{}-{}", std::process::id(), nanos));
+            let path =
+                std::env::temp_dir().join(format!("minmark-fs-{}-{}", std::process::id(), nanos));
             fs::create_dir_all(&path).unwrap();
             Self(path)
         }
@@ -257,9 +285,12 @@ mod tests {
         // §48: la canónica de un symlink que sale del proyecto también sale.
         let (_dir, root) = proyecto();
         fs::create_dir_all(root.join("interno")).unwrap();
-        symlink("interno", root.join("enlace_in")).unwrap();
         let fuera = TestDir::new();
-        symlink(fuera.path(), root.join("enlace_out")).unwrap();
+        if symlink("interno", root.join("enlace_in")).is_err()
+            || symlink(fuera.path(), root.join("enlace_out")).is_err()
+        {
+            return; // sin privilegio de symlinks (Windows): no aplica aquí
+        }
 
         let esperado = fs::canonicalize(root.join("interno")).unwrap();
         assert_eq!(
@@ -308,8 +339,11 @@ mod tests {
         let (_dir, root) = proyecto();
         fs::create_dir_all(root.join("a")).unwrap();
         fs::write(root.join("a/uno.md"), "x\n").unwrap();
-        symlink("..", root.join("a/enlace")).unwrap();
-        symlink(".", root.join("ciclo")).unwrap();
+        if symlink("..", root.join("a/enlace")).is_err()
+            || symlink(".", root.join("ciclo")).is_err()
+        {
+            return; // sin privilegio de symlinks (Windows): no aplica aquí
+        }
 
         let entries = walk_tree(&root).unwrap();
         let nombres: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
@@ -333,7 +367,9 @@ mod tests {
         let (_dir, root) = proyecto();
         fs::create_dir_all(root.join("real")).unwrap();
         fs::write(root.join("real/dentro.md"), "x\n").unwrap();
-        symlink("real", root.join("enlace_carpeta")).unwrap();
+        if symlink("real", root.join("enlace_carpeta")).is_err() {
+            return; // sin privilegio de symlinks (Windows): no aplica aquí
+        }
 
         let entries = walk_tree(&root).unwrap();
         let nombres: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
@@ -360,8 +396,11 @@ mod tests {
         let (_dir, root) = proyecto();
         fs::create_dir_all(root.join("carpeta")).unwrap();
         fs::write(root.join("archivo.md"), "x\n").unwrap();
-        symlink("archivo.md", root.join("enlace_archivo")).unwrap();
-        symlink("carpeta", root.join("enlace_carpeta")).unwrap();
+        if symlink("archivo.md", root.join("enlace_archivo")).is_err()
+            || symlink("carpeta", root.join("enlace_carpeta")).is_err()
+        {
+            return; // sin privilegio de symlinks (Windows): no aplica aquí
+        }
 
         let entries = read_dir_entries(&root).unwrap();
         assert_eq!(

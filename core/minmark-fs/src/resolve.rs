@@ -524,6 +524,26 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
 
+    /// Symlink portable para tests (fichero en Windows): devuelve `Err` si el
+    /// sistema no permite crear symlinks y el test que lo usa termina entonces
+    /// sin aserciones («no aplica en esta máquina»).
+    #[cfg(unix)]
+    fn symlink(original: impl AsRef<Path>, link: impl AsRef<Path>) -> std::io::Result<()> {
+        std::os::unix::fs::symlink(original, link)
+    }
+
+    #[cfg(windows)]
+    fn symlink(original: impl AsRef<Path>, link: impl AsRef<Path>) -> std::io::Result<()> {
+        let original = original.as_ref();
+        let link = link.as_ref();
+        let base = link.parent().unwrap_or_else(|| Path::new(""));
+        if base.join(original).is_dir() {
+            std::os::windows::fs::symlink_dir(original, link)
+        } else {
+            std::os::windows::fs::symlink_file(original, link)
+        }
+    }
+
     fn temp_tree(tag: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -810,7 +830,10 @@ mod tests {
 
         // La ruta real del archivo (p. ej. la que deja pegar una imagen desde
         // otro programa) resuelve a su relativa dentro del proyecto.
-        let real = root.join("cap/mi archivo.md").to_string_lossy().into_owned();
+        let real = root
+            .join("cap/mi archivo.md")
+            .to_string_lossy()
+            .into_owned();
         let target = r.resolve(&real, "index.md");
         assert_eq!(target.kind, TargetKind::Local);
         assert_eq!(target.rel_path.as_deref(), Some("cap/mi archivo.md"));
@@ -837,10 +860,7 @@ mod tests {
         // el motor no lee fuera de la raíz.
         let fuera = temp_tree("absoluta-fuera");
         fs::write(fuera.join("secreto.png"), [0x89]).unwrap();
-        let real_fuera = fuera
-            .join("secreto.png")
-            .to_string_lossy()
-            .into_owned();
+        let real_fuera = fuera.join("secreto.png").to_string_lossy().into_owned();
         assert!(
             std::path::Path::new(&real_fuera).is_file(),
             "el archivo exterior existe"
@@ -915,7 +935,9 @@ mod tests {
         let mut index = ProjectIndex::new(root.clone());
         index.refresh().unwrap();
         fs::remove_file(root.join("cap/a.md")).unwrap();
-        std::os::unix::fs::symlink(outside.join("fuera.md"), root.join("cap/a.md")).unwrap();
+        if symlink(outside.join("fuera.md"), root.join("cap/a.md")).is_err() {
+            return; // sin privilegio de symlinks (Windows): no aplica aquí
+        }
         let open = OpenBuffers::new();
         let r = resolver(&index, &open);
 

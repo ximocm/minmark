@@ -25,7 +25,7 @@ mod paths;
 pub mod resolve;
 pub mod search;
 mod snapshots;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 mod watch;
 
 pub use atomic::{stage_write, write_atomic, StagedWrite};
@@ -40,7 +40,11 @@ pub use paths::{read_dir_entries, resolve_in_project, walk_tree, TreeEntry};
 pub use resolve::{LinkTarget, OpenBuffers, Resolver, TargetKind};
 pub use snapshots::{default_dir, SnapshotStore};
 #[cfg(target_os = "linux")]
-pub use watch::{ChangeEvent, ChangeKind, InotifyWatcher, Watcher};
+pub use watch::InotifyWatcher;
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+pub use watch::NotifyWatcher;
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+pub use watch::{ChangeEvent, ChangeKind, NativeWatcher, Watcher};
 
 use minmark_document::Document;
 use std::fmt;
@@ -78,11 +82,18 @@ impl fmt::Display for FsError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NotUtf8 { path } => {
-                write!(f, "{} no es UTF-8 válido (solo se admite UTF-8, §12.5)", path.display())
+                write!(
+                    f,
+                    "{} no es UTF-8 válido (solo se admite UTF-8, §12.5)",
+                    path.display()
+                )
             }
             Self::Io { path, source } => write!(f, "error de E/S en {}: {source}", path.display()),
             Self::MissingPath => {
-                write!(f, "el documento no tiene archivo asignado; use Save As (§12.4)")
+                write!(
+                    f,
+                    "el documento no tiene archivo asignado; use Save As (§12.4)"
+                )
             }
             Self::PathOutsideProject { path } => {
                 write!(f, "la ruta {} sale del proyecto (§48)", path.display())
@@ -93,7 +104,11 @@ impl fmt::Display for FsError {
                 path.display()
             ),
             Self::AlreadyExists { path } => {
-                write!(f, "el destino {} ya existe (§3.7: sin sobrescritura)", path.display())
+                write!(
+                    f,
+                    "el destino {} ya existe (§3.7: sin sobrescritura)",
+                    path.display()
+                )
             }
             Self::UnsafeReference { path, dest } => write!(
                 f,
@@ -176,7 +191,9 @@ mod tests {
     #[test]
     fn extensiones_markdown_de_12_2() {
         assert!(is_markdown_path(Path::new("notas.md")));
-        assert!(is_markdown_path(Path::new("/proyecto/carpeta/informe.markdown")));
+        assert!(is_markdown_path(Path::new(
+            "/proyecto/carpeta/informe.markdown"
+        )));
         assert!(!is_markdown_path(Path::new("datos.txt")));
         assert!(!is_markdown_path(Path::new("sin_extension")));
         assert!(!is_markdown_path(Path::new("README.MD")));

@@ -33,7 +33,6 @@ use crate::paths::walk_tree;
 use crate::{relative_path, write_atomic, FsError};
 use minmark_document::find_markdown_references;
 use std::collections::{BTreeMap, BTreeSet};
-use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 /// Firma del formato de índice.
@@ -116,10 +115,13 @@ impl ProjectIndex {
     }
 
     /// Ruta por defecto del índice de `root` (§45.1): fuera del proyecto,
-    /// `$XDG_DATA_HOME/minmark/index/<clave>.index` (o `~/.local/share/…`),
-    /// con la clave derivada de la raíz canónica.
+    /// bajo el directorio de datos por SO (`minmark_config::dirs`):
+    /// `$XDG_DATA_HOME/minmark/index/…` en Linux (o `~/.local/share/…`),
+    /// `%LOCALAPPDATA%\minmark\index\…` en Windows y
+    /// `~/Library/Application Support/minmark/index/…` en macOS. La clave se
+    /// deriva de la raíz canónica.
     pub fn default_path(root: &Path) -> Result<PathBuf, FsError> {
-        let base = data_dir_from_env(std::env::var_os("XDG_DATA_HOME"), std::env::var_os("HOME"))?;
+        let base = data_base()?;
         let canon = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
         let key = canon.to_string_lossy();
         let mut hash: u64 = 0xcbf2_9ce4_8422_2325; // FNV-1a: std-only, estable.
@@ -357,33 +359,24 @@ impl ProjectIndex {
     }
 }
 
-/// Directorio de datos de la aplicación con subcarpeta `tail` (§45.1): mismo
-/// patrón que [`crate::SnapshotStore::default_dir`] (§3.6), fuera del
-/// proyecto. Un valor no absoluto no es utilizable (§45.1).
-fn data_dir_from_env(
-    xdg_data_home: Option<OsString>,
-    home: Option<OsString>,
-) -> Result<PathBuf, FsError> {
-    if let Some(dir) = xdg_data_home.map(PathBuf::from) {
-        if dir.is_absolute() {
-            return Ok(dir.join("minmark").join("index"));
+/// Directorio por defecto del índice (§45.1): base de datos por SO
+/// (`minmark_config::dirs`) + `minmark/index`, fuera del proyecto, con el
+/// error histórico si el sistema no ofrece ninguna base utilizable.
+fn data_base() -> Result<PathBuf, FsError> {
+    minmark_config::dirs::data_dir()
+        .map(|base| base.join("minmark").join("index"))
+        .ok_or_else(|| {
+        let motivo = if cfg!(target_os = "windows") {
+            "sin %LOCALAPPDATA% no hay directorio de datos fuera del proyecto (§45.1)"
+        } else if cfg!(target_os = "macos") {
+            "sin HOME no hay directorio de datos fuera del proyecto (§45.1)"
+        } else {
+            "sin XDG_DATA_HOME ni HOME absolutos no hay directorio de datos fuera del proyecto (§45.1)"
+        };
+        FsError::Io {
+            path: PathBuf::new(),
+            source: std::io::Error::new(std::io::ErrorKind::NotFound, motivo),
         }
-    }
-    if let Some(dir) = home.map(PathBuf::from) {
-        if dir.is_absolute() {
-            return Ok(dir
-                .join(".local")
-                .join("share")
-                .join("minmark")
-                .join("index"));
-        }
-    }
-    Err(FsError::Io {
-        path: PathBuf::new(),
-        source: std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "sin XDG_DATA_HOME ni HOME absolutos no hay directorio de datos fuera del proyecto (§45.1)",
-        ),
     })
 }
 

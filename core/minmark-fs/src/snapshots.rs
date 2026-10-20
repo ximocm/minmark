@@ -15,7 +15,6 @@
 //! (UTF-8 del path asociado, vacío si no hay).
 
 use crate::{at_snapshot_limit, snapshots_size, FsError, SnapshotMeta};
-use std::ffi::OsString;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -31,45 +30,28 @@ const MAX_ID_LEN: usize = 20;
 
 /// Directorio por defecto de snapshots, fuera del proyecto (§3.6, §45.1).
 ///
-/// `$XDG_DATA_HOME/minmark/snapshots` si `XDG_DATA_HOME` está definido y es
-/// absoluto; si no, `$HOME/.local/share/minmark/snapshots`. Nunca dentro del
-/// proyecto: sin variables de entorno utilizables no hay destino seguro y se
-/// devuelve [`FsError::Io`] con [`ErrorKind::NotFound`].
+/// Base de datos por SO (`minmark_config::dirs`): `$XDG_DATA_HOME` (si es
+/// absoluto) o `$HOME/.local/share` en Linux con `minmark/snapshots` debajo,
+/// `%LOCALAPPDATA%\minmark\snapshots` en Windows y
+/// `~/Library/Application Support/minmark/snapshots` en macOS. Nunca dentro
+/// del proyecto: sin variables de entorno utilizables no hay destino seguro y
+/// se devuelve [`FsError::Io`] con [`ErrorKind::NotFound`].
 pub fn default_dir() -> Result<PathBuf, FsError> {
-    dir_from_env(
-        std::env::var_os("XDG_DATA_HOME"),
-        std::env::var_os("HOME"),
-    )
-}
-
-/// Lógica de [`default_dir`] con el entorno inyectado.
-///
-/// Separada para poder validar todas las ramas sin mutar variables de
-/// proceso (compartidas entre los tests en paralelo). Un valor no absoluto
-/// no es utilizable: un destino relativo caería dentro del proyecto, fuera
-/// del almacén externo que exige §45.1.
-fn dir_from_env(xdg_data_home: Option<OsString>, home: Option<OsString>) -> Result<PathBuf, FsError> {
-    if let Some(dir) = xdg_data_home.map(PathBuf::from) {
-        if dir.is_absolute() {
-            return Ok(dir.join("minmark").join("snapshots"));
-        }
-    }
-    if let Some(dir) = home.map(PathBuf::from) {
-        if dir.is_absolute() {
-            return Ok(dir
-                .join(".local")
-                .join("share")
-                .join("minmark")
-                .join("snapshots"));
-        }
-    }
-    Err(FsError::Io {
-        path: PathBuf::new(),
-        source: std::io::Error::new(
-            ErrorKind::NotFound,
-            "sin XDG_DATA_HOME ni HOME absolutos no hay directorio de snapshots fuera del proyecto (§45.1)",
-        ),
-    })
+    minmark_config::dirs::data_dir()
+        .map(|base| base.join("minmark").join("snapshots"))
+        .ok_or_else(|| {
+            let motivo = if cfg!(target_os = "windows") {
+                "sin %LOCALAPPDATA% no hay directorio de snapshots fuera del proyecto (§45.1)"
+            } else if cfg!(target_os = "macos") {
+                "sin HOME no hay directorio de snapshots fuera del proyecto (§45.1)"
+            } else {
+                "sin XDG_DATA_HOME ni HOME absolutos no hay directorio de snapshots fuera del proyecto (§45.1)"
+            };
+            FsError::Io {
+                path: PathBuf::new(),
+                source: std::io::Error::new(ErrorKind::NotFound, motivo),
+            }
+        })
 }
 
 /// Nombre del subdirectorio de un snapshot: id decimal relleno a 10 dígitos.
@@ -92,11 +74,10 @@ fn write_snapshot_files(
     content: &str,
 ) -> Result<(), FsError> {
     let content_path = snap_dir.join(CONTENT_FILE);
-    fs::write(&content_path, content.as_bytes())
-        .map_err(|source| FsError::Io {
-            path: content_path,
-            source,
-        })?;
+    fs::write(&content_path, content.as_bytes()).map_err(|source| FsError::Io {
+        path: content_path,
+        source,
+    })?;
     let doc_path = snap_dir.join(DOCUMENT_FILE);
     fs::write(&doc_path, document_text.unwrap_or("").as_bytes()).map_err(|source| FsError::Io {
         path: doc_path,
@@ -231,10 +212,8 @@ impl SnapshotStore {
             path: snap_dir.clone(),
             source,
         })?;
-        let written =
-            write_snapshot_files(&snap_dir, document_text, content).and_then(|()| {
-                meta_of(id, &snap_dir)
-            });
+        let written = write_snapshot_files(&snap_dir, document_text, content)
+            .and_then(|()| meta_of(id, &snap_dir));
         let meta = match written {
             Ok(meta) => meta,
             Err(err) => {
@@ -335,8 +314,8 @@ mod tests {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_nanos();
-            let path = std::env::temp_dir()
-                .join(format!("minmark-fs-{}-{}", std::process::id(), nanos));
+            let path =
+                std::env::temp_dir().join(format!("minmark-fs-{}-{}", std::process::id(), nanos));
             fs::create_dir_all(&path).unwrap();
             Self(path)
         }
@@ -502,43 +481,20 @@ mod tests {
     }
 
     #[test]
-    fn default_dir_logica_controlada() {
-        // XDG_DATA_HOME absoluto manda (§45.1).
-        assert_eq!(
-            dir_from_env(
-                Some(OsString::from("/tmp/xdg")),
-                Some(OsString::from("/home/ana"))
-            )
-            .unwrap(),
-            PathBuf::from("/tmp/xdg/minmark/snapshots")
-        );
-        // XDG_DATA_HOME no absoluto: se ignora y se usa HOME.
-        assert_eq!(
-            dir_from_env(
-                Some(OsString::from("xdg-relativo")),
-                Some(OsString::from("/home/ana"))
-            )
-            .unwrap(),
-            PathBuf::from("/home/ana/.local/share/minmark/snapshots")
-        );
-        // Solo HOME.
-        assert_eq!(
-            dir_from_env(None, Some(OsString::from("/home/ana"))).unwrap(),
-            PathBuf::from("/home/ana/.local/share/minmark/snapshots")
-        );
-        // Sin variables utilizables no hay destino fuera del proyecto.
-        for (xdg, home) in [
-            (None, None),
-            (Some(OsString::from("rel")), None),
-            (None, Some(OsString::from("rel"))),
-            (Some(OsString::from("rel")), Some(OsString::from("rel"))),
-        ] {
-            match dir_from_env(xdg, home) {
-                Err(FsError::Io { source, .. }) => {
-                    assert_eq!(source.kind(), ErrorKind::NotFound)
-                }
-                other => panic!("esperaba Io NotFound, obtuvo {:?}", other),
+    fn default_dir_usa_la_base_central_de_datos_45_1() {
+        // El descubrimiento vive en `minmark_config::dirs` (las tres ramas por
+        // SO se validan allí de forma inyectada); aquí se verifica que los
+        // snapshots se componen sobre esa misma base y que la ausencia de ella
+        // produce el error especificado.
+        match (default_dir(), minmark_config::dirs::data_dir()) {
+            (Ok(dir), Some(base)) => {
+                assert_eq!(dir, base.join("minmark").join("snapshots"));
+                assert!(dir.is_absolute(), "{:?} debe ser absoluta", dir);
             }
+            (Err(FsError::Io { source, .. }), None) => {
+                assert_eq!(source.kind(), ErrorKind::NotFound)
+            }
+            (dir, base) => panic!("incoherentes: default_dir={dir:?} data_dir={base:?}"),
         }
     }
 
@@ -581,7 +537,10 @@ mod tests {
         let snaps = dir.file("snaps");
         {
             let mut store = SnapshotStore::open(snaps.clone()).unwrap();
-            store.create(None, "completo uno\n", u64::MAX).unwrap().unwrap();
+            store
+                .create(None, "completo uno\n", u64::MAX)
+                .unwrap()
+                .unwrap();
         }
         let parcial = snaps.join("0000000002");
         fs::create_dir(&parcial).unwrap();

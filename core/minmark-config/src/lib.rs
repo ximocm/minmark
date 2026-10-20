@@ -11,6 +11,10 @@ mod compositions;
 mod settings;
 mod theme;
 
+/// Descubrimiento de directorios por SO (§45.1, §14.2): único punto que
+/// decide configuración, datos y estado en Linux, Windows y macOS.
+pub mod dirs;
+
 pub use compositions::{parse_compositions, Composition, CompositionWarning};
 pub use theme::{detect_system_theme, resolve_theme, ResolvedTheme, SystemTheme};
 

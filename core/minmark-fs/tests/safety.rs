@@ -1,10 +1,10 @@
 //! Escenarios de seguridad end-to-end de ISSUE-019 sobre el filesystem real:
 //! detección de cambios externos (§12.7, §46) integrada con el buffer.
 
-use minmark_fs::{ChangeKind, FileStore, FsError, InotifyWatcher, LocalFs, Watcher};
+use minmark_fs::{ChangeKind, FileStore, FsError, LocalFs, NativeWatcher, Watcher};
 use std::fs;
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 struct TestDir(PathBuf);
 
@@ -14,7 +14,8 @@ impl TestDir {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let path = std::env::temp_dir().join(format!("minmark-safety-{}-{}", std::process::id(), nanos));
+        let path =
+            std::env::temp_dir().join(format!("minmark-safety-{}-{}", std::process::id(), nanos));
         fs::create_dir_all(&path).unwrap();
         Self(path)
     }
@@ -38,12 +39,29 @@ fn cambios_externos_se_notifican_sin_recargar_el_buffer() {
     let mut doc = store.open(&path).unwrap();
     doc.replace_content("edición local\n");
 
-    let mut watcher = InotifyWatcher::new().unwrap();
+    let mut watcher = NativeWatcher::new().unwrap();
     watcher.watch(&path).unwrap();
     fs::write(&path, "otro programa\n").unwrap();
 
-    // Notificación nativa al watcher…
-    let events = watcher.poll().unwrap();
+    // Notificación nativa al watcher: inotify entrega ya en el primer `poll`
+    // y los backends de Windows/macOS desde su hilo nativo; el test espera
+    // con reintentos (no es un rescan: el watcher solo emite, §46).
+    let fin = Instant::now() + Duration::from_secs(10);
+    let mut events = Vec::new();
+    loop {
+        events.extend(watcher.poll().unwrap());
+        if events
+            .iter()
+            .any(|e| e.kind == ChangeKind::Modified && e.path.ends_with("doc.md"))
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < fin,
+            "sin la notificación esperada; eventos: {events:?}"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
     assert!(
         events
             .iter()

@@ -85,9 +85,15 @@ pub fn create_folder(root: &Path, parent: &Path, name: &str) -> Result<PathBuf, 
 fn create_entry(root: &Path, parent: &Path, name: &str, file: bool) -> Result<PathBuf, FsError> {
     let path = checked_target(root, parent, name)?;
     if file {
-        std::fs::write(&path, b"").map_err(|source| FsError::Io { path: path.clone(), source })?;
+        std::fs::write(&path, b"").map_err(|source| FsError::Io {
+            path: path.clone(),
+            source,
+        })?;
     } else {
-        std::fs::create_dir(&path).map_err(|source| FsError::Io { path: path.clone(), source })?;
+        std::fs::create_dir(&path).map_err(|source| FsError::Io {
+            path: path.clone(),
+            source,
+        })?;
     }
     Ok(path)
 }
@@ -195,11 +201,16 @@ pub fn import_markdown(root: &Path, src: &Path, dest_dir: &Path) -> Result<PathB
 
 /// Envía `path` (archivo o carpeta) a la papelera del sistema (§14.9).
 ///
-/// Implementación de la especificación XDG trash: `$XDG_DATA_HOME/Trash/`
-/// con `files/<nombre>` y `info/<nombre>.trashinfo` (`Path` exacto y
-/// `DeletionDate`). `DeletionDate` va en UTC: sin dependencias de fecha (§4.1)
-/// no hay conversión de zona local; el valor es informativo y `Path` —lo que
-/// permite restaurar— se preserva exacto (decisión registrada en ISSUE-023).
+/// En Linux —y en los demás Unix sin backend propio— es la implementación de
+/// la especificación XDG trash: `$XDG_DATA_HOME/Trash/` con `files/<nombre>` e
+/// `info/<nombre>.trashinfo` (`Path` exacto y `DeletionDate`). `DeletionDate`
+/// va en UTC: sin dependencias de fecha (§4.1) no hay conversión de zona
+/// local; el valor es informativo y `Path` —lo que permite restaurar— se
+/// preserva exacto (decisión registrada en ISSUE-023). En Windows y macOS la
+/// papelera es la nativa del sistema: Papelera de reciclaje y `~/.Trash` vía
+/// el crate `trash` (justificación de la dependencia en `Cargo.toml`,
+/// §4.4 / precedente ADR-003).
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 pub fn trash(path: &Path) -> Result<(), FsError> {
     let base = std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
@@ -213,6 +224,17 @@ pub fn trash(path: &Path) -> Result<(), FsError> {
     trash_to(&base.join("Trash"), path)
 }
 
+/// [`trash`] en Windows y macOS: papelera nativa (§14.9), sin escritura
+/// directa ni borrado definitivo. Los errores de la papelera del sistema se
+/// propagan como [`FsError::Io`]: nunca un fallo silencioso.
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+pub fn trash(path: &Path) -> Result<(), FsError> {
+    ::trash::delete(path).map_err(|source| FsError::Io {
+        path: path.to_path_buf(),
+        source: std::io::Error::other(format!("papelera del sistema: {source}")),
+    })
+}
+
 /// [`trash`] sobre una raíz de papelera explícita (tests; la XDG real es
 /// `$XDG_DATA_HOME/Trash`).
 pub fn trash_to(trash_root: &Path, path: &Path) -> Result<(), FsError> {
@@ -220,7 +242,10 @@ pub fn trash_to(trash_root: &Path, path: &Path) -> Result<(), FsError> {
     let (stem, ext) = split_name(&name);
     std::fs::create_dir_all(trash_root.join("files"))
         .and_then(|()| std::fs::create_dir_all(trash_root.join("info")))
-        .map_err(|source| FsError::Io { path: trash_root.to_path_buf(), source })?;
+        .map_err(|source| FsError::Io {
+            path: trash_root.to_path_buf(),
+            source,
+        })?;
     let target = numbered_path(&trash_root.join("files"), &stem, ext.as_deref());
     let trash_name = file_name_str(&target);
 
@@ -228,7 +253,9 @@ pub fn trash_to(trash_root: &Path, path: &Path) -> Result<(), FsError> {
         path: path.to_path_buf(),
         source,
     })?;
-    let info = trash_root.join("info").join(format!("{trash_name}.trashinfo"));
+    let info = trash_root
+        .join("info")
+        .join(format!("{trash_name}.trashinfo"));
     let info_body = format!(
         "[Trash Info]\nPath={}\nDeletionDate={}\n",
         percent_encode(&absolute.to_string_lossy()),
@@ -241,7 +268,10 @@ pub fn trash_to(trash_root: &Path, path: &Path) -> Result<(), FsError> {
 
     if let Err(source) = move_entry_raw(path, &target) {
         let _ = std::fs::remove_file(&info);
-        return Err(FsError::Io { path: path.to_path_buf(), source });
+        return Err(FsError::Io {
+            path: path.to_path_buf(),
+            source,
+        });
     }
     Ok(())
 }
@@ -262,7 +292,7 @@ fn copy_entry_io(from: &Path, to: &Path) -> std::io::Result<()> {
     let meta = std::fs::symlink_metadata(from)?;
     if meta.file_type().is_symlink() {
         let target = std::fs::read_link(from)?;
-        return std::os::unix::fs::symlink(target, to);
+        return recreate_symlink(from, &target, to);
     }
     if meta.is_dir() {
         std::fs::create_dir(to)?;
@@ -276,6 +306,33 @@ fn copy_entry_io(from: &Path, to: &Path) -> std::io::Result<()> {
     }
 }
 
+/// Recrea en `to` un symlink cuyo destino leído es `target`: los enlaces se
+/// copian como enlaces, nunca como contenido (§14.7, §3.7).
+///
+/// En Windows `std::os::windows::fs` exige distinguir fichero de carpeta; si
+/// el sistema no permite crear symlinks (sin privilegio ni Developer Mode) el
+/// error de E/S se propaga a [`FsError::Io`] sin copia silenciosa de respaldo.
+#[cfg(unix)]
+fn recreate_symlink(_from: &Path, target: &Path, to: &Path) -> std::io::Result<()> {
+    std::os::unix::fs::symlink(target, to)
+}
+
+/// Versión Windows de [`recreate_symlink`]: el tipo del enlace (fichero o
+/// carpeta) se decide por el destino real, resuelto contra la carpeta del
+/// propio enlace cuando `target` es relativo.
+#[cfg(windows)]
+fn recreate_symlink(from: &Path, target: &Path, to: &Path) -> std::io::Result<()> {
+    let base = from.parent().unwrap_or_else(|| Path::new(""));
+    let es_carpeta = std::fs::metadata(base.join(target))
+        .map(|meta| meta.is_dir())
+        .unwrap_or(false);
+    if es_carpeta {
+        std::os::windows::fs::symlink_dir(target, to)
+    } else {
+        std::os::windows::fs::symlink_file(target, to)
+    }
+}
+
 fn remove_entry_io(path: &Path) -> std::io::Result<()> {
     let meta = std::fs::symlink_metadata(path)?;
     if meta.is_dir() {
@@ -286,7 +343,10 @@ fn remove_entry_io(path: &Path) -> std::io::Result<()> {
 }
 
 fn copy_entry(from: &Path, to: &Path) -> Result<(), FsError> {
-    copy_entry_io(from, to).map_err(|source| FsError::Io { path: from.to_path_buf(), source })
+    copy_entry_io(from, to).map_err(|source| FsError::Io {
+        path: from.to_path_buf(),
+        source,
+    })
 }
 
 /// Percent-encoding de la ruta original para `Trash/info` (XDG).
@@ -312,7 +372,12 @@ fn utc_timestamp() -> String {
     let days = secs.div_euclid(86_400);
     let time = secs.rem_euclid(86_400);
     let (year, month, day) = civil_from_days(days);
-    format!("{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}", time / 3600, (time % 3600) / 60, time % 60)
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}",
+        time / 3600,
+        (time % 3600) / 60,
+        time % 60
+    )
 }
 
 /// Días desde 1970-01-01 → fecha civil (algoritmo de Howard Hinnant).
@@ -441,13 +506,19 @@ pub fn apply_path_change(change: &PathChange) -> Result<(), FsError> {
         })?;
         if let Err(source) = write_atomic(path, content.as_bytes()) {
             rollback(&journal);
-            return Err(FsError::Io { path: path.clone(), source });
+            return Err(FsError::Io {
+                path: path.clone(),
+                source,
+            });
         }
         journal.push((path.clone(), Some(original)));
     }
     if let Err(source) = std::fs::rename(&change.from, &change.to) {
         rollback(&journal);
-        return Err(FsError::Io { path: change.from.clone(), source });
+        return Err(FsError::Io {
+            path: change.from.clone(),
+            source,
+        });
     }
     Ok(())
 }
@@ -490,7 +561,8 @@ fn plan_reference(
     if path_part.is_empty() || has_scheme(path_part) {
         return Ok(None);
     }
-    let base = if reference.kind == RefKind::ConfigPath && file_name_str(file) == ".mdproject.toml" {
+    let base = if reference.kind == RefKind::ConfigPath && file_name_str(file) == ".mdproject.toml"
+    {
         root
     } else {
         file_dir
@@ -605,7 +677,10 @@ fn scan_reference_files(root: &Path, ignore: &IgnorePatterns) -> Result<Vec<Path
             .path
             .extension()
             .is_some_and(|ext| ext == "md" || ext == "markdown");
-        let is_project_toml = entry.path.file_name().is_some_and(|n| n == ".mdproject.toml");
+        let is_project_toml = entry
+            .path
+            .file_name()
+            .is_some_and(|n| n == ".mdproject.toml");
         if is_markdown || is_project_toml {
             files.push(entry.path);
         }
@@ -617,7 +692,8 @@ fn scan_reference_files(root: &Path, ignore: &IgnorePatterns) -> Result<Vec<Path
 
 fn checked_target(root: &Path, parent: &Path, name: &str) -> Result<PathBuf, FsError> {
     let mut components = Path::new(name).components();
-    let simple = matches!(components.next(), Some(Component::Normal(_))) && components.next().is_none();
+    let simple =
+        matches!(components.next(), Some(Component::Normal(_))) && components.next().is_none();
     if !simple || name.is_empty() {
         return Err(FsError::InvalidOperation {
             reason: "el nombre debe ser un nombre simple (sin / ni ..)",
@@ -764,7 +840,8 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let dir = std::env::temp_dir().join(format!("minmark-ops-{tag}-{}-{nanos}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("minmark-ops-{tag}-{}-{nanos}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
@@ -809,7 +886,10 @@ mod tests {
     #[test]
     fn ruta_relativa_17() {
         assert_eq!(relative_path(Path::new("/p"), Path::new("/p/a.md")), "a.md");
-        assert_eq!(relative_path(Path::new("/p/cap"), Path::new("/p/a.md")), "../a.md");
+        assert_eq!(
+            relative_path(Path::new("/p/cap"), Path::new("/p/a.md")),
+            "../a.md"
+        );
         assert_eq!(
             relative_path(Path::new("/p/cap"), Path::new("/p/cap/x/y.png")),
             "x/y.png"
@@ -960,7 +1040,10 @@ mod tests {
             &root.join("chapters/con (paréntesis).md"),
             ChangeOptions::default(),
         );
-        assert!(matches!(result, Err(FsError::UnsafeReference { .. })), "{result:?}");
+        assert!(
+            matches!(result, Err(FsError::UnsafeReference { .. })),
+            "{result:?}"
+        );
         // Sin efectos: nada tocado (§16: abort completo).
         assert!(root.join("chapters/chapter1.md").exists());
         assert_eq!(fs::read_to_string(root.join("index.md")).unwrap(), before);
@@ -1019,7 +1102,10 @@ mod tests {
             &root.join("a/otro.md"),
             ChangeOptions { wiki_links: true },
         );
-        assert!(matches!(result, Err(FsError::UnsafeReference { .. })), "{result:?}");
+        assert!(
+            matches!(result, Err(FsError::UnsafeReference { .. })),
+            "{result:?}"
+        );
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -1079,14 +1165,15 @@ mod tests {
             fs::read_to_string(root.join("generado.md")).unwrap(),
             "[](objetivo.md)\n"
         );
-        assert_eq!(fs::read_to_string(root.join("doc.md")).unwrap(), "[](destino.md)\n");
+        assert_eq!(
+            fs::read_to_string(root.join("doc.md")).unwrap(),
+            "[](destino.md)\n"
+        );
         let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
     fn fallo_a_mitad_revuelve_todo_16() {
-        use std::os::unix::fs::PermissionsExt;
-
         let root = proyecto_16("rollback");
         fs::write(root.join("otro.md"), "[x](chapters/chapter1.md)\n").unwrap();
         let plan = plan_path_change(
@@ -1102,13 +1189,38 @@ mod tests {
         // escrito debe revertirse (all-or-nothing).
         let mut updates = plan.updates.clone();
         updates.sort();
-        let bloqueado = updates[1].0.parent().unwrap().to_path_buf();
-        fs::set_permissions(&bloqueado, fs::Permissions::from_mode(0o555)).unwrap();
 
-        let result = apply_path_change(&plan);
-        fs::set_permissions(&bloqueado, fs::Permissions::from_mode(0o755)).unwrap();
+        // Unix: directorio del segundo archivo en 0o555 (no se puede crear el
+        // temporal de la escritura atómica). Windows: los atributos de
+        // directorio no bloquean escrituras dentro, así que se marca como de
+        // solo lectura el propio fichero (el `rename` sobre él falla).
+        #[cfg(unix)]
+        let result = {
+            use std::os::unix::fs::PermissionsExt;
+            let bloqueado = updates[1].0.parent().unwrap().to_path_buf();
+            fs::set_permissions(&bloqueado, fs::Permissions::from_mode(0o555)).unwrap();
+            let result = apply_path_change(&plan);
+            fs::set_permissions(&bloqueado, fs::Permissions::from_mode(0o755)).unwrap();
+            result
+        };
+        #[cfg(windows)]
+        let result = {
+            let bloqueado = updates[1].0.clone();
+            let mut permisos = fs::metadata(&bloqueado).unwrap().permissions();
+            permisos.set_readonly(true);
+            fs::set_permissions(&bloqueado, permisos).unwrap();
+            let result = apply_path_change(&plan);
+            let mut permisos = fs::metadata(&bloqueado).unwrap().permissions();
+            permisos.set_readonly(false);
+            fs::set_permissions(&bloqueado, permisos).unwrap();
+            result
+        };
+
         assert!(result.is_err(), "{result:?}");
-        assert!(root.join("chapters/chapter1.md").exists(), "el movimiento no se hizo");
+        assert!(
+            root.join("chapters/chapter1.md").exists(),
+            "el movimiento no se hizo"
+        );
         for file in [root.join("index.md"), root.join("otro.md")] {
             let content = fs::read_to_string(&file).unwrap();
             assert!(
