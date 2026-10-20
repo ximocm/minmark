@@ -1,11 +1,14 @@
-//! Panel Preview de minmark (ISSUE-020): página continua del documento en una
-//! WebView WebKitGTK 6.0 (ADR-001).
+//! Panel Preview de minmark (ISSUE-020): página continua del documento en el
+//! webview del motor nativo (ADR-001, ADR-005).
 //!
 //! - [`ViewMode`] modela los modos de vista §9 (Editor / Split / Preview).
 //! - [`render_document`] es el render **puro** fuente Markdown → página HTML
 //!   con el CSS embebido (§10.2): es el HTML que carga la WebView del
 //!   Preview. Todo el CSS va dentro de la página (§3.4: sin recursos de red).
 //! - [`PreviewPane`] es el widget GTK (`ScrolledWindow` con la WebView).
+//! - El webview concreto vive tras el trait privado `PreviewEngine`: hoy su
+//!   única implementación es WebKitGTK 6.0 en `engine` (Linux, ADR-005);
+//!   WebView2 y WKWebView entrarán por el mismo trait.
 //!
 //! §7.2: el HTML emitido por `minmark_renderer` escapa siempre el contenido
 //! del documento; este módulo solo transporta ese resultado, nunca inyecta
@@ -13,9 +16,37 @@
 
 use gtk4 as gtk;
 use gtk4::prelude::*;
-use webkit6::prelude::*;
 
 use minmark_config::Settings;
+
+// El motor WebKitGTK 6.0 solo existe como librería del sistema en Linux
+// (ADR-005: sin binarios para Windows ni port usable de macOS, y los BSD no
+// empaquetan WebKitGTK 6.0), de ahí `target_os = "linux"` y no `unix`. Los
+// motores WebView2 (Windows) y WKWebView (macOS) se añadirán entonces en
+// sus propios módulos; hasta que lleguen, el `ui` compila en Linux.
+#[cfg(target_os = "linux")]
+mod engine;
+#[cfg(target_os = "windows")]
+mod engine_webview2;
+#[cfg(target_os = "macos")]
+mod engine_wkwebview;
+
+/// Motor del Preview según el sistema operativo (ADR-005): WebKitGTK en
+/// Linux, WebView2 en Windows y WKWebView en macOS.
+#[cfg(target_os = "linux")]
+fn create_engine() -> Box<dyn PreviewEngine> {
+    Box::new(engine::WebkitEngine::new())
+}
+
+#[cfg(target_os = "windows")]
+fn create_engine() -> Box<dyn PreviewEngine> {
+    Box::new(engine_webview2::Webview2Engine::new())
+}
+
+#[cfg(target_os = "macos")]
+fn create_engine() -> Box<dyn PreviewEngine> {
+    Box::new(engine_wkwebview::WkwebviewEngine::new())
+}
 
 /// Modo de vista (§9): editor solo, split editor+preview, preview solo.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -99,11 +130,51 @@ pub fn render_document_at(
 /// así que el Preview funciona sin ningún recurso externo.
 const BASE_URI: &str = "file:///";
 
-/// Panel Preview (§10.2): [`gtk::ScrolledWindow`] con una [`webkit6::WebView`]
-/// dentro (ADR-001) que muestra la página continua del documento.
+/// Motor del webview detrás de [`PreviewPane`] (ADR-005): transporte del HTML
+/// y del JS, ciclo de carga y puentes nativos. Es privado a propósito: la
+/// navegación, los scripts y el render ya son agnósticos del motor aquí, y el
+/// backend concreto queda confinado en su módulo.
+///
+/// La carga es «HTML con URI base `file:///`» (§3.4), no una navegación por
+/// cadena: ningún backend puede apoyarse en `NavigateToString` de WebView2
+/// (límite de 2 MiB), así que el motor Windows alojará la misma página en un
+/// archivo temporal local.
+trait PreviewEngine {
+    /// Widget GTK nativo del motor, para montarlo en el `ScrolledWindow`.
+    fn widget(&self) -> gtk::Widget;
+    /// Carga `html` como documento nuevo con `base_uri` como URI base.
+    fn load_html(&self, html: &str, base_uri: &str);
+    /// Evalúa `script` sin esperar resultado (dispara y olvida).
+    fn run_script(&self, script: &str);
+    /// `true` mientras el motor está cargando un documento.
+    fn is_loading(&self) -> bool;
+    /// Aviso de que la carga terminó: el panel aplica aquí las actualizaciones
+    /// diferidas, el diagnóstico de enlaces y el scroll pendiente. El callback
+    /// recibe un handle al motor para poder evaluar sus scripts.
+    fn connect_load_finished(&self, callback: std::rc::Rc<dyn Fn(&dyn PreviewEngine)>);
+    /// Script de usuario inicial + canal de mensajes `minmarkLink` (el
+    /// postMessage concreto del puente lo define cada backend).
+    fn connect_link_activation(&self, activate: std::rc::Rc<dyn Fn(String)>);
+    /// Veta la navegación que salga del documento: la WebView conserva la
+    /// página (§3.4), igual que el resto del código.
+    fn block_navigation(&self);
+    /// Captura del documento completo a PNG para la evidencia de QA.
+    #[cfg(test)]
+    fn snapshot(&self, path: &std::path::Path, done: std::rc::Rc<std::cell::Cell<bool>>);
+    /// Evalúa `script` y reporta si la evaluación terminó sin error.
+    #[cfg(test)]
+    fn eval_ok(&self, script: &str, done: std::rc::Rc<std::cell::Cell<bool>>);
+    /// Evalúa `script` y entrega su resultado numérico.
+    #[cfg(test)]
+    fn eval_number(&self, script: &str, result: std::rc::Rc<std::cell::Cell<Option<f64>>>);
+}
+
+/// Panel Preview (§10.2): [`gtk::ScrolledWindow`] con el webview del motor
+/// (`PreviewEngine`) dentro (ADR-001, ADR-005) que muestra la página
+/// continua del documento.
 pub struct PreviewPane {
     scrolled: gtk::ScrolledWindow,
-    webview: webkit6::WebView,
+    engine: Box<dyn PreviewEngine>,
     diagnostic_script: std::rc::Rc<std::cell::RefCell<String>>,
     scroll_byte: std::rc::Rc<std::cell::Cell<Option<(u32, bool)>>>,
     document_key: std::cell::RefCell<Option<(Option<std::path::PathBuf>, u64)>>,
@@ -113,35 +184,16 @@ pub struct PreviewPane {
 impl PreviewPane {
     #[cfg(test)]
     pub fn test_snapshot(&self, path: &std::path::Path, done: std::rc::Rc<std::cell::Cell<bool>>) {
-        let path = path.to_owned();
-        self.webview.snapshot(
-            webkit6::SnapshotRegion::FullDocument,
-            webkit6::SnapshotOptions::NONE,
-            None::<&gtk::gio::Cancellable>,
-            move |result| {
-                result
-                    .expect("WebKit snapshot")
-                    .save_to_png(&path)
-                    .expect("snapshot PNG");
-                done.set(true);
-            },
-        );
+        self.engine.snapshot(path, done);
     }
     #[cfg(test)]
     pub fn test_click_first_link(&self, done: std::rc::Rc<std::cell::Cell<bool>>) {
-        self.webview.evaluate_javascript(
-            "document.querySelector('a[href]').click(); true",
-            None,
-            None,
-            None::<&gtk::gio::Cancellable>,
-            move |result| {
-                done.set(result.is_ok());
-            },
-        );
+        self.engine
+            .eval_ok("document.querySelector('a[href]').click(); true", done);
     }
     #[cfg(test)]
     pub fn test_is_loading(&self) -> bool {
-        self.webview.is_loading()
+        self.engine.is_loading()
     }
     #[cfg(test)]
     pub fn test_eval_number(
@@ -149,18 +201,7 @@ impl PreviewPane {
         script: &str,
         result: std::rc::Rc<std::cell::Cell<Option<f64>>>,
     ) {
-        self.webview.evaluate_javascript(
-            script,
-            None,
-            None,
-            None::<&gtk::gio::Cancellable>,
-            move |value| {
-                result.set(Some(value.expect("Preview JavaScript").to_double()));
-            },
-        );
-    }
-    fn run_script(view: &webkit6::WebView, script: &str) {
-        view.evaluate_javascript(script, None, None, None::<&gtk::gio::Cancellable>, |_| {});
+        self.engine.eval_number(script, result);
     }
     pub fn scroll_to_byte(&self, byte: u32) {
         self.request_scroll(byte, false);
@@ -178,14 +219,14 @@ impl PreviewPane {
         let Some(script) = fragment_script(destination) else {
             return false;
         };
-        Self::run_script(&self.webview, &script);
+        self.engine.run_script(&script);
         true
     }
     fn request_scroll(&self, byte: u32, follow: bool) {
-        if self.webview.is_loading() {
+        if self.engine.is_loading() {
             self.scroll_byte.set(Some((byte, follow)));
         } else {
-            Self::run_script(&self.webview, &scroll_script(byte, follow));
+            self.engine.run_script(&scroll_script(byte, follow));
         }
     }
     pub fn set_link_diagnostics(&self, links: &[crate::intelligence::Link]) {
@@ -199,63 +240,37 @@ impl PreviewPane {
             .join(",");
         let script = format!("{{ const errors = new Map([{entries}]); document.querySelectorAll('a[href]').forEach(a => {{ const message = errors.get(a.getAttribute('href')); a.style.textDecorationStyle = message ? 'wavy' : ''; if (message) {{ a.setAttribute('data-mm-error',''); a.title = message; a.setAttribute('aria-label', a.textContent + ': ' + message); }} else if (a.hasAttribute('data-mm-error')) {{ a.removeAttribute('data-mm-error'); a.removeAttribute('title'); a.removeAttribute('aria-label'); }} }}); }}");
         *self.diagnostic_script.borrow_mut() = script.clone();
-        Self::run_script(&self.webview, &script);
+        self.engine.run_script(&script);
     }
     pub fn connect_link_activation(&self, activate: std::rc::Rc<dyn Fn(String)>) {
-        let manager = self
-            .webview
-            .user_content_manager()
-            .expect("WebView content manager");
-        manager.register_script_message_handler("minmarkLink", None);
-        manager.connect_script_message_received(Some("minmarkLink"), move |_, value| {
-            activate(value.to_str().to_string());
-        });
-        manager.add_script(&webkit6::UserScript::new(
-            "document.addEventListener('click', e => { const a = e.target.closest('a[href]'); if (a) { e.preventDefault(); const href = a.getAttribute('href'); if (href.startsWith('#mm-note-')) { document.getElementById(href.slice(1))?.scrollIntoView({block: 'center'}); } else { window.webkit.messageHandlers.minmarkLink.postMessage(href); } } });",
-            webkit6::UserContentInjectedFrames::TopFrame,
-            webkit6::UserScriptInjectionTime::End, &[], &[],
-        ));
-        // También bloquea navegación de teclado, ventanas nuevas y enlaces
-        // que no pasen por el puente: la WebView conserva el documento.
-        self.webview.connect_decide_policy(|_, decision, _| {
-            if let Some(nav) = decision.downcast_ref::<webkit6::NavigationPolicyDecision>() {
-                if nav.navigation_action().is_some_and(|mut a| {
-                    a.navigation_type() == webkit6::NavigationType::LinkClicked
-                }) {
-                    decision.ignore();
-                    return true;
-                }
-            }
-            false
-        });
+        self.engine.connect_link_activation(activate);
+        self.engine.block_navigation();
     }
     /// Crea el panel con la WebView ya montada en su ScrolledWindow.
     ///
     /// Requiere GTK inicializado en el hilo principal (lo hace `main`).
     pub fn new() -> Self {
-        let webview = webkit6::WebView::new();
+        let engine = create_engine();
         let scrolled = gtk::ScrolledWindow::new();
-        scrolled.set_child(Some(&webview));
+        scrolled.set_child(Some(&engine.widget()));
         let diagnostic_script = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
         let scroll_byte = std::rc::Rc::new(std::cell::Cell::new(None));
         let pending_html = std::rc::Rc::new(std::cell::RefCell::new(None::<String>));
         let script = diagnostic_script.clone();
         let scroll = scroll_byte.clone();
         let pending = pending_html.clone();
-        webview.connect_load_changed(move |view, event| {
-            if event == webkit6::LoadEvent::Finished {
-                if let Some(html) = pending.borrow_mut().take() {
-                    Self::run_script(view, &update_script(&html));
-                }
-                Self::run_script(view, &script.borrow());
-                if let Some((byte, follow)) = scroll.take() {
-                    Self::run_script(view, &scroll_script(byte, follow));
-                }
+        engine.connect_load_finished(std::rc::Rc::new(move |engine| {
+            if let Some(html) = pending.borrow_mut().take() {
+                engine.run_script(&update_script(&html));
             }
-        });
+            engine.run_script(&script.borrow());
+            if let Some((byte, follow)) = scroll.take() {
+                engine.run_script(&scroll_script(byte, follow));
+            }
+        }));
         Self {
             scrolled,
-            webview,
+            engine,
             diagnostic_script,
             scroll_byte,
             document_key: std::cell::RefCell::new(None),
@@ -281,18 +296,17 @@ impl PreviewPane {
         if self.document_key.borrow().as_ref() == Some(&document_key) {
             // Las ediciones actualizan el DOM en la misma página. Recargar
             // la WebView descartaría su posición de lectura en cada tecla.
-            if self.webview.is_loading() {
+            if self.engine.is_loading() {
                 *self.pending_html.borrow_mut() = Some(html.to_owned());
             } else {
-                Self::run_script(&self.webview, &update_script(html));
+                self.engine.run_script(&update_script(html));
             }
             return;
         }
         *self.document_key.borrow_mut() = Some(document_key);
         self.pending_html.borrow_mut().take();
         self.scroll_byte.set(None);
-        self.webview
-            .load_html(html, Some(base_uri.unwrap_or(BASE_URI)));
+        self.engine.load_html(html, base_uri.unwrap_or(BASE_URI));
     }
 }
 

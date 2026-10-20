@@ -13,10 +13,44 @@ path = "src/main.rs"
 # `v4_10`: `gtk::FileDialog` y `gtk::AlertDialog` (diálogos §36/§3.7) están
 # tras esa feature; el runtime del sistema es GTK 4.14 (§50.1 Linux primero).
 gtk4 = { version = "0.9", features = ["v4_10"] }
-webkit6 = "0.4"
 minmark-document = { path = "../core/minmark-document" }
 minmark-parser = { path = "../core/minmark-parser" }
 minmark-pdf = { path = "../core/minmark-pdf" }
 minmark-renderer = { path = "../core/minmark-renderer" }
 minmark-config = { path = "../core/minmark-config" }
 minmark-fs = { path = "../core/minmark-fs" }
+
+# Linux (ADR-001/ADR-005): el motor del Preview es WebKitGTK 6.0, biblioteca
+# del sistema que solo existe en Linux.
+[target.'cfg(target_os = "linux")'.dependencies]
+webkit6 = "0.4"
+
+# macOS (ADR-005): el motor del Preview es WKWebView alojado como NSView hija
+# de la vista nativa de GTK. `gdk4-macos` da la NSWindow de la superficie
+# (`v4_8` → `gdk_macos_surface_get_native_window`); el resto son los bindings
+# Objective-C de WebKit/AppKit y `block2` para los callbacks.
+[target.'cfg(macos)'.dependencies]
+objc2 = "0.6"
+objc2-foundation = "0.3"
+objc2-core-foundation = "0.3"
+objc2-app-kit = "0.3"
+objc2-web-kit = "0.3"
+block2 = "0.6"
+gdk4-macos = { version = "0.9", features = ["v4_8"] }
+
+# Windows (ADR-005): el motor del Preview es WebView2 alojado como HWND hijo
+# de la superficie GDK. `gdk4-win32` da el handle nativo de la GdkSurface;
+# `webview2-com` son los bindings COM del SDK de WebView2 y `windows` las
+# APIs Win32 que toca el backend (HWND/RECT, IStream para CapturePreview,
+# SHCreateMemStream, GetClientRect, CoInitializeEx). Toolchain de Windows:
+# MSVC + GTK4 de gvsbuild (ADR-005); el runtime WebView2 Evergreen va en los
+# prerrequisitos del bundle.
+[target.'cfg(windows)'.dependencies]
+gdk4-win32 = "0.9"
+webview2-com = "0.39"
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
