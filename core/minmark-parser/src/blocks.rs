@@ -136,6 +136,9 @@ fn segment<'s>(text: &'s str, base: usize, options: &ParseOptions) -> Vec<Segmen
         }
         acc
     };
+    // §7.4.1 «código primero»: dentro de un fence no se interpreta ningún
+    // constructo de bloque extendido (`:::`, `$$`).
+    let in_code = fenced_code_mask(&lines);
 
     let mut segments = Vec::new();
     let mut raw_start: Option<usize> = None;
@@ -145,59 +148,67 @@ fn segment<'s>(text: &'s str, base: usize, options: &ParseOptions) -> Vec<Segmen
         let trimmed = lines[idx].0.trim();
 
         // Callout `::: tipo "título"` (§22) con anidamiento.
-        if let Some((callout_type, title)) = parse_callout_open(trimmed, options) {
-            let mut depth = 1;
-            let mut close = None;
-            for (j, (line, _, _)) in lines.iter().enumerate().skip(idx + 1) {
-                let t = line.trim();
-                if parse_callout_open(t, options).is_some() {
-                    depth += 1;
-                } else if t == ":::" {
-                    depth -= 1;
-                    if depth == 0 {
-                        close = Some(j);
-                        break;
+        if !in_code[idx] {
+            if let Some((callout_type, title)) = parse_callout_open(trimmed, options) {
+                let mut depth = 1;
+                let mut close = None;
+                for (j, (line, _, _)) in lines.iter().enumerate().skip(idx + 1) {
+                    if in_code[j] {
+                        continue;
+                    }
+                    let t = line.trim();
+                    if parse_callout_open(t, options).is_some() {
+                        depth += 1;
+                    } else if t == ":::" {
+                        depth -= 1;
+                        if depth == 0 {
+                            close = Some(j);
+                            break;
+                        }
                     }
                 }
+                if let Some(close_idx) = close {
+                    flush_raw(&mut raw_start, &mut segments, &lines, text, base, idx);
+                    let inner_start = lines[idx].2;
+                    let inner_end = lines[close_idx].1;
+                    segments.push(Segment::Callout {
+                        callout_type,
+                        title,
+                        inner: &text[inner_start..inner_end],
+                        inner_base: base + inner_start,
+                        span: Span {
+                            start: (base + lines[idx].1) as u32,
+                            end: (base + lines[close_idx].2) as u32,
+                        },
+                    });
+                    idx = close_idx + 1;
+                    continue;
+                }
             }
-            if let Some(close_idx) = close {
-                flush_raw(&mut raw_start, &mut segments, &lines, text, base, idx);
-                let inner_start = lines[idx].2;
-                let inner_end = lines[close_idx].1;
-                segments.push(Segment::Callout {
-                    callout_type,
-                    title,
-                    inner: &text[inner_start..inner_end],
-                    inner_base: base + inner_start,
-                    span: Span {
-                        start: (base + lines[idx].1) as u32,
-                        end: (base + lines[close_idx].2) as u32,
-                    },
-                });
-                idx = close_idx + 1;
-                continue;
-            }
-        }
 
-        // Ecuación de bloque `$$ ... $$` (§24).
-        if trimmed == "$$" {
-            if let Some(close_idx) = lines[idx + 1..]
-                .iter()
-                .position(|(line, _, _)| line.trim() == "$$")
-                .map(|p| p + idx + 1)
-            {
-                flush_raw(&mut raw_start, &mut segments, &lines, text, base, idx);
-                let raw_latex = &text[lines[idx].2..lines[close_idx].1];
-                let latex = raw_latex.strip_suffix('\n').unwrap_or(raw_latex);
-                segments.push(Segment::Math {
-                    latex: latex.to_string(),
-                    span: Span {
-                        start: (base + lines[idx].1) as u32,
-                        end: (base + lines[close_idx].2) as u32,
-                    },
-                });
-                idx = close_idx + 1;
-                continue;
+            // Ecuación de bloque `$$ ... $$` (§24).
+            if trimmed == "$$" {
+                if let Some(close_idx) = lines[idx + 1..]
+                    .iter()
+                    .enumerate()
+                    .find(|(offset, (line, _, _))| {
+                        !in_code[idx + 1 + *offset] && line.trim() == "$$"
+                    })
+                    .map(|(offset, _)| idx + 1 + offset)
+                {
+                    flush_raw(&mut raw_start, &mut segments, &lines, text, base, idx);
+                    let raw_latex = &text[lines[idx].2..lines[close_idx].1];
+                    let latex = raw_latex.strip_suffix('\n').unwrap_or(raw_latex);
+                    segments.push(Segment::Math {
+                        latex: latex.to_string(),
+                        span: Span {
+                            start: (base + lines[idx].1) as u32,
+                            end: (base + lines[close_idx].2) as u32,
+                        },
+                    });
+                    idx = close_idx + 1;
+                    continue;
+                }
             }
         }
 
@@ -216,6 +227,52 @@ fn segment<'s>(text: &'s str, base: usize, options: &ParseOptions) -> Vec<Segmen
         lines.len(),
     );
     segments
+}
+
+/// Máscara de líneas dentro de un fence de código (§7.4.1 «código primero»).
+///
+/// El opener y el closer forman parte del propio code block, así que también
+/// quedan marcados. Un fence se abre con tres o más `` ` `` o `~` y se cierra
+/// con al menos tantos del mismo carácter (CommonMark).
+fn fenced_code_mask(lines: &[(&str, usize, usize)]) -> Vec<bool> {
+    let mut mask = vec![false; lines.len()];
+    let mut fence: Option<(char, usize)> = None;
+    for (i, (line, _, _)) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        match fence {
+            Some((marker, len)) => {
+                mask[i] = true;
+                if closes_fence(trimmed, marker, len) {
+                    fence = None;
+                }
+            }
+            None => {
+                if let Some(open) = opens_fence(trimmed) {
+                    fence = Some(open);
+                    mask[i] = true;
+                }
+            }
+        }
+    }
+    mask
+}
+
+fn opens_fence(trimmed: &str) -> Option<(char, usize)> {
+    let marker = trimmed.chars().next().filter(|c| matches!(c, '`' | '~'))?;
+    let len = trimmed.chars().take_while(|c| *c == marker).count();
+    if len < 3 {
+        return None;
+    }
+    // El info string de un fence de backticks no puede contener backticks.
+    if marker == '`' && trimmed[len..].contains('`') {
+        return None;
+    }
+    Some((marker, len))
+}
+
+fn closes_fence(trimmed: &str, marker: char, len: usize) -> bool {
+    let count = trimmed.chars().take_while(|c| *c == marker).count();
+    count == trimmed.chars().count() && count >= len
 }
 
 fn flush_raw<'s>(

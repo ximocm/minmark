@@ -6,6 +6,9 @@
 - [BUILDING](../BUILDING.md): requisitos, compilación, tests e instalación local.
 - [CONTRIBUTING](../CONTRIBUTING.md): errores, propuestas y flujo de contribución.
 - [CHANGELOG](../CHANGELOG.md): cambios pendientes de publicación.
+- [Cómo citar](CITING.md): referencias APA y BibTeX del software.
+- [Documento de demostración](SHOWCASE.md): todo el dialecto con ejemplos
+  editables, abrible en minmark como banco de pruebas.
 - [CI y releases](CI.md): matriz de plataformas, paquetes y publicación por tags.
 - [Publicación en GitHub](PUBLISHING.md): comprobaciones y archivos grandes.
 - [Licencia](../LICENSE): Apache License 2.0.

@@ -9,7 +9,20 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 
 ## [Unreleased]
 
-Sin cambios pendientes de publicación.
+### Añadido
+
+- [Cómo citar minmark](docs/CITING.md) y [`CITATION.cff`](CITATION.cff) en la
+  raíz, con referencia APA y BibTeX exportable desde GitHub.
+- [Documento de demostración](docs/SHOWCASE.md) con todo el dialecto: énfasis,
+  listas y tareas, tablas, imágenes, colores inline, callouts, matemáticas,
+  citas y bibliografía, notas, referencias cruzadas y front matter.
+
+### Corregido
+
+- El parser interpretaba `::: tipo` y `$$` dentro de fences de código como
+  callouts y ecuaciones de bloque, en contra de §7.4.1 («código primero»). Los
+  fences de `` ` `` y `~` protegen ahora su contenido también frente a las
+  extensiones de bloque.
 
 ## [0.3.0] — 2026-10-20
 

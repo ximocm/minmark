@@ -36,6 +36,47 @@ fn tablas_gfm_y_code_fences() {
 }
 
 #[test]
+fn code_fences_protegen_bloques_extendidos() {
+    // §7.4.1: `:::` (§22) y `$$` (§24) dentro de un fence son código,
+    // no callouts ni ecuaciones de bloque.
+    let source = "```markdown\n::: warning \"X\"\n$$\nE = mc^2\n$$\n:::\n```\n";
+    let ast = parse(source);
+    assert_eq!(ast.blocks.len(), 1, "{:?}", ast.blocks);
+    let BlockKind::CodeBlock { language, code } = &ast.blocks[0].kind else {
+        panic!("esperaba code fence: {:?}", ast.blocks[0]);
+    };
+    assert_eq!(language.as_deref(), Some("markdown"));
+    assert_eq!(code, "::: warning \"X\"\n$$\nE = mc^2\n$$\n:::\n");
+
+    // Un callout que contiene un fence con `:::` cierra con su propio `:::`.
+    let ast = parse("::: note \"T\"\n```md\n:::\n```\ncontenido\n:::\n");
+    assert_eq!(ast.blocks.len(), 1, "{:?}", ast.blocks);
+    let BlockKind::Callout { blocks, .. } = &ast.blocks[0].kind else {
+        panic!("esperaba callout: {:?}", ast.blocks[0]);
+    };
+    assert_eq!(blocks.len(), 2, "{blocks:?}");
+    assert!(
+        matches!(&blocks[0].kind, BlockKind::CodeBlock { code, .. } if code == ":::\n"),
+        "{:?}",
+        blocks[0]
+    );
+    assert!(
+        matches!(&blocks[1].kind, BlockKind::Paragraph { .. }),
+        "{:?}",
+        blocks[1]
+    );
+
+    // Fences de `~` también protegen.
+    let ast = parse("~~~\n$$\nx = 1\n$$\n~~~\n");
+    assert_eq!(ast.blocks.len(), 1, "{:?}", ast.blocks);
+    assert!(
+        matches!(&ast.blocks[0].kind, BlockKind::CodeBlock { code, .. } if code == "$$\nx = 1\n$$\n"),
+        "{:?}",
+        ast.blocks[0]
+    );
+}
+
+#[test]
 fn math_latex_inline_y_bloque() {
     // §24.
     assert!(only_paragraph("La energía es $E = mc^2$.\n").contains(&Inline::Math(
