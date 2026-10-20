@@ -44,6 +44,14 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
   de modo que ningún token inseparable sale del área de texto. Documentación:
   [Composiciones](docs/COMPOSITIONS.md).
 
+### Cambiado
+
+- El editor ajusta visualmente las líneas largas al ancho de la vista
+  (`WrapMode::WordChar`): el texto se parte solo en pantalla, sin insertar
+  saltos de línea en el documento y sin scroll horizontal. Es un cambio solo
+  visual sobre el `wrap-mode` `GTK_WRAP_NONE` de §34.2 en la vista de edición;
+  Preview y PDF no cambian.
+
 ### Corregido
 
 - La exportación PDF se detenía con «No se puede resolver la imagen: …» cuando
