@@ -9,6 +9,10 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 
 ## [Unreleased]
 
+Sin cambios pendientes de publicación.
+
+## [0.3.0] — 2026-10-20
+
 ### Añadido
 
 - Fase 6: composiciones multiarchivo declaradas en `.mdproject.toml`
@@ -69,11 +73,13 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 
 ### Verificación y limitaciones
 
-- 349 pruebas del core, 93 de UI e integración gráfica en X11/Wayland pasan.
-  Capturas y PDF multipágina inspeccionados; Orca anuncia sugerencias de citas.
-- Pendientes la lectura del contenido de Preview con Orca y las fuentes CJK
-  de paginado/PDF. Clippy de los paquetes modificados pasa con warnings;
-  el workspace conserva un error previo en `minmark-fs`.
+- 412 pruebas del core y 115 de UI (3 ignoradas, preexistentes) pasan en Linux;
+  el core se verifica además en Windows y macOS. Integración gráfica en
+  X11/Wayland, capturas y PDF multipágina inspeccionados; Orca anuncia
+  sugerencias de citas.
+- Pendientes la lectura del contenido de Preview con Orca (#39) y las fuentes
+  CJK de paginado/PDF (#40). Clippy de los paquetes modificados pasa con
+  warnings; el workspace conserva un error previo en `minmark-fs`.
 
 ## [0.2.0] — 2026-10-13
 
