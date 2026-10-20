@@ -9,6 +9,14 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 
 ## [Unreleased]
 
+### Añadido
+
+- [Cómo citar minmark](docs/CITING.md) y [`CITATION.cff`](CITATION.cff) en la
+  raíz, con referencia APA y BibTeX exportable desde GitHub.
+- [Documento de demostración](docs/SHOWCASE.md) con todo el dialecto: énfasis,
+  listas y tareas, tablas, imágenes, colores inline, callouts, matemáticas,
+  citas y bibliografía, notas, referencias cruzadas y front matter.
+
 ### Corregido
 
 - El parser interpretaba `::: tipo` y `$$` dentro de fences de código como

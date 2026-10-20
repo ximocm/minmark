@@ -1,0 +1,28 @@
+cff-version: 1.2.0
+message: "Si usas minmark en un trabajo, publicación o proyecto, por favor cita este documento."
+type: software
+title: "minmark"
+abstract: >-
+  Editor de Markdown de escritorio para Linux, escrito en Rust con GTK4 y
+  WebKitGTK. Trabaja con archivos y carpetas locales, con edición visual,
+  vista previa, referencias cruzadas, matemáticas, bibliografía CSL y
+  exportación PDF. Markdown como fuente de verdad.
+authors:
+  - family-names: "Cabanes Martinez"
+    given-names: "Joaquim"
+    alias: "ximocm"
+version: "0.3.0"
+date-released: "2026-10-20"
+repository-code: "https://github.com/ximocm/minmark"
+url: "https://github.com/ximocm/minmark"
+license: Apache-2.0
+keywords:
+  - markdown
+  - editor
+  - desktop
+  - rust
+  - gtk4
+  - pdf
+  - bibtex
+  - csl
+  - latex

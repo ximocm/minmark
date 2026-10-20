@@ -101,6 +101,9 @@ atajos disponibles en la aplicación.
 - [Changelog](CHANGELOG.md).
 - [CI y releases](docs/CI.md): pruebas del core en Linux, Windows y macOS; paquetes Linux.
 - [Índice de documentación](docs/README.md): especificación y decisiones.
+- [Cómo citar minmark](docs/CITING.md): referencias APA y BibTeX del software.
+- [Documento de demostración](docs/SHOWCASE.md): todo el dialecto con ejemplos
+  editables (tablas, imágenes, colores, énfasis, citas, matemáticas…).
 - [Arquitectura del core](core/README.md).
 - [Preparación para publicar en GitHub](docs/PUBLISHING.md).
 
