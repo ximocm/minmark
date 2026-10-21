@@ -120,10 +120,6 @@ mod tests {
     /// finita: ningún test duerme sin cota.
     const ESPERA: Duration = Duration::from_secs(20);
 
-    /// Cota de cada intento de [`esperar_reintentando`]; el resto de la cota
-    /// total `ESPERA` queda para los reintentos.
-    const INTENTO: Duration = Duration::from_secs(5);
-
     /// Ventana de quietud de [`drenar`]: sin eventos durante este tiempo se
     /// considera al watcher vacío de verdad.
     const TRANQUILO: Duration = Duration::from_millis(500);
@@ -192,40 +188,11 @@ mod tests {
         acumulados
     }
 
-    /// Como [`esperar`] pero con reintento acotado de `operacion`: en
-    /// macOS/FSEvents puede arrastrarse un `Created` tardío de la operación
-    /// anterior y `coalesce` lo fundiría con el `Modified` posterior (el alta
-    /// gana, §12.7/ISSUE-026), en cuyo caso ni ampliar la espera bastaría.
-    /// Cada intento descarta sus acumulados — lo tardío queda consumido — y
-    /// repite la operación, siempre dentro de la cota total `ESPERA`
-    /// (acotado, sin esperas libres).
-    fn esperar_reintentando(
-        watcher: &mut NativeWatcher,
-        mut operacion: impl FnMut(),
-        espera: impl Fn(&[ChangeEvent]) -> bool,
-    ) -> Vec<ChangeEvent> {
-        let fin = Instant::now() + ESPERA;
-        loop {
-            operacion();
-            let (acumulados, cumplida) =
-                intento(watcher, (Instant::now() + INTENTO).min(fin), &espera);
-            if cumplida {
-                return acumulados;
-            }
-            assert!(
-                Instant::now() < fin,
-                "sin los eventos esperados; acumulados: {acumulados:?}"
-            );
-            // Cota del intento agotada: se consume lo tardío y se repite.
-            drenar(watcher);
-        }
-    }
-
     /// Drena el watcher hasta una ventana de quietud ([`TRANQUILO`]), no hasta
     /// el primer `poll` vacío: los backends asíncronos pueden tener entregas
     /// en vuelo y un `poll` vacío no significa que no lleguen más. Lo tardío
     /// que se cuela entre fases se funde en [`coalesce`] (el alta gana) y
-    /// arruina el siguiente intento. Siempre acotado por `ESPERA`.
+    /// enmascara el evento de la siguiente. Siempre acotado por `ESPERA`.
     fn drenar(watcher: &mut NativeWatcher) {
         let fin = Instant::now() + ESPERA;
         let mut quieto: Option<Instant> = None;
@@ -357,56 +324,62 @@ mod tests {
 
     #[test]
     fn watch_tree_detecta_altas_bajas_y_modificaciones() {
-        // ISSUE-026: crear, borrar y modificar dentro del subárbol.
+        // ISSUE-026: crear, borrar y modificar dentro del subárbol. Cada fase
+        // usa su propia ruta: un evento tardío de la fase anterior se funde
+        // con el de la siguiente en `coalesce` (el alta gana, §12.7/ISSUE-026)
+        // y la fase no ve nunca su tipo puro (le pasaba en macOS a la
+        // modificación tras la creación del mismo fichero).
         let dir = TestDir::new();
+        let previa = dir.file("previa.md");
+        let borrable = dir.file("borrar.md");
+        fs::write(&previa, "previa\n").unwrap();
+        fs::write(&borrable, "borrar\n").unwrap();
+
         let mut watcher = NativeWatcher::new().unwrap();
         watcher.watch_tree(&dir.0).unwrap();
         watcher.watch_tree(&dir.0).unwrap(); // idempotente
         assert!(watcher.poll().unwrap().is_empty());
 
-        let path = dir.file("nuevo.md");
-        fs::write(&path, "hola\n").unwrap();
+        // Alta de una ruta nueva.
+        let nueva = dir.file("nueva.md");
+        fs::write(&nueva, "hola\n").unwrap();
         let events = esperar(&mut watcher, |evs| {
             evs.iter()
-                .any(|e| e.kind == ChangeKind::Created && e.path.ends_with("nuevo.md"))
+                .any(|e| e.kind == ChangeKind::Created && e.path.ends_with("nueva.md"))
         });
         assert!(
             events
                 .iter()
-                .any(|e| e.kind == ChangeKind::Created && e.path.ends_with("nuevo.md")),
+                .any(|e| e.kind == ChangeKind::Created && e.path.ends_with("nueva.md")),
             "eventos: {events:?}"
         );
         drenar(&mut watcher);
 
-        // Reintento acotado: un `Created` tardío de la creación se fundiría
-        // con este `Modified` en `coalesce` (el alta gana, ISSUE-026), así
-        // que, si una cota de intento se agota, se repite la escritura con
-        // acumulados propios. La primera escritura la hace el propio helper.
-        let events = esperar_reintentando(
-            &mut watcher,
-            || fs::write(&path, "cambiado\n").unwrap(),
-            |evs| {
-                evs.iter()
-                    .any(|e| e.kind == ChangeKind::Modified && e.path.ends_with("nuevo.md"))
-            },
-        );
-        assert!(
-            events
-                .iter()
-                .any(|e| e.kind == ChangeKind::Modified && e.path.ends_with("nuevo.md")),
-            "eventos: {events:?}"
-        );
-        drenar(&mut watcher);
-
-        fs::remove_file(&path).unwrap();
+        // Modificación de un fichero anterior al watch: su único evento
+        // posible es `Modified`.
+        fs::write(&previa, "cambiado\n").unwrap();
         let events = esperar(&mut watcher, |evs| {
             evs.iter()
-                .any(|e| e.kind == ChangeKind::Deleted && e.path.ends_with("nuevo.md"))
+                .any(|e| e.kind == ChangeKind::Modified && e.path.ends_with("previa.md"))
         });
         assert!(
             events
                 .iter()
-                .any(|e| e.kind == ChangeKind::Deleted && e.path.ends_with("nuevo.md")),
+                .any(|e| e.kind == ChangeKind::Modified && e.path.ends_with("previa.md")),
+            "eventos: {events:?}"
+        );
+        drenar(&mut watcher);
+
+        // Baja.
+        fs::remove_file(&borrable).unwrap();
+        let events = esperar(&mut watcher, |evs| {
+            evs.iter()
+                .any(|e| e.kind == ChangeKind::Deleted && e.path.ends_with("borrar.md"))
+        });
+        assert!(
+            events
+                .iter()
+                .any(|e| e.kind == ChangeKind::Deleted && e.path.ends_with("borrar.md")),
             "eventos: {events:?}"
         );
     }
