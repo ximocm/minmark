@@ -355,17 +355,25 @@ mod tests {
         );
         drenar(&mut watcher);
 
-        // Modificación de un fichero anterior al watch: su único evento
-        // posible es `Modified`.
+        // Modificación de un fichero anterior al watch. En Linux/Windows el
+        // tipo es estricto (`Modified`); en macOS/FSEvents la escritura puede
+        // llegar como alta: `notify` no distingue una escritura de un
+        // movido/dentro y la entrega puede duplicarse o retrasarse (§46 y el
+        // mapeo de `traducir`; la garantía de §48 no depende del watcher).
+        #[cfg(not(target_os = "macos"))]
+        let es_modificacion = |e: &ChangeEvent| e.kind == ChangeKind::Modified;
+        #[cfg(target_os = "macos")]
+        let es_modificacion =
+            |e: &ChangeEvent| matches!(e.kind, ChangeKind::Modified | ChangeKind::Created);
         fs::write(&previa, "cambiado\n").unwrap();
         let events = esperar(&mut watcher, |evs| {
             evs.iter()
-                .any(|e| e.kind == ChangeKind::Modified && e.path.ends_with("previa.md"))
+                .any(|e| es_modificacion(e) && e.path.ends_with("previa.md"))
         });
         assert!(
             events
                 .iter()
-                .any(|e| e.kind == ChangeKind::Modified && e.path.ends_with("previa.md")),
+                .any(|e| es_modificacion(e) && e.path.ends_with("previa.md")),
             "eventos: {events:?}"
         );
         drenar(&mut watcher);
