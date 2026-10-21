@@ -9,6 +9,10 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 
 ## [Unreleased]
 
+Sin cambios pendientes de publicación.
+
+## [0.4.0] — 2026-10-21
+
 ### Añadido
 
 - [Cómo citar minmark](docs/CITING.md) y [`CITATION.cff`](CITATION.cff) en la
@@ -64,6 +68,17 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
   nativo multiplataforma, la tabla de dependencias de macOS se activa de verdad
   (`cfg(target_os = "macos")`) y el host de WKWebView implementa el
   subclaseado GTK y los marcadores de hilo principal que exige objc2.
+
+### Verificación y limitaciones
+
+- 422 pruebas del core (Linux, Windows Server 2022 y macOS 15), 115 de UI
+  (3 ignoradas, preexistentes) y 23 de la política de release pasan; la
+  matriz de CI compila, empaqueta y hace smoke tests de los tres paquetes
+  (`.tar.gz`, MSI + bundle Burn + ZIP portable, `.dmg`/`.tar.gz`).
+- Pendientes la QA manual de Windows y macOS (instalación y desinstalación
+  del MSI, apertura del `.app`, Preview con scroll, edición y enlaces), la
+  lectura del contenido de Preview con Orca (#39) y las fuentes CJK de
+  paginado/PDF (#40).
 
 ## [0.3.0] — 2026-10-20
 
