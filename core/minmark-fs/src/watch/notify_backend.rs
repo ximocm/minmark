@@ -20,7 +20,12 @@
 //! - rename → `ReadDirectoryChangesW` empareja origen/destino y FSEvents no,
 //!   así que no se distingue la dirección: la ruta se comprueba al consumir
 //!   el evento, después de terminar la operación → si existe es alta
-//!   (árbol) o modificación (fichero); si ya no existe es baja.
+//!   (árbol) o modificación (fichero); si ya no existe es baja. En macOS se
+//!   ha observado en CI que una escritura in-situ llega también como
+//!   `Create`/`Modify(Name)`, de modo que una modificación dentro de un árbol
+//!   puede reportarse como `Created` (e incluso duplicarse o retrasarse la
+//!   entrega): la distinción de tipos no es fiable en ese SO, cuya garantía
+//!   de §12.7/§48 la sostiene la huella de `LocalFs::changed_externally`.
 //! - `Access` y `Other` (p. ej. el aviso de rescan de FSEvents) se descartan;
 //!   un error o desbordamiento del backend también, como la cola saturada de
 //!   inotify: la red de seguridad de §12.7/§48 es la huella de
