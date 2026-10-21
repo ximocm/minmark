@@ -124,6 +124,10 @@ mod tests {
     /// total `ESPERA` queda para los reintentos.
     const INTENTO: Duration = Duration::from_secs(5);
 
+    /// Ventana de quietud de [`drenar`]: sin eventos durante este tiempo se
+    /// considera al watcher vacío de verdad.
+    const TRANQUILO: Duration = Duration::from_millis(500);
+
     struct TestDir(PathBuf);
 
     impl TestDir {
@@ -217,14 +221,22 @@ mod tests {
         }
     }
 
-    /// Drena el watcher hasta un `poll` vacío (los backends asíncronos pueden
-    /// tener entregas en vuelo tras el evento esperado).
+    /// Drena el watcher hasta una ventana de quietud ([`TRANQUILO`]), no hasta
+    /// el primer `poll` vacío: los backends asíncronos pueden tener entregas
+    /// en vuelo y un `poll` vacío no significa que no lleguen más. Lo tardío
+    /// que se cuela entre fases se funde en [`coalesce`] (el alta gana) y
+    /// arruina el siguiente intento. Siempre acotado por `ESPERA`.
     fn drenar(watcher: &mut NativeWatcher) {
         let fin = Instant::now() + ESPERA;
+        let mut quieto: Option<Instant> = None;
         loop {
             let events = watcher.poll().unwrap();
             if events.is_empty() {
-                return;
+                if quieto.get_or_insert_with(Instant::now).elapsed() >= TRANQUILO {
+                    return;
+                }
+            } else {
+                quieto = None;
             }
             assert!(Instant::now() < fin, "el watcher no se vacía: {events:?}");
             thread::sleep(Duration::from_millis(10));
