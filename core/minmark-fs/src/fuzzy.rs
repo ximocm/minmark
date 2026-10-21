@@ -920,14 +920,7 @@ mod tests {
 
     #[test]
     fn resolve_heading_line_desde_disco() {
-        let root = std::env::temp_dir().join(format!(
-            "minmark-fuzzy-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
+        let root = crate::test_dir::crear("minmark-fuzzy");
         std::fs::create_dir_all(root.join("cap")).unwrap();
         std::fs::write(root.join("cap/a.md"), "# Cap A\n\n## Detalle\n").unwrap();
         assert_eq!(

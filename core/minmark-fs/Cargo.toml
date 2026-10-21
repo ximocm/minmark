@@ -6,9 +6,21 @@ license.workspace = true
 description = "Filesystem de minmark: file I/O, guardado atómico y snapshots (ISSUE-013/ISSUE-019)"
 
 [dependencies]
+minmark-config = { workspace = true }
 minmark-document = { workspace = true }
 minmark-parser = { path = "../minmark-parser" }
 
+# Watching (§46) y papelera del sistema (§14.9) fuera de Linux. `notify`
+# envuelve ReadDirectoryChangesW (Windows) y FSEvents (macOS): no hay API de
+# `std` ni syscall razonable que escribir a mano para ellas, y la alternativa
+# sería polling (§46 lo prohíbe). `trash` invoca la Papelera de reciclaje y
+# `~/.Trash` con sus APIs nativas. Justificación de dependencia estratégica:
+# precedente ADR-003 / §4.4 (resuelve funcionalidad crítica con licencias
+# limpias: CC0-1.0 y MIT). En Linux no se compilan: el backend sigue siendo
+# el inotify directo de §50.1 y la papelera, la especificación XDG.
+[target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
+notify = "8"
+trash = "5"
+
 [dev-dependencies]
-minmark-config = { path = "../minmark-config" }
 minmark-renderer = { path = "../minmark-renderer" }

@@ -2,11 +2,13 @@
 use minmark_config::{parse_scalar_layer, resolve, ConfigLayer, Level, Settings, Value};
 use std::path::{Path, PathBuf};
 
+/// Ruta de `config.toml` global (§58.1): `minmark/config.toml` bajo el
+/// directorio de configuración por SO (`minmark_config::dirs`): XDG en Linux
+/// (`$XDG_CONFIG_HOME` o `~/.config`), `%APPDATA%` en Windows y
+/// `~/Library/Application Support` en macOS. Sin base utilizable no hay
+/// configuración global.
 pub fn global_path() -> Option<PathBuf> {
-    std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
-        .map(|p| p.join("minmark/config.toml"))
+    minmark_config::dirs::config_dir().map(|base| base.join("minmark").join("config.toml"))
 }
 pub fn load_at(root: Option<&Path>, source: &str, document: Option<&Path>) -> Settings {
     let mut layers = Vec::new();
@@ -140,10 +142,10 @@ fn resource_paths(layer: &mut ConfigLayer, base: Option<&Path>, boundary: Option
                     return;
                 };
                 let joined = base.join(&*text);
-                let resolved = std::fs::canonicalize(&joined).unwrap_or(joined);
+                let resolved = minmark_fs::canonicalize(&joined).unwrap_or(joined);
                 if let (Ok(root), Ok(file)) = (
-                    std::fs::canonicalize(boundary.unwrap_or(base)),
-                    std::fs::canonicalize(&resolved),
+                    minmark_fs::canonicalize(boundary.unwrap_or(base)),
+                    minmark_fs::canonicalize(&resolved),
                 ) {
                     if !file.starts_with(root) {
                         *text = format!("blocked://recurso fuera del ámbito: {text}");

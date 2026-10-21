@@ -10,7 +10,7 @@
 
 use crate::FsError;
 use std::collections::HashSet;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Component, Path, PathBuf};
@@ -28,6 +28,67 @@ pub struct TreeEntry {
     pub is_dir: bool,
 }
 
+/// Canoniza `path` con [`fs::canonicalize`] y normaliza el namespace de la
+/// ruta resultante (§48).
+///
+/// En Windows `fs::canonicalize` devuelve rutas *verbatim*
+/// (`\\?\C:\a\b.md`, `\\?\UNC\servidor\compartido\…`), que **no** comparan
+/// por prefijo (`starts_with`/`strip_prefix`) con las rutas absolutas
+/// «planas» que escriben el usuario, la UI y los ficheros del proyecto
+/// (`C:\a\b.md`, `\\servidor\compartido\…`): `\\?\…` no compone igual que
+/// `C:\…`, así que una ruta dentro del proyecto se clasificaría como ajena
+/// (§48). Esta función devuelve siempre la forma plana:
+/// `\\?\C:\a\b.md` → `C:\a\b.md` y `\\?\UNC\servidor\compartido\…` →
+/// `\\servidor\compartido\…`.
+///
+/// **Invariante**: toda canonicalización de minmark-fs (este módulo,
+/// `resolve`, `ops`, `search`, `index` y los backends de watching) y toda
+/// canonicalización del `ui` que se combine o compare con rutas devueltas
+/// por este crate pasa por aquí, de modo que las dos rutas de cualquier
+/// comparación pertenecen al mismo namespace. En Linux y macOS no existe el
+/// prefijo verbatim: el resultado es byte-idéntico al de `fs::canonicalize`.
+pub fn canonicalize(path: &Path) -> std::io::Result<PathBuf> {
+    let canon = fs::canonicalize(path)?;
+    Ok(sin_verbatim(&canon))
+}
+
+/// Quita el prefijo verbatim de Windows a una ruta ya canónica:
+/// `\\?\C:\a\b` → `C:\a\b` y `\\?\UNC\servidor\compartido\a` →
+/// `\\servidor\compartido\a`. Los demás prefijos verbatim (p. ej.
+/// `\\?\Volume{…}`, sin forma plana equivalente) y las rutas sin prefijo se
+/// devuelven intactos.
+fn sin_verbatim(canon: &Path) -> PathBuf {
+    /// Reconstruye un `OsStr` recortado de [`OsStr::as_encoded_bytes`].
+    ///
+    /// SAFETY: los cortes de `sin_verbatim` se hacen siempre tras un prefijo
+    /// de solo ASCII (`\\?\UNC\`, `\\?\`), y el resto es un sufijo de los
+    /// bytes codificados de un `OsStr` real, que siguen siendo WTF-8 válido
+    /// (Unix: bytes crudos; Windows: WTF-8 sin caracteres entre comodines).
+    fn recorte(bytes: &[u8]) -> &OsStr {
+        unsafe { OsStr::from_encoded_bytes_unchecked(bytes) }
+    }
+
+    let bytes = canon.as_os_str().as_encoded_bytes();
+    if let Some(resto) = bytes.strip_prefix(&b"\\\\?\\UNC\\"[..]) {
+        let mut out = OsString::from(r"\\");
+        out.push(recorte(resto));
+        return PathBuf::from(out);
+    }
+    match bytes.strip_prefix(&b"\\\\?\\"[..]) {
+        // Solo la forma con letra de unidad (`\\?\C:\…`): se queda sin el
+        // prefijo (`C:\…`).
+        Some(resto)
+            if resto.len() >= 3
+                && resto[0].is_ascii_alphabetic()
+                && resto[1] == b':'
+                && (resto[2] == b'\\' || resto[2] == b'/') =>
+        {
+            PathBuf::from(recorte(resto))
+        }
+        _ => canon.to_path_buf(),
+    }
+}
+
 /// Resuelve `path` dentro de `root` y verifica que no sale del proyecto (§48).
 ///
 /// `path` puede ser absoluta o relativa a `root` (§17). La resolución es
@@ -39,7 +100,7 @@ pub struct TreeEntry {
 /// parte inexistente se rechaza como [`FsError::PathOutsideProject`]. Un error
 /// de E/S en la canonicalización es [`FsError::Io`].
 pub fn resolve_in_project(root: &Path, path: &Path) -> Result<PathBuf, FsError> {
-    let root_canon = fs::canonicalize(root).map_err(|source| FsError::Io {
+    let root_canon = canonicalize(root).map_err(|source| FsError::Io {
         path: root.to_path_buf(),
         source,
     })?;
@@ -49,14 +110,19 @@ pub fn resolve_in_project(root: &Path, path: &Path) -> Result<PathBuf, FsError> 
         // §17: las rutas relativas son contra el directorio del proyecto.
         root_canon.join(path)
     };
-    let resolved = match fs::canonicalize(&candidate) {
+    let resolved = match canonicalize(&candidate) {
         Ok(resolved) => resolved,
         Err(source) if source.kind() == ErrorKind::NotFound => {
             // Destino aún inexistente (Save As): el resto se compone sobre el
             // ancestro existente más cercano (§48).
             resolve_missing_tail(&candidate)?
         }
-        Err(source) => return Err(FsError::Io { path: candidate, source }),
+        Err(source) => {
+            return Err(FsError::Io {
+                path: candidate,
+                source,
+            })
+        }
     };
     if !resolved.starts_with(&root_canon) {
         return Err(FsError::PathOutsideProject { path: resolved });
@@ -87,7 +153,7 @@ fn resolve_missing_tail(candidate: &Path) -> Result<PathBuf, FsError> {
                 path: candidate.to_path_buf(),
             });
         };
-        match fs::canonicalize(parent) {
+        match canonicalize(parent) {
             Ok(base) => {
                 let mut resolved = base;
                 for name in tail.iter().rev() {
@@ -165,15 +231,14 @@ pub fn read_dir_entries(dir: &Path) -> Result<Vec<TreeEntry>, FsError> {
 /// no visitar ninguno dos veces (§48: evitar ciclos de symlink). El recorrido
 /// es iterativo y siempre termina, sin recursión infinita ni panic.
 pub fn walk_tree(root: &Path) -> Result<Vec<TreeEntry>, FsError> {
-    let root = fs::canonicalize(root).map_err(|source| FsError::Io {
+    let root = canonicalize(root).map_err(|source| FsError::Io {
         path: root.to_path_buf(),
         source,
     })?;
     let mut visited: HashSet<PathBuf> = HashSet::new();
     visited.insert(root.clone());
     let mut out = Vec::new();
-    let mut stack: Vec<std::vec::IntoIter<TreeEntry>> =
-        vec![read_dir_entries(&root)?.into_iter()];
+    let mut stack: Vec<std::vec::IntoIter<TreeEntry>> = vec![read_dir_entries(&root)?.into_iter()];
     while !stack.is_empty() {
         let next = stack.last_mut().and_then(|frame| frame.next());
         let Some(entry) = next else {
@@ -183,7 +248,7 @@ pub fn walk_tree(root: &Path) -> Result<Vec<TreeEntry>, FsError> {
         // Solo se desciende en directorios reales: nunca en carpetas
         // enlazadas mediante symlink (§14.7).
         if entry.is_dir && !entry.is_symlink {
-            let canon = fs::canonicalize(&entry.path).map_err(|source| FsError::Io {
+            let canon = canonicalize(&entry.path).map_err(|source| FsError::Io {
                 path: entry.path.clone(),
                 source,
             })?;
@@ -199,21 +264,37 @@ pub fn walk_tree(root: &Path) -> Result<Vec<TreeEntry>, FsError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::unix::fs::symlink;
-    use std::time::{SystemTime, UNIX_EPOCH};
+
+    /// Symlink portable para tests: en Windows distingue fichero de carpeta
+    /// (`symlink_file`/`symlink_dir`) y devuelve `Err` cuando el sistema no
+    /// permite crear symlinks (sin privilegio ni Developer Mode). Los tests
+    /// tratan ese error como «este escenario no aplica en esta máquina» y
+    /// terminan sin aserciones.
+    #[cfg(unix)]
+    fn symlink(original: impl AsRef<Path>, link: impl AsRef<Path>) -> std::io::Result<()> {
+        std::os::unix::fs::symlink(original, link)
+    }
+
+    #[cfg(windows)]
+    fn symlink(original: impl AsRef<Path>, link: impl AsRef<Path>) -> std::io::Result<()> {
+        let original = original.as_ref();
+        let link = link.as_ref();
+        // El destino relativo se resuelve contra la carpeta del enlace.
+        let base = link.parent().unwrap_or_else(|| Path::new(""));
+        let es_carpeta = base.join(original).is_dir();
+        if es_carpeta {
+            std::os::windows::fs::symlink_dir(original, link)
+        } else {
+            std::os::windows::fs::symlink_file(original, link)
+        }
+    }
 
     /// Directorio temporal de test, eliminado al salir.
     struct TestDir(PathBuf);
 
     impl TestDir {
         fn new() -> Self {
-            let nanos = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos();
-            let path = std::env::temp_dir().join(format!("minmark-fs-{}-{}", std::process::id(), nanos));
-            fs::create_dir_all(&path).unwrap();
-            Self(path)
+            Self(crate::test_dir::crear("minmark-paths"))
         }
 
         fn file(&self, name: &str) -> PathBuf {
@@ -238,6 +319,35 @@ mod tests {
         (dir, root)
     }
 
+    /// `sin_verbatim` (la normalización que `canonicalize` aplica al
+    /// resultado de Windows): `\\?\C:\…` → `C:\…` y
+    /// `\\?\UNC\servidor\…` → `\\servidor\…`; el resto de formas (planas,
+    /// otros prefijos verbatim, Unix) no se toca. Comprobable en cualquier
+    /// SO porque la transformación es sobre la grafía, no sobre el disco.
+    #[test]
+    fn sin_verbatim_normaliza_las_rutas_de_windows() {
+        assert_eq!(
+            sin_verbatim(Path::new(r"\\?\C:\proyecto\cap\f.md")),
+            PathBuf::from(r"C:\proyecto\cap\f.md")
+        );
+        assert_eq!(
+            sin_verbatim(Path::new(r"\\?\UNC\servidor\compartido\f.md")),
+            PathBuf::from(r"\\servidor\compartido\f.md")
+        );
+        assert_eq!(
+            sin_verbatim(Path::new(r"C:\proyecto")),
+            PathBuf::from(r"C:\proyecto")
+        );
+        assert_eq!(
+            sin_verbatim(Path::new(r"\\?\Volume{0123}")),
+            PathBuf::from(r"\\?\Volume{0123}")
+        );
+        assert_eq!(
+            sin_verbatim(Path::new("/tmp/proyecto")),
+            PathBuf::from("/tmp/proyecto")
+        );
+    }
+
     #[test]
     fn resolve_rechaza_fuera_del_proyecto() {
         // §48: path traversal y rutas absolutas externas.
@@ -257,11 +367,14 @@ mod tests {
         // §48: la canónica de un symlink que sale del proyecto también sale.
         let (_dir, root) = proyecto();
         fs::create_dir_all(root.join("interno")).unwrap();
-        symlink("interno", root.join("enlace_in")).unwrap();
         let fuera = TestDir::new();
-        symlink(fuera.path(), root.join("enlace_out")).unwrap();
+        if symlink("interno", root.join("enlace_in")).is_err()
+            || symlink(fuera.path(), root.join("enlace_out")).is_err()
+        {
+            return; // sin privilegio de symlinks (Windows): no aplica aquí
+        }
 
-        let esperado = fs::canonicalize(root.join("interno")).unwrap();
+        let esperado = canonicalize(&root.join("interno")).unwrap();
         assert_eq!(
             resolve_in_project(&root, &root.join("enlace_in")).unwrap(),
             esperado
@@ -277,7 +390,7 @@ mod tests {
         // §17: relativas contra root; §48: Save As sobre un destino nuevo.
         let (_dir, root) = proyecto();
         fs::create_dir_all(root.join("docs")).unwrap();
-        let raiz = fs::canonicalize(&root).unwrap();
+        let raiz = canonicalize(&root).unwrap();
 
         let resuelto = resolve_in_project(&root, Path::new("docs/notas.md")).unwrap();
         assert!(resuelto.is_absolute());
@@ -308,8 +421,11 @@ mod tests {
         let (_dir, root) = proyecto();
         fs::create_dir_all(root.join("a")).unwrap();
         fs::write(root.join("a/uno.md"), "x\n").unwrap();
-        symlink("..", root.join("a/enlace")).unwrap();
-        symlink(".", root.join("ciclo")).unwrap();
+        if symlink("..", root.join("a/enlace")).is_err()
+            || symlink(".", root.join("ciclo")).is_err()
+        {
+            return; // sin privilegio de symlinks (Windows): no aplica aquí
+        }
 
         let entries = walk_tree(&root).unwrap();
         let nombres: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
@@ -333,7 +449,9 @@ mod tests {
         let (_dir, root) = proyecto();
         fs::create_dir_all(root.join("real")).unwrap();
         fs::write(root.join("real/dentro.md"), "x\n").unwrap();
-        symlink("real", root.join("enlace_carpeta")).unwrap();
+        if symlink("real", root.join("enlace_carpeta")).is_err() {
+            return; // sin privilegio de symlinks (Windows): no aplica aquí
+        }
 
         let entries = walk_tree(&root).unwrap();
         let nombres: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
@@ -346,7 +464,7 @@ mod tests {
                 .filter(|e| e.name == "dentro.md")
                 .map(|e| e.path.clone())
                 .collect::<Vec<_>>(),
-            [fs::canonicalize(&root).unwrap().join("real/dentro.md")]
+            [canonicalize(&root).unwrap().join("real/dentro.md")]
         );
 
         let enlace = entries.iter().find(|e| e.name == "enlace_carpeta").unwrap();
@@ -360,8 +478,11 @@ mod tests {
         let (_dir, root) = proyecto();
         fs::create_dir_all(root.join("carpeta")).unwrap();
         fs::write(root.join("archivo.md"), "x\n").unwrap();
-        symlink("archivo.md", root.join("enlace_archivo")).unwrap();
-        symlink("carpeta", root.join("enlace_carpeta")).unwrap();
+        if symlink("archivo.md", root.join("enlace_archivo")).is_err()
+            || symlink("carpeta", root.join("enlace_carpeta")).is_err()
+        {
+            return; // sin privilegio de symlinks (Windows): no aplica aquí
+        }
 
         let entries = read_dir_entries(&root).unwrap();
         assert_eq!(

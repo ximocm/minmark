@@ -299,7 +299,7 @@ struct AppCmds {
     sidebar: Option<Rc<Sidebar>>,
     /// Watcher del subárbol del proyecto (ISSUE-026, §46); `None` en
     /// standalone.
-    watcher: Option<Rc<RefCell<minmark_fs::InotifyWatcher>>>,
+    watcher: Option<Rc<RefCell<minmark_fs::NativeWatcher>>>,
     /// Composiciones del `.mdproject.toml` de la raíz (§20, ISSUE-022);
     /// vacías en ventanas standalone, donde las acciones de composición
     /// quedan deshabilitadas. Se redescubren al cambiar `.mdproject.toml`
@@ -1925,7 +1925,7 @@ impl Commands for AppCmds {
 /// Ruta comparable: canónica si se resuelve y la propia si no (§12.7: dos
 /// grafías de un mismo fichero son el mismo fichero).
 fn ruta_comparable(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    minmark_fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 /// Diálogo de error modal (§3.7: acciones observables).
@@ -2272,7 +2272,7 @@ fn build_window(app: &Application, scope: WindowScope, open_paths: &[PathBuf]) -
     let watcher = match &scope {
         WindowScope::Project(root) => {
             spawn_index_refresh(root.clone(), slot.clone());
-            match minmark_fs::InotifyWatcher::new() {
+            match minmark_fs::NativeWatcher::new() {
                 Ok(mut watcher) => {
                     if let Err(err) = minmark_fs::Watcher::watch_tree(&mut watcher, root) {
                         eprintln!("minmark: sin watching de proyecto: {err}");
@@ -2474,7 +2474,7 @@ fn build_window(app: &Application, scope: WindowScope, open_paths: &[PathBuf]) -
 /// desactiva explícitamente con la variable que WebKit define para ello:
 /// minmark es una app local sin red (§3.4) y la alternativa es un crash al
 /// abrir cualquier ventana con Preview (decisión registrada en CHANGELOG).
-fn ensure_webkit_sandbox_usable() {
+fn ensure_sandbox_usable() {
     let bwrap_ok = std::process::Command::new("bwrap")
         .args(["--ro-bind", "/", "/", "/bin/true"])
         .stdout(std::process::Stdio::null())
@@ -2490,7 +2490,7 @@ fn ensure_webkit_sandbox_usable() {
 fn main() {
     // Antes de tocar ningún widget de WebKit (§4.5: el sandbox es un medio,
     // no el fin; un crash en el arranque no es aceptable).
-    ensure_webkit_sandbox_usable();
+    ensure_sandbox_usable();
     // Argumentos (ISSUE-021): cada carpeta abre una ventana de proyecto y los
     // archivos una ventana standalone con sus pestañas (como Notepad++).
     let mut files: Vec<PathBuf> = Vec::new();
@@ -2650,7 +2650,7 @@ mod gtk_integration_tests {
     #[ignore = "requiere sesión gráfica GTK/WebKit"]
     fn gtk_navigation_outline_completion_and_dirty_buffers() {
         gtk4::init().expect("GTK display");
-        ensure_webkit_sandbox_usable();
+        ensure_sandbox_usable();
         let root = std::env::temp_dir().join(format!("minmark-gtk-phase4-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         let a = root.join("a.md");
@@ -2996,7 +2996,7 @@ mod gtk_integration_tests {
     #[ignore = "requiere sesión gráfica GTK/WebKit"]
     fn composiciones_se_redescubren_al_cambiar_mdproject_en_caliente() {
         gtk4::init().expect("GTK display");
-        ensure_webkit_sandbox_usable();
+        ensure_sandbox_usable();
         let root =
             std::env::temp_dir().join(format!("minmark-gtk-redescubre-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
@@ -3075,7 +3075,7 @@ mod gtk_integration_tests {
     #[ignore = "requiere sesión gráfica GTK/WebKit"]
     fn preview_combinado_navega_destinos_internos_con_scroll_in_page() {
         gtk4::init().expect("GTK display");
-        ensure_webkit_sandbox_usable();
+        ensure_sandbox_usable();
         let root = std::env::temp_dir().join(format!(
             "minmark-gtk-destino-interno-{}",
             std::process::id()

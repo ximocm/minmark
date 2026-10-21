@@ -1,10 +1,11 @@
 //! Estado persistente del explorador (ISSUE-022, §14.3: «estado restaurable»).
 //!
 //! Visibilidad y ancho del panel lateral, restaurados al abrir una ventana de
-//! proyecto. Vive en `$XDG_STATE_HOME/minmark/ui.ini`
-//! (`~/.local/state/minmark/ui.ini`), fuera de cualquier proyecto (§14.2:
-//! abrir una carpeta no crea ni modifica archivos del proyecto; §3.1: los
-//! archivos son del usuario).
+//! proyecto. Vive en `minmark/ui.ini` bajo el directorio de estado por SO
+//! (`minmark_config::dirs`: `$XDG_STATE_HOME`/`~/.local/state` en Linux,
+//! `%APPDATA%` en Windows y `~/Library/Application Support` en macOS), fuera
+//! de cualquier proyecto (§14.2: abrir una carpeta no crea ni modifica
+//! archivos del proyecto; §3.1: los archivos son del usuario).
 //!
 //! Formato mínimo `clave=valor` (una por línea), leído de forma tolerante:
 //! claves desconocidas y valores ilegibles se ignoran y dejan el default.
@@ -78,18 +79,14 @@ pub fn parse(text: &str) -> ExplorerState {
     state
 }
 
-/// Ruta de `ui.ini`: `$XDG_STATE_HOME/minmark/` o `~/.local/state/minmark/`.
+/// Ruta de `ui.ini` (§14.2): `minmark/ui.ini` bajo el directorio de estado
+/// por SO (`minmark_config::dirs`): `$XDG_STATE_HOME` o `~/.local/state` en
+/// Linux, `%APPDATA%` en Windows y `~/Library/Application Support` en macOS.
 ///
-/// Sin HOME/XDG utilizable degrada al directorio temporal: el estado es un
+/// Sin base utilizable degrada al directorio temporal: el estado es un
 /// confort de UI, nunca un requisito para funcionar.
 pub fn state_path() -> PathBuf {
-    let base = std::env::var_os("XDG_STATE_HOME")
-        .map(PathBuf::from)
-        .filter(|path| path.is_absolute())
-        .or_else(|| {
-            std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local").join("state"))
-        })
-        .unwrap_or_else(std::env::temp_dir);
+    let base = minmark_config::dirs::state_dir().unwrap_or_else(std::env::temp_dir);
     base.join("minmark").join("ui.ini")
 }
 

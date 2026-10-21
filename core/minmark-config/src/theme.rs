@@ -7,7 +7,6 @@
 use crate::Theme;
 use std::env;
 use std::fs;
-use std::path::PathBuf;
 use std::process::Command;
 
 /// Preferencia de tema del entorno.
@@ -86,9 +85,9 @@ fn gsettings_theme() -> Option<SystemTheme> {
 }
 
 fn kde_theme() -> Option<SystemTheme> {
-    let config_dir = env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))?;
+    // Directorio de configuración centralizado por SO (§45.1): XDG en Linux,
+    // %APPDATA% en Windows, ~/Library/Application Support en macOS.
+    let config_dir = crate::dirs::config_dir()?;
     let content = fs::read_to_string(config_dir.join("kdeglobals")).ok()?;
     parse_kdeglobals(&content)
 }
@@ -155,10 +154,22 @@ mod tests {
 
     #[test]
     fn resolucion_light_dark_y_system() {
-        assert_eq!(resolve_theme(Theme::Light, SystemTheme::Dark), ResolvedTheme::Light);
-        assert_eq!(resolve_theme(Theme::Dark, SystemTheme::Light), ResolvedTheme::Dark);
-        assert_eq!(resolve_theme(Theme::System, SystemTheme::Dark), ResolvedTheme::Dark);
-        assert_eq!(resolve_theme(Theme::System, SystemTheme::Light), ResolvedTheme::Light);
+        assert_eq!(
+            resolve_theme(Theme::Light, SystemTheme::Dark),
+            ResolvedTheme::Light
+        );
+        assert_eq!(
+            resolve_theme(Theme::Dark, SystemTheme::Light),
+            ResolvedTheme::Dark
+        );
+        assert_eq!(
+            resolve_theme(Theme::System, SystemTheme::Dark),
+            ResolvedTheme::Dark
+        );
+        assert_eq!(
+            resolve_theme(Theme::System, SystemTheme::Light),
+            ResolvedTheme::Light
+        );
         // Sin preferencia determinable: fallback Light.
         assert_eq!(
             resolve_theme(Theme::System, SystemTheme::Unknown),

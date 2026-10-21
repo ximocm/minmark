@@ -10,7 +10,12 @@ visual y vista previa en la misma ventana.
 **En desarrollo:** las fases de core Linux, proyectos y edición visual están
 completadas. La versión actual es `0.3.0`; consulta las novedades y el trabajo
 pendiente en el [changelog](CHANGELOG.md).
-Windows está planificado; macOS no es una plataforma soportada actualmente.
+
+Linux es la plataforma principal y es la que publica releases hoy. La CI
+también compila y empaqueta la UI para Windows (ZIP portátil, MSI y bundle) y
+macOS (`.app` en `.dmg` y `.tar.gz`) desde el mismo código (ADR-005); esos
+paquetes son nuevos y su QA manual (ventanas, diálogos, Preview) sigue
+pendiente antes de considerarlos listos para publicar.
 
 ## Qué puedes hacer
 
@@ -71,6 +76,10 @@ estático portable.
 Cada carpeta abre una ventana de proyecto; los archivos se abren en pestañas de
 una ventana independiente. También puedes abrirlos desde el menú **File**.
 
+En Windows y macOS la UI se compila con GTK 4 del sistema (gvsbuild y
+Homebrew) y su Preview usa los motores nativos WebView2 y WKWebView; los
+paquetes para esas plataformas se generan con los scripts incluidos.
+
 Consulta [BUILDING.md](BUILDING.md) para compilación de desarrollo, tests,
 instalación local y solución de problemas.
 
@@ -99,7 +108,7 @@ atajos disponibles en la aplicación.
 - [Compilación, tests e instalación local](BUILDING.md).
 - [Cómo contribuir y comunicar errores](CONTRIBUTING.md).
 - [Changelog](CHANGELOG.md).
-- [CI y releases](docs/CI.md): pruebas del core en Linux, Windows y macOS; paquetes Linux.
+- [CI y releases](docs/CI.md): pruebas del core y paquetes de Linux, Windows y macOS.
 - [Índice de documentación](docs/README.md): especificación y decisiones.
 - [Cómo citar minmark](docs/CITING.md): referencias APA y BibTeX del software.
 - [Documento de demostración](docs/SHOWCASE.md): todo el dialecto con ejemplos
@@ -129,6 +138,14 @@ Los índices de proyecto se guardan bajo `$XDG_DATA_HOME/minmark/index/`
 del core usa el mismo directorio de datos, en `minmark/snapshots/`. El estado del
 explorador se guarda en `$XDG_STATE_HOME/minmark/ui.ini` (por defecto
 `~/.local/state/minmark/ui.ini`).
+
+## Privacidad en Windows
+
+Preview en Windows se apoya en el WebView2 Evergreen de Microsoft, un
+componente del sistema que puede enviar a Microsoft sus propios diagnósticos.
+minmark no añade telemetría ni acceso a red propio (§3.4). En Linux y macOS
+el Preview usa WebKitGTK y WKWebView, sin ese componente. Consulta
+[ADR-005](docs/adr/005-preview-multiplataforma.md).
 
 ## Licencia
 

@@ -26,7 +26,7 @@
 
 use crate::index::ProjectIndex;
 use crate::ignore::IgnorePatterns;
-use crate::paths::walk_tree;
+use crate::paths::{canonicalize, walk_tree};
 use crate::{relative_path, resolve_in_project, write_atomic, FsError};
 use minmark_document::{Matcher, TextMatch};
 use std::collections::BTreeSet;
@@ -241,7 +241,7 @@ fn drive(
     cancel: &AtomicBool,
     mut emit: impl FnMut(SearchEvent) -> bool,
 ) -> Result<SearchStats, FsError> {
-    let root = std::fs::canonicalize(root).map_err(|source| FsError::Io {
+    let root = canonicalize(root).map_err(|source| FsError::Io {
         path: root.to_path_buf(),
         source,
     })?;
@@ -471,7 +471,7 @@ pub fn plan_replace(
     template: &str,
     files: &[ReplaceFile],
 ) -> Result<ReplacePlan, ReplaceError> {
-    let root = std::fs::canonicalize(root).map_err(|source| ReplaceError::Io {
+    let root = canonicalize(root).map_err(|source| ReplaceError::Io {
         path: root.to_path_buf(),
         source,
     })?;
@@ -634,7 +634,7 @@ mod tests {
     use super::*;
     use minmark_document::SearchOptions;
     use std::sync::mpsc::channel;
-    use std::time::{Instant, SystemTime, UNIX_EPOCH};
+    use std::time::Instant;
 
     /// Directorio temporal de test, eliminado al salir (mismo patrón que
     /// [`crate::paths`]).
@@ -642,14 +642,7 @@ mod tests {
 
     impl TestDir {
         fn new() -> Self {
-            let nanos = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos();
-            let path =
-                std::env::temp_dir().join(format!("minmark-search-{}-{}", std::process::id(), nanos));
-            std::fs::create_dir_all(&path).unwrap();
-            Self(path)
+            Self(crate::test_dir::crear("minmark-search"))
         }
 
         fn write(&self, rel: &str, content: impl AsRef<[u8]>) {
