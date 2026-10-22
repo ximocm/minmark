@@ -235,7 +235,7 @@ mod tests {
     use super::*;
 
     use std::fs;
-    use std::os::unix::fs::symlink;
+    use crate::test_support::symlink;
 
     fn temp_tree(tag: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now()

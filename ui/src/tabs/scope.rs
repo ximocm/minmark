@@ -63,7 +63,7 @@ impl WindowScope {
 mod tests {
     use super::*;
     use std::fs;
-    use std::os::unix::fs::symlink;
+    use crate::test_support::symlink;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     struct TestDir(PathBuf);

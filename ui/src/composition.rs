@@ -692,7 +692,7 @@ mod tests {
         let root = base.join("proyecto");
         std::fs::create_dir_all(root.join("docs")).unwrap();
         std::fs::write(base.join("fuera.md"), "SECRETO-CANONICO\n").unwrap();
-        std::os::unix::fs::symlink(&base, root.join("enlace")).unwrap();
+        crate::test_support::symlink(&base, root.join("enlace")).unwrap();
         std::fs::write(
             root.join(".mdproject.toml"),
             "[[composition]]\nname = \"A\"\nfiles = [\"docs/../../fuera.md\"]\n[[composition]]\nname = \"B\"\nfiles = [\"enlace/fuera.md\"]\n",
@@ -733,7 +733,7 @@ mod tests {
         let root = base.join("proyecto");
         std::fs::create_dir_all(root.join("caps")).unwrap();
         std::fs::create_dir_all(base.join("exterior")).unwrap();
-        std::os::unix::fs::symlink(base.join("exterior"), root.join("enlace")).unwrap();
+        crate::test_support::symlink(base.join("exterior"), root.join("enlace")).unwrap();
         std::fs::write(
             root.join(".mdproject.toml"),
             "[[composition]]\nname = \"A\"\nfiles = [\"enlace/falta.md\"]\n[[composition]]\nname = \"B\"\nfiles = [\"caps/falta.md\"]\n",

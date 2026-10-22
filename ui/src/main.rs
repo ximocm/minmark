@@ -26,20 +26,23 @@
 //! `TabManager`; el `TextBuffer` del TextView es el espejo sincronizado del
 //! mismo documento en los dos modos §8 (Markdown y Visual, ISSUE-030).
 
-mod academic;
-mod composition;
-mod editor;
-mod explorer;
-mod export;
-mod find;
-mod intelligence;
-mod list_scroll;
-mod menus;
-mod preview;
-mod quickopen;
-mod search;
-mod settings;
-mod tabs;
+// `pub` para que el binario de prueba `tests/qa_preview.rs` (ISSUE-57) pueda
+// reexportarlos al incluir este archivo como módulo y las rutas `crate::…`
+// resuelvan igual que en el binario.
+pub mod academic;
+pub mod composition;
+pub mod editor;
+pub mod explorer;
+pub mod export;
+pub mod find;
+pub mod intelligence;
+pub mod list_scroll;
+pub mod menus;
+pub mod preview;
+pub mod quickopen;
+pub mod search;
+pub mod settings;
+pub mod tabs;
 
 use editor::{EditSink, EditorPane};
 use explorer::{load_state, save_state, ExplorerAction, ExplorerPane, ExplorerState};
@@ -2712,35 +2715,119 @@ mod tests {
     }
 }
 
+/// Symlink portable para tests (la suite de UI corre también en Windows):
+/// `unix` tiene un solo tipo de symlink; Windows distingue directorio y
+/// fichero según el destino.
+#[cfg(test)]
+pub mod test_support {
+    use std::path::Path;
+
+    #[cfg(unix)]
+    pub fn symlink(origen: impl AsRef<Path>, destino: impl AsRef<Path>) -> std::io::Result<()> {
+        std::os::unix::fs::symlink(origen, destino)
+    }
+
+    #[cfg(windows)]
+    pub fn symlink(origen: impl AsRef<Path>, destino: impl AsRef<Path>) -> std::io::Result<()> {
+        let origen = origen.as_ref();
+        if origen.is_dir() {
+            std::os::windows::fs::symlink_dir(origen, destino)
+        } else {
+            std::os::windows::fs::symlink_file(origen, destino)
+        }
+    }
+}
+
+/// Espera `condition` drenando el main loop de GTK (tests y escenario QA del
+/// Preview, ISSUE-57).
+#[cfg(test)]
+fn pump_until(condition: impl Fn() -> bool) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(8);
+    while !condition() {
+        assert!(std::time::Instant::now() < deadline, "timeout GTK");
+        while glib::MainContext::default().pending() {
+            glib::MainContext::default().iteration(false);
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// Espera a que la inteligencia y el Preview terminen sus refrescos.
+#[cfg(test)]
+fn settle_preview(cmds: &AppCmds) {
+    pump_until(|| {
+        !cmds.intelligence_busy.get()
+            && !cmds.intelligence_pending.get()
+            && !cmds.refresh_scheduled.get()
+            && !cmds.preview.test_is_loading()
+    });
+}
+
+/// Evalúa `script` en la página del Preview y devuelve su resultado numérico.
+#[cfg(test)]
+fn preview_number(cmds: &AppCmds, script: &str) -> f64 {
+    settle_preview(cmds);
+    let result = Rc::new(Cell::new(None));
+    cmds.preview.test_eval_number(script, result.clone());
+    pump_until(|| result.get().is_some());
+    result.get().unwrap()
+}
+
+/// Escenario QA del Preview (ISSUE-57): la Preview debe pintar el documento y
+/// seguir las ediciones en los tres backends (WebKitGTK, WebView2, WKWebView).
+/// Si la vista nativa no se presenta, el DOM queda vacío (`innerText` exige
+/// layout real) y el escenario falla.
+///
+/// Lo ejecutan el `#[test]` de Linux y el binario de prueba
+/// `tests/qa_preview.rs` (sin harness, hilo principal del proceso), que es el
+/// único camino en macOS: GTK allí exige el hilo principal y libtest corre
+/// cada test en el suyo.
+#[cfg(test)]
+pub fn qa_preview_smoke() {
+    gtk4::init().expect("GTK display");
+    ensure_sandbox_usable();
+    let root = std::env::temp_dir().join(format!("minmark-gtk-preview-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let path = root.join("doc.md");
+    std::fs::write(&path, "# Original\n").unwrap();
+    let app = Application::builder()
+        .application_id("app.minmark.test.preview-render")
+        .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+        .build();
+    app.register(None::<&gtk4::gio::Cancellable>).unwrap();
+    let cmds = build_window(&app, WindowScope::Project(root.clone()), &[path.clone()]);
+    pump_until(|| cmds.index.borrow().is_some());
+    cmds.window.set_default_size(900, 600);
+    pump_until(|| cmds.window.is_mapped());
+    settle_preview(&cmds);
+
+    // La preview pinta el documento cargado.
+    let painted = preview_number(&cmds, "document.body ? document.body.innerText.length : -1");
+    assert!(
+        painted > 0.0,
+        "la preview no pinta el documento (innerText = {painted})"
+    );
+
+    // Editar actualiza la MISMA página, sin recargarla, con el texto nuevo.
+    cmds.tabs
+        .borrow_mut()
+        .insert_active(Position::new(1, 0), "Marcador\n");
+    cmds.reload_active();
+    settle_preview(&cmds);
+    let updated = preview_number(
+        &cmds,
+        "document.body.innerText.includes('Marcador') ? 1 : 0",
+    );
+    assert_eq!(updated, 1.0, "la preview no se actualiza al escribir");
+
+    cmds.window.destroy();
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 #[cfg(test)]
 mod gtk_integration_tests {
     use super::*;
-    fn pump_until(condition: impl Fn() -> bool) {
-        let deadline = std::time::Instant::now() + Duration::from_secs(8);
-        while !condition() {
-            assert!(std::time::Instant::now() < deadline, "timeout GTK");
-            while glib::MainContext::default().pending() {
-                glib::MainContext::default().iteration(false);
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
-    }
-    fn settle_preview(cmds: &AppCmds) {
-        pump_until(|| {
-            !cmds.intelligence_busy.get()
-                && !cmds.intelligence_pending.get()
-                && !cmds.refresh_scheduled.get()
-                && !cmds.preview.test_is_loading()
-        });
-    }
-    fn preview_number(cmds: &AppCmds, script: &str) -> f64 {
-        settle_preview(cmds);
-        let result = Rc::new(Cell::new(None));
-        cmds.preview.test_eval_number(script, result.clone());
-        pump_until(|| result.get().is_some());
-        result.get().unwrap()
-    }
-
     /// Captura `window` en el PNG `dest` para la evidencia visual. Espera al
     /// primer frame pintado: según el timing del compositor, `to_node` da
     /// `None` mientras la ventana está mapeada pero aún sin pintar.
@@ -3739,5 +3826,13 @@ mod gtk_integration_tests {
 
         cmds.window.destroy();
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// ISSUE-57: la Preview debe pintar el documento y seguir las ediciones en
+    /// los tres backends; ver [`qa_preview_smoke`].
+    #[test]
+    #[ignore = "requiere sesión gráfica GTK/WebKit"]
+    fn gtk_preview_pinta_y_actualiza_al_escribir() {
+        qa_preview_smoke();
     }
 }
