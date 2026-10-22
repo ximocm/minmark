@@ -1415,6 +1415,34 @@ impl AppCmds {
         self.reload_active();
     }
 
+    /// ISSUE-52: cierra la pestaña `index` desde su «X» (Ctrl+W y File →
+    /// Close Tab pasan la activa con [`Commands::close_tab`]). El tab activo
+    /// solo cambia si se cierra él (§37) y siempre queda ≥1 pestaña.
+    fn close_tab_at(&self, index: usize) {
+        let (modified, title) = {
+            let tabs = self.tabs.borrow();
+            if index >= tabs.len() {
+                return;
+            }
+            (tabs.is_modified(index), tabs.title(index))
+        };
+        if !modified {
+            self.tabs.borrow_mut().close(index);
+            self.reload_active();
+            return;
+        }
+        // §3.7: descartar cambios solo con confirmación explícita, la misma
+        // que Close Tab.
+        let Some(me) = self.slot() else { return };
+        let window = self.window.clone();
+        glib::spawn_future_local(async move {
+            if dialogs::confirm_discard(&window, &title).await {
+                me.tabs.borrow_mut().close(index);
+                me.reload_active();
+            }
+        });
+    }
+
     fn apply_view(&self) {
         let (show_editor, show_preview) = match self.view.get() {
             ViewMode::Editor => (true, false),
@@ -1812,25 +1840,7 @@ impl Commands for AppCmds {
     }
 
     fn close_tab(&self) {
-        let (modified, title) = {
-            let tabs = self.tabs.borrow();
-            let index = tabs.active_index();
-            (tabs.is_modified(index), tabs.title(index))
-        };
-        if !modified {
-            self.tabs.borrow_mut().close_active();
-            self.reload_active();
-            return;
-        }
-        // §3.7: descartar cambios solo con confirmación explícita.
-        let Some(me) = self.slot() else { return };
-        let window = self.window.clone();
-        glib::spawn_future_local(async move {
-            if dialogs::confirm_discard(&window, &title).await {
-                me.tabs.borrow_mut().close_active();
-                me.reload_active();
-            }
-        });
+        self.close_tab_at(self.tabs.borrow().active_index());
     }
 
     fn undo(&self) {
@@ -1993,8 +2003,12 @@ fn theme_css(palette: &Palette, theme: ResolvedTheme) -> String {
         "window {{ background-color: {bg}; color: {fg}; }}\n\
          textview, textview > text {{ font-family: monospace; background-color: {bg}; color: {fg}; }}\n\
          .mm-tab-bar {{ background-color: {code}; }}\n\
-         .mm-tab-bar button {{ padding: 2px 10px; }}\n\
-         .mm-tab-bar button.active {{ background-image: none; background-color: {bg}; color: {fg}; border-bottom: 2px solid {fg}; font-weight: bold; }}\n\
+         .mm-tab-bar .mm-tab {{ padding: 2px 4px 0 4px; }}\n\
+         .mm-tab-bar .mm-tab button {{ background-image: none; background-color: transparent; box-shadow: none; border-width: 0; padding: 2px 8px; min-height: 24px; }}\n\
+         .mm-tab-bar .mm-tab button:hover {{ background-color: rgba(128, 128, 128, 0.3); }}\n\
+         .mm-tab-bar .mm-tab button:focus {{ border-width: 2px; border-color: {fg}; }}\n\
+         .mm-tab-bar .mm-tab button.mm-tab-close {{ padding: 2px 4px; min-width: 24px; }}\n\
+         .mm-tab-bar .mm-tab.active {{ background-image: none; background-color: {bg}; color: {fg}; border-bottom: 2px solid {fg}; font-weight: bold; }}\n\
          .mm-explorer {{ background-color: {bg}; color: {fg}; }}\n\
          .mm-explorer listview {{ background-color: {bg}; color: {fg}; }}\n\
          .mm-explorer listview button {{ background-color: {bg}; color: {fg}; }}\n\
@@ -2086,14 +2100,25 @@ fn build_window(app: &Application, scope: WindowScope, open_paths: &[PathBuf]) -
             }
         })
     });
-    let tab_bar = Rc::new(TabBar::new({
-        let slot = slot.clone();
-        Rc::new(move |index| {
-            if let Some(me) = slot.borrow().as_ref().and_then(Weak::upgrade) {
-                me.select_tab(index);
-            }
-        })
-    }));
+    let tab_bar = Rc::new(TabBar::new(
+        {
+            let slot = slot.clone();
+            Rc::new(move |index| {
+                if let Some(me) = slot.borrow().as_ref().and_then(Weak::upgrade) {
+                    me.select_tab(index);
+                }
+            })
+        },
+        {
+            let slot = slot.clone();
+            Rc::new(move |index| {
+                if let Some(me) = slot.borrow().as_ref().and_then(Weak::upgrade) {
+                    // ISSUE-52: la «X» cierra esa pestaña concreta.
+                    me.close_tab_at(index);
+                }
+            })
+        },
+    ));
 
     // Barra de búsqueda/reemplazo del archivo actual (§40.1, ISSUE-027):
     // acciones en tardío por [`CmdSlot`], como el resto de widgets.
@@ -2716,6 +2741,28 @@ mod gtk_integration_tests {
         result.get().unwrap()
     }
 
+    /// Captura `window` en el PNG `dest` para la evidencia visual. Espera al
+    /// primer frame pintado: según el timing del compositor, `to_node` da
+    /// `None` mientras la ventana está mapeada pero aún sin pintar.
+    fn capture_window(window: &gtk4::Window, dest: &Path) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(8);
+        loop {
+            while glib::MainContext::default().pending() {
+                glib::MainContext::default().iteration(false);
+            }
+            let snapshot = gtk4::Snapshot::new();
+            let paintable = gtk4::WidgetPaintable::new(Some(window));
+            paintable.snapshot(&snapshot, window.width() as f64, window.height() as f64);
+            if let Some(node) = snapshot.to_node() {
+                let texture = window.renderer().unwrap().render_texture(&node, None);
+                texture.save_to_png(dest).unwrap();
+                return;
+            }
+            assert!(std::time::Instant::now() < deadline, "timeout captura GTK");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
     #[test]
     #[ignore = "requiere sesión gráfica GTK/WebKit"]
     fn gtk_external_change_notice_and_reload() {
@@ -2777,18 +2824,10 @@ mod gtk_integration_tests {
         cmds.window.set_default_size(900, 600);
         settle_preview(&cmds);
         pump_until(|| cmds.window.is_mapped());
-        let snapshot = gtk4::Snapshot::new();
-        let paintable = gtk4::WidgetPaintable::new(Some(&cmds.window));
-        paintable.snapshot(
-            &snapshot,
-            cmds.window.width() as f64,
-            cmds.window.height() as f64,
+        capture_window(
+            cmds.window.upcast_ref(),
+            &std::env::temp_dir().join("minmark-external-warning.png"),
         );
-        let node = snapshot.to_node().expect("ventana renderizada");
-        let texture = cmds.window.renderer().unwrap().render_texture(&node, None);
-        texture
-            .save_to_png(std::env::temp_dir().join("minmark-external-warning.png"))
-            .unwrap();
 
         let reload =
             find_button(cmds.external_notice.upcast_ref(), "Recargar desde disco").unwrap();
@@ -3520,5 +3559,185 @@ mod gtk_integration_tests {
         }
         assert_eq!(std::fs::read_to_string(&paper).unwrap(), source);
         cmds.window.destroy();
+    }
+
+    /// ISSUE-52 (§37, §3.7): la «X» de la barra cierra esa pestaña concreta
+    /// sin tocar la activa; con cambios sin guardar pide la misma confirmación
+    /// que Close Tab (Cancelar no descarta nada); cerrar la activa pasa a la
+    /// siguiente y siempre queda ≥1 pestaña.
+    #[test]
+    #[ignore = "requiere sesión gráfica GTK/WebKit"]
+    fn gtk_tab_close_buttons_cierran_pestana_concreta() {
+        fn tab_close_buttons(window: &Widget) -> Vec<gtk4::Button> {
+            fn walk(widget: &Widget, found: &mut Vec<gtk4::Button>) {
+                if let Some(button) = widget.downcast_ref::<gtk4::Button>() {
+                    if button.has_css_class("mm-tab-close") {
+                        found.push(button.clone());
+                    }
+                }
+                let mut child = widget.first_child();
+                while let Some(widget) = child {
+                    walk(&widget, found);
+                    child = widget.next_sibling();
+                }
+            }
+            let mut found = Vec::new();
+            walk(window, &mut found);
+            found
+        }
+        fn find_button(widget: &Widget, label: &str) -> Option<gtk4::Button> {
+            if let Some(button) = widget.downcast_ref::<gtk4::Button>() {
+                if button.label().as_deref() == Some(label) {
+                    return Some(button.clone());
+                }
+            }
+            let mut child = widget.first_child();
+            while let Some(widget) = child {
+                if let Some(button) = find_button(&widget, label) {
+                    return Some(button);
+                }
+                child = widget.next_sibling();
+            }
+            None
+        }
+        fn dialog_button(label: &str) -> Option<gtk4::Button> {
+            gtk4::Window::list_toplevels()
+                .iter()
+                .find_map(|window| find_button(window, label))
+        }
+        /// Ventana del diálogo que contiene el botón `label` (el diálogo es
+        /// otra ventana que [`AppCmds::window`]).
+        fn dialog_window(label: &str) -> Option<gtk4::Window> {
+            gtk4::Window::list_toplevels()
+                .into_iter()
+                .find(|window| find_button(window, label).is_some())
+                .and_then(|window| window.downcast::<gtk4::Window>().ok())
+        }
+        /// Captura una ventana real para la evidencia visual (opcional:
+        /// `MINMARK_QA_OUTPUT_DIR`).
+        fn capture(window: &gtk4::Window, name: &str) {
+            let Some(evidence) = std::env::var_os("MINMARK_QA_OUTPUT_DIR").map(PathBuf::from)
+            else {
+                return;
+            };
+            std::fs::create_dir_all(&evidence).unwrap();
+            capture_window(window, &evidence.join(name));
+        }
+
+        gtk4::init().expect("GTK display");
+        ensure_sandbox_usable();
+        let root = std::env::temp_dir().join(format!("minmark-gtk-close-x-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let paths: Vec<PathBuf> = ["a.md", "b.md", "c.md", "d.md"]
+            .iter()
+            .map(|name| {
+                std::fs::write(root.join(name), format!("# {name}\n")).unwrap();
+                root.join(name)
+            })
+            .collect();
+        let app = Application::builder()
+            .application_id("app.minmark.test.tab-close-x")
+            .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk4::gio::Cancellable>).unwrap();
+        let cmds = build_window(&app, WindowScope::Project(root.clone()), &paths);
+        pump_until(|| cmds.index.borrow().is_some());
+        cmds.window.set_default_size(900, 600);
+        settle_preview(&cmds);
+        pump_until(|| cmds.window.is_mapped());
+
+        // La barra muestra una «X» por pestaña (la inicial «Sin título 1» y
+        // los cuatro archivos), con tooltip que identifica la pestaña y área
+        // de clic fijada por el CSS (`mm-tab-close`).
+        assert_eq!(cmds.tabs.borrow().len(), 5);
+        let closes = tab_close_buttons(cmds.window.upcast_ref());
+        assert_eq!(closes.len(), 5, "una «X» por pestaña (ISSUE-52)");
+        assert_eq!(closes[4].tooltip_text().as_deref(), Some("Cerrar «d.md»"));
+        assert!(
+            closes.iter().all(|close| close.can_focus()),
+            "cada «X» es alcanzable con el foco por teclado"
+        );
+        capture(cmds.window.upcast_ref(), "issue52-00-barra-con-cierre.png");
+
+        // Cerrar una pestaña INACTIVA: el tab activo (d.md) no cambia.
+        assert_eq!(cmds.tabs.borrow().active_index(), 4);
+        closes[2].emit_clicked(); // b.md
+        pump_until(|| cmds.tabs.borrow().len() == 4);
+        assert_eq!(cmds.tabs.borrow().active_index(), 3);
+        assert_eq!(
+            cmds.tabs.borrow().active().path.as_deref(),
+            Some(paths[3].as_path()),
+            "sigue activo el mismo tab"
+        );
+        capture(
+            cmds.window.upcast_ref(),
+            "issue52-01-cerrada-la-inactiva.png",
+        );
+
+        // Pestaña inactiva con cambios sin guardar: la misma confirmación que
+        // Close Tab (§3.7); Cancelar no descarta nada.
+        cmds.tabs.borrow_mut().set_active(1); // a.md
+        cmds.tabs
+            .borrow_mut()
+            .insert_active(Position::new(0, 0), "sin guardar ");
+        cmds.reload_active();
+        cmds.tabs.borrow_mut().set_active(3); // d.md
+        cmds.reload_active();
+        tab_close_buttons(cmds.window.upcast_ref())[1].emit_clicked();
+        pump_until(|| dialog_button("Descartar").is_some());
+        let dialog = dialog_window("Descartar").expect("diálogo de descarte");
+        capture(&dialog, "issue52-02-confirmacion-descarte.png");
+        dialog_button("Cancelar").unwrap().emit_clicked();
+        pump_until(|| dialog_button("Cancelar").is_none());
+        assert_eq!(cmds.tabs.borrow().len(), 4, "Cancelar conserva la pestaña");
+        assert_eq!(cmds.tabs.borrow().active_index(), 3, "y el tab activo");
+        assert!(
+            cmds.tabs.borrow().is_modified(1),
+            "y sus cambios sin guardar"
+        );
+
+        // «Descartar» confirmado cierra esa pestaña concreta.
+        tab_close_buttons(cmds.window.upcast_ref())[1].emit_clicked();
+        pump_until(|| dialog_button("Descartar").is_some());
+        dialog_button("Descartar").unwrap().emit_clicked();
+        pump_until(|| cmds.tabs.borrow().len() == 3);
+        assert_eq!(cmds.tabs.borrow().active_index(), 2);
+        assert_eq!(
+            cmds.tabs.borrow().active().path.as_deref(),
+            Some(paths[3].as_path())
+        );
+
+        // Cerrar la ACTIVA pasa a la siguiente (§37).
+        cmds.tabs.borrow_mut().set_active(1); // c.md
+        cmds.reload_active();
+        tab_close_buttons(cmds.window.upcast_ref())[1].emit_clicked();
+        pump_until(|| cmds.tabs.borrow().len() == 2);
+        assert_eq!(cmds.tabs.borrow().active_index(), 1);
+        assert_eq!(
+            cmds.tabs.borrow().active().path.as_deref(),
+            Some(paths[3].as_path()),
+            "cerrar la activa pasa a la siguiente"
+        );
+
+        // Al quedar una sola pestaña la barra se oculta (§37) y el cierre de
+        // la última crea un «Sin título N» nuevo: siempre queda ≥1 (§37).
+        tab_close_buttons(cmds.window.upcast_ref())[0].emit_clicked(); // «Sin título 1»
+        pump_until(|| cmds.tabs.borrow().len() == 1);
+        assert_eq!(cmds.tabs.borrow().active_index(), 0);
+        assert_eq!(
+            cmds.tabs.borrow().active().path.as_deref(),
+            Some(paths[3].as_path())
+        );
+        assert!(
+            !cmds.tab_bar.widget().is_visible(),
+            "barra oculta con un solo documento (§37)"
+        );
+        cmds.close_tab_at(0);
+        assert_eq!(cmds.tabs.borrow().len(), 1, "invariante §37: ≥1 pestaña");
+        assert_eq!(cmds.tabs.borrow().title(0), "Sin título 2");
+
+        cmds.window.destroy();
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
