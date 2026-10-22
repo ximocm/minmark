@@ -250,11 +250,10 @@ impl TabManager {
     /// carpeta afecta a sus pestañas hijas.
     pub fn mark_external(&mut self, path: &Path) {
         for tab in &mut self.tabs {
-            if tab
-                .path
-                .as_ref()
-                .is_some_and(|p| p == path || p.starts_with(path))
-            {
+            if tab.path.as_ref().is_some_and(|p| {
+                (p == path || p.starts_with(path))
+                    && (!p.exists() || self.fs.changed_externally(p).unwrap_or(true))
+            }) {
                 tab.external_change = true;
             }
         }
@@ -287,6 +286,21 @@ impl TabManager {
             tab.external_change = false;
             self.saved[index] = content;
         }
+        Ok(())
+    }
+
+    /// Recarga explícita del usuario: sustituye el buffer y su historial.
+    /// El llamador confirma antes el descarte de cambios sin guardar.
+    pub fn reload_active_from_disk(&mut self) -> Result<(), FsError> {
+        let index = self.active;
+        let path = self.tabs[index]
+            .path
+            .as_deref()
+            .ok_or(FsError::MissingPath)?;
+        let document = self.fs.open(path)?;
+        self.saved[index] = document.content().to_owned();
+        self.tabs[index].editor = Editor::new(document);
+        self.tabs[index].external_change = false;
         Ok(())
     }
 
@@ -585,6 +599,26 @@ mod tests {
     }
 
     #[test]
+    fn guardado_propio_no_produce_aviso_externo() {
+        let dir = TestDir::new();
+        let path = dir.file("doc.md");
+        fs::write(&path, "original\n").unwrap();
+        let mut tabs = TabManager::new();
+        let index = tabs.open(&path).unwrap();
+        tabs.insert_active(Position::new(0, 0), "# ");
+        tabs.save_active().unwrap();
+
+        tabs.mark_external(&path);
+        assert_eq!(tabs.title(index), "doc.md");
+        tabs.mark_external(&dir.0);
+        assert_eq!(tabs.title(index), "doc.md");
+
+        fs::write(&path, "cambio de otro programa\n").unwrap();
+        tabs.mark_external(&path);
+        assert_eq!(tabs.title(index), "⚠ doc.md");
+    }
+
+    #[test]
     fn aviso_cambio_externo_12_7_sin_recargar_buffer() {
         // §12.7 (ISSUE-026): el cambio externo se marca en el título (§3.7)
         // sin tocar el buffer; guardar lo resuelve.
@@ -596,6 +630,7 @@ mod tests {
         let contenido = tabs.active().editor.document().content().to_string();
 
         // Evento sobre el archivo abierto: marca sin recarga.
+        fs::write(&path, "cambio externo\n").unwrap();
         tabs.mark_external(&path);
         assert_eq!(tabs.title(index), "⚠ doc.md");
         assert_eq!(
@@ -609,12 +644,57 @@ mod tests {
         assert_eq!(tabs.title(index), "●⚠ doc.md");
 
         // El guardado resuelve el aviso.
-        tabs.save_active().unwrap();
+        tabs.save_active_confirmed().unwrap();
         assert_eq!(tabs.title(index), "doc.md");
 
         // Un evento sobre la carpeta afecta a las pestañas hijas.
+        fs::remove_file(&path).unwrap();
         tabs.mark_external(&dir.0);
         assert_eq!(tabs.title(index), "⚠ doc.md");
+    }
+
+    #[test]
+    fn recarga_explicita_sustituye_buffer_y_actualiza_huella() {
+        let dir = TestDir::new();
+        let path = dir.file("doc.md");
+        fs::write(&path, "original\n").unwrap();
+        let mut tabs = TabManager::new();
+        let index = tabs.open(&path).unwrap();
+        tabs.insert_active(Position::new(0, 0), "local ");
+        tabs.toggle_mode_active();
+        fs::write(&path, "version externa\n").unwrap();
+        tabs.mark_external(&path);
+
+        tabs.reload_active_from_disk().unwrap();
+        assert_eq!(
+            tabs.active().editor.document().content(),
+            "version externa\n"
+        );
+        assert_eq!(tabs.active().mode, EditMode::Visual);
+        assert_eq!(tabs.title(index), "doc.md");
+        assert!(!tabs.undo_active());
+        tabs.insert_active(Position::new(0, 0), "# ");
+        tabs.save_active().unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "# version externa\n");
+    }
+
+    #[test]
+    fn recarga_fallida_conserva_buffer_y_aviso() {
+        let dir = TestDir::new();
+        let path = dir.file("doc.md");
+        fs::write(&path, "original\n").unwrap();
+        let mut tabs = TabManager::new();
+        let index = tabs.open(&path).unwrap();
+        tabs.insert_active(Position::new(0, 0), "local ");
+        fs::remove_file(&path).unwrap();
+        tabs.mark_external(&path);
+
+        assert!(tabs.reload_active_from_disk().is_err());
+        assert_eq!(
+            tabs.active().editor.document().content(),
+            "local original\n"
+        );
+        assert_eq!(tabs.title(index), "●⚠ doc.md");
     }
 
     #[test]
@@ -765,9 +845,9 @@ mod tests {
         let mut tabs = TabManager::new();
         let index = tabs.open(&path).unwrap();
         tabs.insert_active(Position::new(0, 5), "!"); // «disco!\n»
-        tabs.mark_external(&path);
 
         fs::write(&path, "otro\n").unwrap();
+        tabs.mark_external(&path);
         tabs.reload_from_disk(&path).unwrap();
 
         assert_eq!(

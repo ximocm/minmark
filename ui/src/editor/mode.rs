@@ -25,6 +25,7 @@ impl EditMode {
     }
 
     /// Etiqueta de UI estable: "Markdown" / "Visual".
+    #[cfg(test)]
     pub fn label(self) -> &'static str {
         match self {
             EditMode::Markdown => "Markdown",

@@ -99,6 +99,7 @@ impl Command {
 
     /// Etiqueta de menú en inglés (§36: File, Edit, …). El ítem de atajos
     /// conserva «Atajos», el nombre con el que §36 lo lista en Help.
+    #[cfg(test)]
     pub fn label(&self) -> &'static str {
         match self {
             Command::New => "New",

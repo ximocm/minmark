@@ -61,6 +61,7 @@ pub struct SearchModel {
 impl SearchModel {
     /// Sustituye todos los resultados (nueva búsqueda). Los grupos nuevos
     /// entran expandidos y sin exclusiones; se limpia la activa.
+    #[cfg(test)]
     pub fn set_results(&mut self, files: Vec<FileMatches>) {
         self.groups = files.into_iter().map(new_group).collect();
         self.current = None;
