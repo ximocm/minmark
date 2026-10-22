@@ -72,7 +72,7 @@ dylibs dentro del `.app` para que no dependan de Homebrew al ejecutarse.
 cargo build --locked --manifest-path ui/Cargo.toml --release
 
 # Desarrollo: compilar y abrir un archivo
-cargo run --locked --manifest-path ui/Cargo.toml -- notas.md
+cargo run --locked --manifest-path ui/Cargo.toml -- README.md
 
 # Solo el core
 cargo build --locked --manifest-path core/Cargo.toml --workspace

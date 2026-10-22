@@ -275,6 +275,7 @@ struct AppCmds {
     editor_pane: Rc<EditorPane>,
     preview: Rc<PreviewPane>,
     tab_bar: Rc<TabBar>,
+    external_notice: GtkBox,
     /// Barra de búsqueda/reemplazo del archivo actual (§40.1, ISSUE-027).
     find_bar: Rc<FindBar>,
     /// Paleta Quick Open (§41, ISSUE-029, §39: `Ctrl+P`).
@@ -958,6 +959,37 @@ impl AppCmds {
             }
         };
         self.window.set_title(Some(&text));
+        let tabs = self.tabs.borrow();
+        let tab = tabs.active();
+        self.external_notice.set_visible(tab.external_change);
+        self.external_notice.set_tooltip_text(
+            tab.path
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .as_deref(),
+        );
+    }
+
+    fn reload_external(&self) {
+        let Some(me) = self.slot() else { return };
+        let (path, modified) = {
+            let tabs = self.tabs.borrow();
+            let Some(path) = tabs.active().path.clone() else {
+                return;
+            };
+            (path, tabs.is_modified(tabs.active_index()))
+        };
+        let window = self.window.clone();
+        glib::spawn_future_local(async move {
+            if modified && !dialogs::confirm_discard(&window, &path.display().to_string()).await {
+                return;
+            }
+            let result = me.tabs.borrow_mut().reload_active_from_disk();
+            match result {
+                Ok(()) => me.reload_active(),
+                Err(err) => show_error(&window, &err.to_string()),
+            }
+        });
     }
 
     /// Abre una ventana nueva con su propio ámbito y sus pestañas (ISSUE-021).
@@ -1962,7 +1994,7 @@ fn theme_css(palette: &Palette, theme: ResolvedTheme) -> String {
          textview, textview > text {{ font-family: monospace; background-color: {bg}; color: {fg}; }}\n\
          .mm-tab-bar {{ background-color: {code}; }}\n\
          .mm-tab-bar button {{ padding: 2px 10px; }}\n\
-         .mm-tab-bar button.active {{ border-bottom: 2px solid {fg}; font-weight: bold; }}\n\
+         .mm-tab-bar button.active {{ background-image: none; background-color: {bg}; color: {fg}; border-bottom: 2px solid {fg}; font-weight: bold; }}\n\
          .mm-explorer {{ background-color: {bg}; color: {fg}; }}\n\
          .mm-explorer listview {{ background-color: {bg}; color: {fg}; }}\n\
          .mm-explorer listview button {{ background-color: {bg}; color: {fg}; }}\n\
@@ -2332,9 +2364,45 @@ fn build_window(app: &Application, scope: WindowScope, open_paths: &[PathBuf]) -
         None => (paned.clone().upcast(), None),
     };
 
+    let external_notice = GtkBox::new(Orientation::Horizontal, 8);
+    external_notice.set_visible(false);
+    external_notice.set_margin_top(6);
+    external_notice.set_margin_bottom(6);
+    external_notice.set_margin_start(8);
+    external_notice.set_margin_end(8);
+    external_notice.append(&gtk4::Image::from_icon_name("dialog-warning-symbolic"));
+    let notice_text = gtk4::Label::new(Some(
+        "El archivo cambió o se eliminó fuera de minmark. Tu versión sigue abierta.",
+    ));
+    notice_text.set_wrap(true);
+    notice_text.set_xalign(0.0);
+    notice_text.set_hexpand(true);
+    external_notice.append(&notice_text);
+    let reload = gtk4::Button::with_label("Recargar desde disco");
+    reload.connect_clicked({
+        let slot = slot.clone();
+        move |_| {
+            if let Some(me) = slot.borrow().as_ref().and_then(Weak::upgrade) {
+                me.reload_external();
+            }
+        }
+    });
+    external_notice.append(&reload);
+    let save_copy = gtk4::Button::with_label("Guardar como…");
+    save_copy.connect_clicked({
+        let slot = slot.clone();
+        move |_| {
+            if let Some(me) = slot.borrow().as_ref().and_then(Weak::upgrade) {
+                me.save_as();
+            }
+        }
+    });
+    external_notice.append(&save_copy);
+
     let vbox = GtkBox::new(Orientation::Vertical, 0);
     vbox.append(&menubar);
     vbox.append(&tab_bar.widget());
+    vbox.append(&external_notice);
     vbox.append(&find_bar.widget());
     vbox.append(&content);
     content.set_vexpand(true);
@@ -2356,6 +2424,7 @@ fn build_window(app: &Application, scope: WindowScope, open_paths: &[PathBuf]) -
         editor_pane,
         preview,
         tab_bar,
+        external_notice,
         find_bar,
         quickopen,
         index: RefCell::new(None),
@@ -2646,6 +2715,123 @@ mod gtk_integration_tests {
         pump_until(|| result.get().is_some());
         result.get().unwrap()
     }
+
+    #[test]
+    #[ignore = "requiere sesión gráfica GTK/WebKit"]
+    fn gtk_external_change_notice_and_reload() {
+        fn find_button(widget: &Widget, label: &str) -> Option<gtk4::Button> {
+            if let Some(button) = widget.downcast_ref::<gtk4::Button>() {
+                if button.label().as_deref() == Some(label) {
+                    return Some(button.clone());
+                }
+            }
+            let mut child = widget.first_child();
+            while let Some(widget) = child {
+                if let Some(button) = find_button(&widget, label) {
+                    return Some(button);
+                }
+                child = widget.next_sibling();
+            }
+            None
+        }
+        fn dialog_button(label: &str) -> Option<gtk4::Button> {
+            gtk4::Window::list_toplevels()
+                .iter()
+                .find_map(|window| find_button(window, label))
+        }
+
+        gtk4::init().expect("GTK display");
+        ensure_sandbox_usable();
+        let root = std::env::temp_dir().join(format!("minmark-gtk-warning-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("mentoring-portainer.md");
+        std::fs::write(&path, "# Original\n").unwrap();
+        let app = Application::builder()
+            .application_id("app.minmark.test.external-warning")
+            .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk4::gio::Cancellable>).unwrap();
+        let cmds = build_window(&app, WindowScope::Project(root.clone()), &[path.clone()]);
+        pump_until(|| cmds.index.borrow().is_some());
+        cmds.tabs
+            .borrow_mut()
+            .insert_active(Position::new(0, 0), "local ");
+        cmds.save();
+        cmds.pump_watcher();
+        assert!(
+            !cmds.external_notice.is_visible(),
+            "sin falso aviso al guardar"
+        );
+
+        std::fs::write(&path, "# Modificado fuera de minmark\n").unwrap();
+        cmds.pump_watcher();
+        assert!(cmds.external_notice.is_visible());
+        assert_eq!(
+            cmds.external_notice.tooltip_text().as_deref(),
+            path.to_str()
+        );
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content(),
+            "local # Original\n"
+        );
+        cmds.window.set_default_size(900, 600);
+        settle_preview(&cmds);
+        pump_until(|| cmds.window.is_mapped());
+        let snapshot = gtk4::Snapshot::new();
+        let paintable = gtk4::WidgetPaintable::new(Some(&cmds.window));
+        paintable.snapshot(
+            &snapshot,
+            cmds.window.width() as f64,
+            cmds.window.height() as f64,
+        );
+        let node = snapshot.to_node().expect("ventana renderizada");
+        let texture = cmds.window.renderer().unwrap().render_texture(&node, None);
+        texture
+            .save_to_png(std::env::temp_dir().join("minmark-external-warning.png"))
+            .unwrap();
+
+        let reload =
+            find_button(cmds.external_notice.upcast_ref(), "Recargar desde disco").unwrap();
+        reload.emit_clicked();
+        pump_until(|| !cmds.tabs.borrow().active().external_change);
+        assert!(!cmds.external_notice.is_visible());
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content(),
+            "# Modificado fuera de minmark\n"
+        );
+
+        cmds.tabs
+            .borrow_mut()
+            .insert_active(Position::new(0, 0), "sin guardar ");
+        std::fs::write(&path, "# Otra version externa\n").unwrap();
+        cmds.pump_watcher();
+        reload.emit_clicked();
+        pump_until(|| dialog_button("Cancelar").is_some());
+        dialog_button("Cancelar").unwrap().emit_clicked();
+        pump_until(|| dialog_button("Cancelar").is_none());
+        assert!(cmds
+            .tabs
+            .borrow()
+            .active()
+            .editor
+            .document()
+            .content()
+            .starts_with("sin guardar "));
+        assert!(cmds.external_notice.is_visible());
+        reload.emit_clicked();
+        pump_until(|| dialog_button("Descartar").is_some());
+        dialog_button("Descartar").unwrap().emit_clicked();
+        pump_until(|| !cmds.tabs.borrow().active().external_change);
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content(),
+            "# Otra version externa\n"
+        );
+        assert!(!cmds.external_notice.is_visible());
+
+        cmds.window.destroy();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     #[ignore = "requiere sesión gráfica GTK/WebKit"]
     fn gtk_navigation_outline_completion_and_dirty_buffers() {

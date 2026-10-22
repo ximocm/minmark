@@ -9,7 +9,16 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 
 ## [Unreleased]
 
-Sin cambios pendientes de publicación.
+### Corregido
+
+- La pestaña activa usa grises y un subrayado discreto en lugar del color de
+  acento del escritorio.
+- Los cambios externos de un archivo se explican con un aviso visible y
+  acciones para recargar desde disco o guardar una copia. La recarga pide
+  confirmación antes de descartar cambios sin guardar; los guardados propios
+  ya no generan falsos avisos de cambio externo.
+- La compilación de la UI deja de avisar por cuatro métodos usados solo en
+  tests. El ejemplo de desarrollo abre `README.md`, incluido en el repositorio.
 
 ## [0.4.0] — 2026-10-21
 

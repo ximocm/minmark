@@ -20,6 +20,7 @@ impl TabBar {
     /// `index`. La visibilidad la fija [`TabBar::sync`] (§37).
     pub fn new(on_select: Rc<dyn Fn(usize)>) -> Self {
         let root = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        root.add_css_class("mm-tab-bar");
         root.set_visible(false);
         Self { root, on_select }
     }
@@ -38,9 +39,17 @@ impl TabBar {
         }
         for index in 0..manager.len() {
             let button = gtk::Button::with_label(&manager.title(index));
+            let tab = &manager.tabs()[index];
+            if let Some(path) = &tab.path {
+                let mut tooltip = path.display().to_string();
+                if tab.external_change {
+                    tooltip.push_str("\nEl archivo cambió o se eliminó fuera de minmark. Activa esta pestaña para ver las opciones.");
+                }
+                button.set_tooltip_text(Some(&tooltip));
+            }
             if index == manager.active_index() {
                 // §37: el tab activo va resaltado.
-                button.add_css_class("suggested-action");
+                button.add_css_class("active");
             }
             let on_select = Rc::clone(&self.on_select);
             button.connect_clicked(move |_| on_select(index));
