@@ -9,6 +9,10 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 
 ## [Unreleased]
 
+Sin cambios pendientes de publicación.
+
+## [0.4.1] — 2026-10-22
+
 ### Añadido
 
 - La barra de pestañas muestra una «X» en cada pestaña que cierra esa pestaña
@@ -26,6 +30,18 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
   ya no generan falsos avisos de cambio externo.
 - La compilación de la UI deja de avisar por cuatro métodos usados solo en
   tests. El ejemplo de desarrollo abre `README.md`, incluido en el repositorio.
+
+### Verificación y limitaciones
+
+- 422 pruebas del core (Linux, Windows Server 2022 y macOS 15), 119 de UI
+  (5 ignoradas: requieren sesión gráfica) y 23 de la política de release
+  pasan; la matriz de CI compila y empaqueta Linux, Windows y macOS.
+- Las cinco pruebas gráficas se ejecutan una por proceso sobre una sesión
+  X11 real y la revisión visual de la app queda en
+  [docs/qa/evidence](docs/qa/evidence): barra con la «X» por pestaña, la
+  confirmación de descarte y la barra del binario ejecutándose.
+- Siguen pendientes la QA manual de Windows y macOS, la lectura de Preview
+  con Orca (#39) y las fuentes CJK de paginado/PDF (#40).
 
 ## [0.4.0] — 2026-10-21
 
