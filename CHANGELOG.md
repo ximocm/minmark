@@ -9,6 +9,13 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 
 ## [Unreleased]
 
+### Añadido
+
+- La barra de pestañas muestra una «X» en cada pestaña que cierra esa pestaña
+  concreta (#52): no cambia la pestaña activa salvo que se cierre ella, pide
+  la misma confirmación que Close Tab cuando tiene cambios sin guardar y
+  mantiene siempre ≥1 pestaña.
+
 ### Corregido
 
 - La pestaña activa usa grises y un subrayado discreto en lugar del color de

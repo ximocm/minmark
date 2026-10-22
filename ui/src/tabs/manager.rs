@@ -158,17 +158,28 @@ impl TabManager {
         result
     }
 
-    /// Cierra el tab activo. El llamador debe haber confirmado antes si
-    /// estaba modificado (§3.7). Invariante: SIEMPRE queda ≥1 tab (cerrar el
-    /// último crea uno nuevo «Sin título N», §37).
-    pub fn close_active(&mut self) {
-        let index = self.active;
+    /// Cierra el tab `index` (ISSUE-52: la «X» de la barra cierra esa pestaña
+    /// concreta; Ctrl+W y File → Close Tab pasan la activa). El llamador debe
+    /// haber confirmado antes si estaba modificado (§3.7).
+    ///
+    /// El tab activo solo cambia si se cierra él: pasa al siguiente (si era el
+    /// último, al anterior). Cerrar cualquier otro conserva el tab activo, con
+    /// su índice un punto antes si estaba después del cerrado. Invariante:
+    /// SIEMPRE queda ≥1 tab (cerrar el último crea uno nuevo «Sin título N»,
+    /// §37). Un índice obsoleto de un callback GTK se ignora sin panic
+    /// (frontera UI).
+    pub fn close(&mut self, index: usize) {
+        if index >= self.tabs.len() {
+            return;
+        }
         self.tabs.remove(index);
         self.saved.remove(index);
         if self.tabs.is_empty() {
             self.new_tab();
-        } else {
+        } else if index == self.active {
             self.active = index.min(self.tabs.len() - 1);
+        } else if index < self.active {
+            self.active -= 1;
         }
     }
 
@@ -751,19 +762,53 @@ mod tests {
         assert_eq!(tabs.title(3), "Sin título 4");
 
         // Cerrar el activo deja ≥1 tab y el activo pasa al siguiente.
-        tabs.close_active();
+        tabs.close(tabs.active_index());
         assert_eq!(tabs.len(), 3);
         assert_eq!(tabs.active_index(), 1);
         assert_eq!(tabs.title(1), "Sin título 3");
 
         // Cerrar el último crea un tab nuevo «Sin título N» (§37).
-        tabs.close_active();
-        tabs.close_active();
+        tabs.close(tabs.active_index());
+        tabs.close(tabs.active_index());
         assert_eq!(tabs.len(), 1);
         assert_eq!(tabs.title(0), "Sin título 1");
-        tabs.close_active();
+        tabs.close(tabs.active_index());
         assert_eq!(tabs.len(), 1);
         assert_eq!(tabs.title(0), "Sin título 5");
+    }
+
+    #[test]
+    fn cerrar_una_pestana_concreta_conserva_el_activo_y_el_invariante() {
+        // ISSUE-52: la «X» de la barra cierra esa pestaña, no la activa; el
+        // tab activo solo cambia cuando se cierra él (§37).
+        let mut tabs = TabManager::new();
+        tabs.new_tab();
+        tabs.new_tab();
+        assert_eq!(tabs.active_index(), 2, "«Sin título 3» queda activo");
+        tabs.set_active(1);
+
+        // Cerrar una posterior a la activa: el activo ni se mueve.
+        tabs.close(2);
+        assert_eq!(tabs.len(), 2);
+        assert_eq!(tabs.active_index(), 1);
+        assert_eq!(tabs.title(1), "Sin título 2");
+
+        // Cerrar una anterior: sigue activo el MISMO tab, un índice antes.
+        tabs.close(0);
+        assert_eq!(tabs.len(), 1);
+        assert_eq!(tabs.active_index(), 0);
+        assert_eq!(tabs.title(0), "Sin título 2");
+
+        // Cerrar el último tab crea «Sin título N» con el siguiente N (§37).
+        tabs.close(0);
+        assert_eq!(tabs.len(), 1);
+        assert_eq!(tabs.active_index(), 0);
+        assert_eq!(tabs.title(0), "Sin título 4");
+
+        // Índice obsoleto de un callback GTK: se ignora sin panic.
+        tabs.close(7);
+        assert_eq!(tabs.len(), 1);
+        assert_eq!(tabs.title(0), "Sin título 4");
     }
 
     #[test]
