@@ -150,6 +150,11 @@ jobs:
       - name: Build Windows desktop
         if: runner.os == 'Windows'
         run: cargo build --locked --release --manifest-path ui/Cargo.toml
+      - name: Test graphical preview on Windows
+        if: runner.os == 'Windows'
+        # ISSUE-57: la Preview debe pintar en WebView2. El runner tiene sesión
+        # gráfica (el smoke test ya lanza la app y sigue viva).
+        run: cargo test --locked --release --manifest-path ui/Cargo.toml gtk_preview_pinta_y_actualiza_al_escribir -- --ignored --test-threads=1
       - name: Package Windows desktop
         if: runner.os == 'Windows'
         env:
@@ -168,6 +173,11 @@ jobs:
       - name: Build macOS desktop
         if: runner.os == 'macOS'
         run: cargo build --locked --release --manifest-path ui/Cargo.toml
+      - name: Test graphical preview on macOS
+        if: runner.os == 'macOS'
+        # ISSUE-57: la Preview debe pintar en WKWebView (misma sesión gráfica
+        # que usa el smoke test del .app).
+        run: cargo test --locked --release --manifest-path ui/Cargo.toml gtk_preview_pinta_y_actualiza_al_escribir -- --ignored --test-threads=1
       - name: Package macOS desktop
         if: runner.os == 'macOS'
         run: python3 scripts/package-macos.py

@@ -3740,4 +3740,52 @@ mod gtk_integration_tests {
         cmds.window.destroy();
         let _ = std::fs::remove_dir_all(&root);
     }
+
+    /// ISSUE-57: la Preview debe pintar el documento y seguir las ediciones
+    /// en los tres backends (WebKitGTK, WebView2, WKWebView). Prueba de humo
+    /// gráfica de Windows/macOS: si la vista nativa no se presenta, el DOM
+    /// queda vacío (`innerText` exige layout real) y esta prueba falla.
+    #[test]
+    #[ignore = "requiere sesión gráfica GTK/WebKit"]
+    fn gtk_preview_pinta_y_actualiza_al_escribir() {
+        gtk4::init().expect("GTK display");
+        ensure_sandbox_usable();
+        let root = std::env::temp_dir().join(format!("minmark-gtk-preview-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("doc.md");
+        std::fs::write(&path, "# Original\n").unwrap();
+        let app = Application::builder()
+            .application_id("app.minmark.test.preview-render")
+            .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk4::gio::Cancellable>).unwrap();
+        let cmds = build_window(&app, WindowScope::Project(root.clone()), &[path.clone()]);
+        pump_until(|| cmds.index.borrow().is_some());
+        cmds.window.set_default_size(900, 600);
+        pump_until(|| cmds.window.is_mapped());
+        settle_preview(&cmds);
+
+        // La preview pinta el documento cargado.
+        let painted = preview_number(&cmds, "document.body ? document.body.innerText.length : -1");
+        assert!(
+            painted > 0.0,
+            "la preview no pinta el documento (innerText = {painted})"
+        );
+
+        // Editar actualiza la MISMA página, sin recargarla, con el texto nuevo.
+        cmds.tabs
+            .borrow_mut()
+            .insert_active(Position::new(1, 0), "Marcador\n");
+        cmds.reload_active();
+        settle_preview(&cmds);
+        let updated = preview_number(
+            &cmds,
+            "document.body.innerText.includes('Marcador') ? 1 : 0",
+        );
+        assert_eq!(updated, 1.0, "la preview no se actualiza al escribir");
+
+        cmds.window.destroy();
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
