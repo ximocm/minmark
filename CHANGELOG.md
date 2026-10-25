@@ -9,6 +9,8 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 
 ## [Unreleased]
 
+## [0.4.3] — 2026-10-25
+
 ### Corregido
 
 - Windows: Guardar un documento nuevo, Guardar como y otros selectores de
@@ -24,7 +26,7 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
   ya no mantienen préstamos del modelo durante el refresco de la interfaz,
   que podían provocar un cierre por `RefCell`.
 
-### Verificación
+### Verificación y limitaciones
 
 - La autocomprobación `--check-preview` comprueba también el guardado y la
   sobrescritura confirmada, cierre de pestaña, redimensionado, cambios
@@ -37,6 +39,9 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
   Xvfb, además de la lógica de UI.
 - Registro y alcance de la validación adelantada de fase 8:
   [estabilidad Windows](docs/qa/estabilidad-windows-2026-10-25.md).
+- Sigue pendiente la matriz manual de instalación/desinstalación MSI en
+  Windows 10/11, los cambios entre monitores con distinto DPI y la
+  interacción del selector nativo de macOS.
 
 ## [0.4.2] — 2026-10-25
 
