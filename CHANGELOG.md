@@ -9,6 +9,10 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 
 ## [Unreleased]
 
+Sin cambios pendientes de publicación.
+
+## [0.4.2] — 2026-10-25
+
 ### Añadido
 
 - `minmark --check-preview`: autocomprobación de la Preview (pinta el
@@ -30,6 +34,23 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 - macOS: el `INSTALL.txt` del paquete recomendaba abrir con «clic derecho →
   Abrir», atajo que Apple eliminó en macOS Sequoia; documenta la vía actual
   (Ajustes → Privacidad y seguridad → «Abrir de todas formas») (#57).
+
+### Verificación y limitaciones
+
+- 422 pruebas del core (Linux, Windows Server 2022 y macOS 15), 119 de UI
+  (6 ignoradas: requieren sesión gráfica) y 23 de la política de release
+  pasan; la suite de UI completa corre ahora también en Windows y macOS.
+- La autocomprobación del Preview (`minmark --check-preview`) pasa en los
+  tres SO, tanto sobre el binario como sobre los paquetes que genera la CI
+  (fichero, edición, «Sin título» y tema oscuro con contraste real).
+- El fix de Windows (carpeta de datos de WebView2) está verificado en CI con
+  el paquete generado; queda pendiente la confirmación sobre una instalación
+  MSI real en el equipo del usuario.
+- macOS: el fallo de Preview reportado no se reproduce en CI ni con el
+  binario ni con el `.app`; queda pendiente la verificación en el equipo del
+  usuario con `minmark --check-preview` (#57).
+- Siguen abiertos la lectura de Preview con Orca (#39) y las fuentes CJK de
+  paginado/PDF (#40).
 
 ## [0.4.1] — 2026-10-22
 

@@ -11,14 +11,14 @@ members = [
 ]
 
 [workspace.package]
-version = "0.4.1"
+version = "0.4.2"
 edition = "2021"
 license = "Apache-2.0"
 
 [workspace.dependencies]
-minmark-document = { path = "minmark-document", version = "0.4.1" }
-minmark-config = { path = "minmark-config", version = "0.4.1" }
-minmark-math = { path = "minmark-math", version = "0.4.1" }
+minmark-document = { path = "minmark-document", version = "0.4.2" }
+minmark-config = { path = "minmark-config", version = "0.4.2" }
+minmark-math = { path = "minmark-math", version = "0.4.2" }
 
 # Parser Markdown único (§4.2), versión benchmarkada en ISSUE-010.
 # `default-features = false` (§4.5): sin renderer HTML propio ni SIMD; el
