@@ -177,6 +177,20 @@ fn resource_paths(layer: &mut ConfigLayer, base: Option<&Path>, boundary: Option
 #[cfg(test)]
 mod academic_tests {
     use super::*;
+
+    /// Compara rutas por recurso, no por forma textual: en Windows
+    /// `temp_dir()` puede dar el nombre corto 8.3 (`RUNNER~1`) mientras la
+    /// resolución de rutas devuelve la forma larga (`runneradmin`).
+    fn mismo_recurso(a: impl AsRef<Path>, b: impl AsRef<Path>) -> bool {
+        matches!(
+            (
+                std::fs::canonicalize(a.as_ref()),
+                std::fs::canonicalize(b.as_ref())
+            ),
+            (Ok(a), Ok(b)) if a == b
+        )
+    }
+
     #[test]
     fn bibliography_lists_csl_precedence_and_resource_boundaries() {
         let root =
@@ -196,13 +210,15 @@ mod academic_tests {
         let source = "---\nbibliography: [one.bib, two.bib]\nbibliography_style: doc.csl\ntoc_max_level: 2\n---\n# Documento";
         let settings = load_at(Some(&root), source, Some(&document));
         assert_eq!(settings.bibliography.len(), 2);
-        assert_eq!(
-            Path::new(&settings.bibliography[0]),
-            root.join("notes/one.bib")
+        assert!(
+            mismo_recurso(&settings.bibliography[0], root.join("notes/one.bib")),
+            "bibliography[0] = {}",
+            settings.bibliography[0]
         );
-        assert_eq!(
-            Path::new(&settings.bibliography_style),
-            root.join("notes/doc.csl")
+        assert!(
+            mismo_recurso(&settings.bibliography_style, root.join("notes/doc.csl")),
+            "bibliography_style = {}",
+            settings.bibliography_style
         );
         assert_eq!(settings.toc_max_level, 2);
         assert_eq!(
@@ -214,9 +230,10 @@ mod academic_tests {
             "---\nbibliography: IEEE\n---\n",
             Some(&document),
         );
-        assert_eq!(
-            Path::new(&named_ieee.bibliography[0]),
-            root.join("notes/IEEE")
+        assert!(
+            mismo_recurso(&named_ieee.bibliography[0], root.join("notes/IEEE")),
+            "bibliography[0] de IEEE = {}",
+            named_ieee.bibliography[0]
         );
         let outside = root.with_extension("outside.bib");
         std::fs::write(&outside, "").unwrap();
