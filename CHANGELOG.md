@@ -26,10 +26,11 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 
 ### Verificación
 
-- La autocomprobación `--check-preview` comprueba también el selector real de
-  guardado, el guardado y la sobrescritura confirmada, cierre de pestaña,
-  redimensionado, cambios Split/Preview y barra lateral. En Windows incluye
-  maximizar/restaurar.
+- La autocomprobación `--check-preview` comprueba también el guardado y la
+  sobrescritura confirmada, cierre de pestaña, redimensionado, cambios
+  Split/Preview y barra lateral. Abre y cancela un selector real en
+  Windows/Linux; en macOS esa interacción requiere comprobación manual.
+  En Windows incluye maximizar/restaurar.
 - Las comprobaciones del paquete Windows eliminan el GTK del entorno de
   compilación para detectar recursos ausentes en una instalación real.
 - La CI de Linux ejecuta los seis escenarios gráficos de integración en

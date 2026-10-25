@@ -22,7 +22,7 @@ una pestaña guardada y la recarga tras una sobrescritura confirmada.
 
 | Caso | Cobertura añadida |
 | --- | --- |
-| Selector de guardado | Schema GTK requerido antes de abrir; aviso recuperable si falta. `--check-preview` abre y cancela un selector real, sin escribir. |
+| Selector de guardado | Schema GTK requerido antes de abrir; aviso recuperable si falta. `--check-preview` abre y cancela un selector real en Windows/Linux, sin escribir. En macOS requiere comprobación manual. |
 | ZIP/MSI sin recursos | Copia y compilación estricta de schemas. El empaquetado se detiene si faltan; pruebas con schemas ausentes y ruta Unicode/con espacios. |
 | Dependencia del equipo de build | Smoke y diagnóstico del paquete con PATH aislado y sin variables de recursos GTK/GIO/XDG heredadas. |
 | Tamaño de Preview | Quitar `BoxLayout` del host sin hijos permite recibir `size_allocate`; se compara el viewport web con el tamaño del widget tras varios tamaños, vistas y barra lateral. Windows incluye maximizar/restaurar. |
@@ -64,6 +64,12 @@ proceso (`--ignored --exact`), con el nombre devuelto por
 `cargo test --locked --manifest-path ui/Cargo.toml --bin minmark -- --ignored --list`.
 La CI ejecuta los seis escenarios sobre Xvfb en Linux; Windows y macOS
 ejecutan `qa_preview` y el diagnóstico del paquete.
+La apertura/cancelación programática del selector Cocoa se deja fuera del
+diagnóstico automático: en CI #83/#84 el panel o el procesamiento posterior
+no devolvieron el control de forma fiable. El resto del escenario macOS,
+incluido guardado del fixture, cierre y layout real, sigue siendo obligatorio.
+La interacción del selector de macOS queda pendiente de validación manual;
+no se cuenta entre las comprobaciones superadas.
 El diagnóstico exige varios tamaños reales del viewport. El tamaño exterior
 solicitado puede quedar limitado por el gestor de ventanas del runner;
 Split/Preview y la barra lateral también ejercitan la recolocación nativa.
@@ -103,3 +109,4 @@ el paquete portable de la rama de corrección.
 - Comprobar cambios entre monitores y DPI fraccionario real; las pruebas
   geométricas no sustituyen a esa verificación.
 - Completar el resto de la matriz funcional de #35 y los controles de fase 7.
+- Comprobar manualmente guardar/cancelar con el selector nativo de macOS.
