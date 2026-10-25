@@ -337,6 +337,16 @@ class WindowsPackage(unittest.TestCase):
 
 
 class MacosPackage(unittest.TestCase):
+    def test_preview_timeout_preserves_diagnostic_phase(self):
+        failure = subprocess.TimeoutExpired("minmark", 1,
+                                            output=b"preview-check: fase fichero/selector-guardar\n",
+                                            stderr=b"native dialog blocked\n")
+        with patch.object(self.module.subprocess, "run", side_effect=failure):
+            with self.assertRaises(SystemExit) as result:
+                self.module.check_preview(Path("minmark"), Path("."), 1)
+        self.assertIn("selector-guardar", str(result.exception))
+        self.assertIn("native dialog blocked", str(result.exception))
+
     @classmethod
     def setUpClass(cls):
         cls.module = load_script("package_macos", "package-macos.py")
