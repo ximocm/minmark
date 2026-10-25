@@ -2877,6 +2877,28 @@ fn check_save_dialog(window: &impl IsA<gtk4::Window>) -> Result<(), String> {
         .modal(true)
         .build();
     let cancellable = gtk4::gio::Cancellable::new();
+    // Programar la cancelación ANTES de abrir: Cocoa puede entrar en un
+    // bucle modal nativo dentro de save() y no despachar los timers de GLib.
+    #[cfg(not(target_os = "macos"))]
+    glib::timeout_add_local_once(Duration::from_millis(300), {
+        let cancellable = cancellable.clone();
+        move || cancellable.cancel()
+    });
+    #[cfg(target_os = "macos")]
+    let _cancel_timer = {
+        use objc2_foundation::{NSRunLoop, NSRunLoopCommonModes, NSTimer};
+        let cancellable = cancellable.clone();
+        let block = block2::RcBlock::new(move |_: std::ptr::NonNull<NSTimer>| cancellable.cancel());
+        // El bloque solo retiene Cancellable (thread-safe); el run loop y
+        // los controles GTK se tocan en el hilo principal de Cocoa.
+        unsafe {
+            let timer = NSTimer::timerWithTimeInterval_repeats_block(0.3, false, &block);
+            let run_loop = NSRunLoop::currentRunLoop();
+            run_loop.addTimer_forMode(&timer, NSRunLoopCommonModes);
+            run_loop.addTimer_forMode(&timer, objc2_app_kit::NSModalPanelRunLoopMode);
+            timer
+        }
+    };
     let result = Rc::new(RefCell::new(None));
     let done = result.clone();
     dialog.save(Some(window), Some(&cancellable), move |outcome| {
@@ -2892,7 +2914,6 @@ fn check_save_dialog(window: &impl IsA<gtk4::Window>) -> Result<(), String> {
             Ok(_) => Err("el selector debía cancelarse sin elegir un destino".into()),
         });
     });
-    glib::timeout_add_local_once(Duration::from_millis(300), move || cancellable.cancel());
     pump_until(|| result.borrow().is_some());
     let outcome = result.borrow_mut().take().unwrap();
     outcome
