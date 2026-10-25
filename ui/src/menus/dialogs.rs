@@ -19,6 +19,19 @@ use gtk4::gio;
 use gtk4::glib;
 use gtk4::prelude::*;
 
+fn file_dialog_available(parent: &impl IsA<gtk::Window>) -> bool {
+    if let Err(message) = crate::runtime::check_file_dialog() {
+        gtk::AlertDialog::builder()
+            .message("No se puede abrir el selector de archivos")
+            .detail(&message)
+            .build()
+            .show(Some(parent));
+        false
+    } else {
+        true
+    }
+}
+
 /// Filtro Markdown (*.md / *.markdown + MIME `text/markdown`) para los diálogos.
 fn markdown_filter() -> gtk::FileFilter {
     let filter = gtk::FileFilter::new();
@@ -41,6 +54,9 @@ fn pdf_filter() -> gtk::FileFilter {
 /// (*.md / *.markdown), con «Todos los archivos» como respaldo. Devuelve el
 /// path elegido o `None` si se cancela.
 pub async fn open_file(parent: &impl IsA<gtk::Window>) -> Option<PathBuf> {
+    if !file_dialog_available(parent) {
+        return None;
+    }
     let dialog = gtk::FileDialog::new();
     dialog.set_title("Abrir archivo");
     dialog.set_modal(true);
@@ -64,6 +80,9 @@ pub async fn open_file(parent: &impl IsA<gtk::Window>) -> Option<PathBuf> {
 /// carpeta elegida se abre en una ventana de proyecto nueva. Devuelve la
 /// carpeta o `None` si se cancela.
 pub async fn open_folder(parent: &impl IsA<gtk::Window>) -> Option<PathBuf> {
+    if !file_dialog_available(parent) {
+        return None;
+    }
     let dialog = gtk::FileDialog::new();
     dialog.set_title("Abrir carpeta");
     dialog.set_modal(true);
@@ -75,6 +94,9 @@ pub async fn open_folder(parent: &impl IsA<gtk::Window>) -> Option<PathBuf> {
 /// Diálogo «Guardar como» (§12.4): sugiere `suggested` como nombre inicial.
 /// Devuelve el path elegido o `None` si se cancela.
 pub async fn save_file_as(parent: &impl IsA<gtk::Window>, suggested: &str) -> Option<PathBuf> {
+    if !file_dialog_available(parent) {
+        return None;
+    }
     let dialog = gtk::FileDialog::new();
     dialog.set_title("Guardar como");
     dialog.set_modal(true);
@@ -96,6 +118,9 @@ pub async fn save_file_as(parent: &impl IsA<gtk::Window>, suggested: &str) -> Op
 /// Diálogo «Exportar PDF» (§32.1, ISSUE-035): sugiere `suggested` como nombre
 /// inicial y filtra `*.pdf`. Devuelve el path elegido o `None` si se cancela.
 pub async fn save_pdf(parent: &impl IsA<gtk::Window>, suggested: &str) -> Option<PathBuf> {
+    if !file_dialog_available(parent) {
+        return None;
+    }
     let dialog = gtk::FileDialog::new();
     dialog.set_title("Exportar PDF");
     dialog.set_modal(true);

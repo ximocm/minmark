@@ -68,7 +68,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libgtk-4-dev libwebkitgtk-6.0-dev pkg-config
+          sudo apt-get install -y --no-install-recommends libgtk-4-dev libwebkitgtk-6.0-dev pkg-config xvfb xauth
       - name: Test complete core on Linux
         if: runner.os == 'Linux'
         run: cargo test --locked --release --manifest-path core/Cargo.toml --workspace
@@ -80,6 +80,19 @@ jobs:
       - name: Test desktop logic on Linux
         if: runner.os == 'Linux'
         run: cargo test --locked --release --manifest-path ui/Cargo.toml
+      - name: Test graphical desktop on Linux
+        if: runner.os == 'Linux'
+        env:
+          GDK_BACKEND: x11
+          GSK_RENDERER: cairo
+          WEBKIT_DISABLE_COMPOSITING_MODE: "1"
+        # GTK conserva el hilo que lo inicializa: un escenario por proceso.
+        # Forzar X11 evita heredar un compositor Wayland ajeno a Xvfb.
+        run: |
+          cargo test --locked --release --manifest-path ui/Cargo.toml --bin minmark -- --ignored --list > "$RUNNER_TEMP/minmark-gtk-tests.txt"
+          while IFS= read -r scenario; do
+            xvfb-run -a cargo test --locked --release --manifest-path ui/Cargo.toml --bin minmark "$scenario" -- --ignored --exact
+          done < <(sed -n 's/: test$//p' "$RUNNER_TEMP/minmark-gtk-tests.txt")
       - name: Build Linux desktop
         if: runner.os == 'Linux'
         run: cargo build --locked --release --manifest-path ui/Cargo.toml
@@ -155,6 +168,7 @@ jobs:
         if: runner.os == 'Windows'
         run: cargo build --locked --release --manifest-path ui/Cargo.toml
       - name: Test graphical preview on Windows
+        timeout-minutes: 3
         if: runner.os == 'Windows'
         # ISSUE-57: la Preview debe pintar en WebView2. El runner tiene sesión
         # gráfica (el smoke test ya lanza la app y sigue viva) y el escenario
@@ -185,6 +199,7 @@ jobs:
         if: runner.os == 'macOS'
         run: cargo build --locked --release --manifest-path ui/Cargo.toml
       - name: Test graphical preview on macOS
+        timeout-minutes: 3
         if: runner.os == 'macOS'
         # ISSUE-57: la Preview debe pintar en WKWebView. GTK en macOS exige el
         # hilo principal, así que el escenario corre en `tests/qa_preview.rs`

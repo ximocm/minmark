@@ -174,6 +174,38 @@ def collect_dlls(exe):
     return staged
 
 
+def stage_gtk_resources(stage, dlls):
+    """GTK necesita sus schemas además de las DLL para abrir FileDialog."""
+    gtk = next((source for name, source in dlls.items()
+                if name.lower() == "gtk-4-1.dll"), None)
+    if gtk is None:
+        raise SystemExit("GTK4 DLL missing from package dependencies")
+    prefix = gtk.parent.parent
+    source = prefix / "share/glib-2.0/schemas"
+    required = source / "org.gtk.gtk4.Settings.FileChooser.gschema.xml"
+    compiler = prefix / "bin/glib-compile-schemas.exe"
+    if not required.is_file() or not compiler.is_file():
+        raise SystemExit(f"Missing GTK4 schemas or glib-compile-schemas: {prefix}")
+    destination = stage / "share/glib-2.0/schemas"
+    shutil.copytree(source, destination)
+    # Regenerar evita distribuir una caché obsoleta o que omita los schemas GTK.
+    subprocess.run([str(compiler), "--strict", str(destination)], check=True)
+    if not (destination / "gschemas.compiled").is_file():
+        raise SystemExit("glib-compile-schemas did not produce gschemas.compiled")
+
+
+def isolated_environment(exe):
+    """Probar el paquete sin el GTK ni los schemas del entorno de build."""
+    env = os.environ.copy()
+    for key in list(env):
+        if key.upper().startswith(("GTK_", "GDK_", "GSETTINGS_", "GIO_", "XDG_")):
+            del env[key]
+    windows = Path(env.get("SystemRoot", r"C:\Windows"))
+    env["PATH"] = os.pathsep.join(map(str, [exe.parent, windows / "System32", windows]))
+    env["GSETTINGS_BACKEND"] = "memory"
+    return env
+
+
 def stage_notices(stage, metadata):
     """Inventario de licencias de dependencias (mismo criterio que package-linux)."""
     notices = stage / "third-party"
@@ -295,6 +327,7 @@ def smoke_launch(exe, cwd, seconds):
     """Arranque breve: el proceso debe seguir vivo (sin DLLs ausentes)."""
     with tempfile.TemporaryFile() as output:
         proc = subprocess.Popen([str(exe)], cwd=str(cwd),
+                                env=isolated_environment(exe),
                                 stdout=output, stderr=subprocess.STDOUT)
         deadline = time.monotonic() + seconds
         while time.monotonic() < deadline:
@@ -323,6 +356,7 @@ def check_preview(exe, cwd, timeout):
     """`--check-preview` sobre el paquete (ISSUE-57): la Preview debe pintar,
     seguir las ediciones y renderear el tema oscuro con contraste."""
     result = subprocess.run([str(exe), "--check-preview"], cwd=str(cwd),
+                            env=isolated_environment(exe),
                             capture_output=True, text=True, timeout=timeout)
     output = (result.stdout or "") + (result.stderr or "")
     if result.returncode != 0 or "check_preview: ok" not in output:
@@ -430,6 +464,7 @@ def main():
         dlls = collect_dlls(binary)
         for dll_name, source in sorted(dlls.items(), key=lambda item: item[0].lower()):
             shutil.copy2(source, stage / dll_name)
+        stage_gtk_resources(stage, dlls)
         for filename in ["LICENSE", "NOTICE", "README.md", "BUILDING.md",
                          "CHANGELOG.md"]:
             shutil.copy2(ROOT / filename, stage / filename)

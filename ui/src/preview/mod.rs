@@ -30,6 +30,8 @@ mod engine;
 mod engine_webview2;
 #[cfg(target_os = "macos")]
 mod engine_wkwebview;
+#[cfg(any(windows, test))]
+mod native_layout;
 
 /// Motor del Preview según el sistema operativo (ADR-005): WebKitGTK en
 /// Linux, WebView2 en Windows y WKWebView en macOS.
@@ -196,6 +198,10 @@ impl PreviewPane {
     /// pruebas y por `--check-preview` (ISSUE-57).
     pub fn test_is_loading(&self) -> bool {
         self.engine.is_loading()
+    }
+
+    pub fn native_widget(&self) -> gtk::Widget {
+        self.engine.widget()
     }
     /// Evalúa `script` en la página y entrega su resultado numérico. Usado
     /// por las pruebas y por `--check-preview` (ISSUE-57).

@@ -19,8 +19,8 @@
 //!   desalineará del todo.
 //! - `size_allocate` cubre también el scroll del `ScrolledWindow` (§10.2):
 //!   al reubicar el hijo, GTK realoca y volvemos a fijar Bounds.
-//! - Las coordenadas de GTK4 en Windows son píxeles físicos (proceso
-//!   DPI-aware por-monitor), el mismo espacio de los Bounds de WebView2.
+//! - GTK usa coordenadas lógicas; Bounds de WebView2 exige píxeles físicos.
+//!   Se aplica la escala de la superficie, también con DPI fraccionario.
 //! - El HWND hijo se recorta al área cliente del padre; una caja GTK fuera
 //!   del viewport no debe tapar al resto de la UI (se fija Bounds vacío).
 //! - El foco GTK↔WebView2 (MoveFocus / WM_SETFOCUS) queda pendiente de QA;
@@ -134,7 +134,9 @@ impl Shared {
         // distinto, el error RPC_E_CHANGED_MODE es inofensivo.
         let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
         let Some(surface) = host.native().and_then(|native| native.surface()) else {
-            eprintln!("minmark: WebView2: sin surface GDK todavía; se reintenta en map/size_allocate");
+            eprintln!(
+                "minmark: WebView2: sin surface GDK todavía; se reintenta en map/size_allocate"
+            );
             return;
         };
         let Ok(win32_surface) = surface.downcast::<Win32Surface>() else {
@@ -143,7 +145,9 @@ impl Shared {
         };
         let parent = win32_surface.handle();
         if parent.0 == 0 {
-            eprintln!("minmark: WebView2: HWND del toplevel nulo; se reintenta en map/size_allocate");
+            eprintln!(
+                "minmark: WebView2: HWND del toplevel nulo; se reintenta en map/size_allocate"
+            );
             return;
         }
         shared.parent_hwnd.set(parent.0);
@@ -375,7 +379,9 @@ impl Shared {
         };
         let parent = HWND(shared.parent_hwnd.get() as *mut _);
         if parent.0.is_null() {
-            eprintln!("minmark: WebView2: HWND del toplevel nulo al colocar; el Preview no se presentará");
+            eprintln!(
+                "minmark: WebView2: HWND del toplevel nulo al colocar; el Preview no se presentará"
+            );
             return;
         };
         let Some(root) = host.root() else {
@@ -387,7 +393,9 @@ impl Shared {
             return;
         };
         let Some(bounds) = host.compute_bounds(&window) else {
-            eprintln!("minmark: WebView2: sin bounds del widget al colocar; el Preview no se presentará");
+            eprintln!(
+                "minmark: WebView2: sin bounds del widget al colocar; el Preview no se presentará"
+            );
             return;
         };
         // widget (raíz) → surface: el transform es surface→widget, se resta.
@@ -395,19 +403,33 @@ impl Shared {
             .native()
             .map(|native| native.surface_transform())
             .unwrap_or((0.0, 0.0));
-        let x = (f64::from(bounds.x()) - tx).round() as i32;
-        let y = (f64::from(bounds.y()) - ty).round() as i32;
-        let width = bounds.width().round() as i32;
-        let height = bounds.height().round() as i32;
+        let Some(surface) = host.native().and_then(|native| native.surface()) else {
+            return;
+        };
+        // `scale` admite fracciones desde GTK 4.12; el mínimo soportado
+        // (4.10) solo expone `scale-factor` entero.
+        let scale = if surface.find_property("scale").is_some() {
+            surface.property::<f64>("scale")
+        } else {
+            f64::from(surface.scale_factor())
+        };
         let mut client = RECT::default();
         if unsafe { GetClientRect(parent, &mut client) }.is_err() {
-            eprintln!("minmark: WebView2: GetClientRect falló al colocar; el Preview no se presentará");
+            eprintln!(
+                "minmark: WebView2: GetClientRect falló al colocar; el Preview no se presentará"
+            );
             return;
         }
-        let (left, top) = (x.max(client.left), y.max(client.top));
-        let (right, bottom) = (
-            (x + width).min(client.right),
-            (y + height).min(client.bottom),
+        let (left, top, right, bottom) = super::native_layout::physical_bounds(
+            (
+                f64::from(bounds.x()),
+                f64::from(bounds.y()),
+                f64::from(bounds.width()),
+                f64::from(bounds.height()),
+            ),
+            (tx, ty),
+            scale,
+            (client.left, client.top, client.right, client.bottom),
         );
         // Caja del widget totalmente fuera del viewport → Bounds vacío: el
         // HWND hijo no debe tapar el resto de la ventana de GTK.
@@ -424,11 +446,13 @@ impl Shared {
         if shared.last_bounds.get() == (bounds.left, bounds.top, bounds.right, bounds.bottom) {
             return;
         }
-        shared
-            .last_bounds
-            .set((bounds.left, bounds.top, bounds.right, bounds.bottom));
-        if let Err(error) = unsafe { controller.SetBounds(bounds) } {
-            eprintln!("minmark: WebView2: SetBounds: {error}");
+        match unsafe { controller.SetBounds(bounds) } {
+            Ok(()) => {
+                shared
+                    .last_bounds
+                    .set((bounds.left, bounds.top, bounds.right, bounds.bottom))
+            }
+            Err(error) => eprintln!("minmark: WebView2: SetBounds: {error}"),
         }
     }
 
@@ -472,6 +496,10 @@ impl Webview2Host {
     fn new(shared: Rc<Shared>) -> Self {
         let host: Self = glib::Object::new();
         host.imp().shared.replace(Some(shared));
+        // GtkBox instala BoxLayout: con un layout manager GTK NO invoca
+        // WidgetImpl::size_allocate. Este host no tiene hijos GTK; quitarlo
+        // permite recolocar la vista nativa al maximizar o mover el separador.
+        host.set_layout_manager(None::<gtk::LayoutManager>);
         // El ScrolledWindow (§10.2) debe llenar su viewport con la caja: el
         // contenido real vive en el HWND hijo, no en el dibujo de GTK.
         host.set_hexpand(true);

@@ -40,6 +40,7 @@ pub mod list_scroll;
 pub mod menus;
 pub mod preview;
 pub mod quickopen;
+pub mod runtime;
 pub mod search;
 pub mod settings;
 pub mod tabs;
@@ -995,6 +996,15 @@ impl AppCmds {
         });
     }
 
+    fn save_confirmed(&self) {
+        // Soltar el préstamo del modelo antes de recargar las vistas.
+        let saved = self.tabs.borrow_mut().save_active_confirmed();
+        match saved {
+            Ok(()) => self.reload_active(),
+            Err(err) => show_error(&self.window, &err.to_string()),
+        }
+    }
+
     /// Abre una ventana nueva con su propio ámbito y sus pestañas (ISSUE-021).
     fn spawn_window(&self, scope: WindowScope, paths: &[PathBuf]) {
         build_window(&self.app, scope, paths);
@@ -1750,10 +1760,7 @@ impl Commands for AppCmds {
                 let window = self.window.clone();
                 glib::spawn_future_local(async move {
                     if dialogs::confirm_overwrite_external(&window, &path).await {
-                        match me.tabs.borrow_mut().save_active_confirmed() {
-                            Ok(()) => me.reload_active(),
-                            Err(err) => show_error(&window, &err.to_string()),
-                        }
+                        me.save_confirmed();
                     }
                 });
             }
@@ -1843,7 +1850,8 @@ impl Commands for AppCmds {
     }
 
     fn close_tab(&self) {
-        self.close_tab_at(self.tabs.borrow().active_index());
+        let index = self.tabs.borrow().active_index();
+        self.close_tab_at(index);
     }
 
     fn undo(&self) {
@@ -2585,6 +2593,7 @@ fn ensure_sandbox_usable() {
 }
 
 fn main() {
+    runtime::configure();
     // Antes de tocar ningún widget de WebKit (§4.5: el sandbox es un medio,
     // no el fin; un crash en el arranque no es aceptable).
     ensure_sandbox_usable();
@@ -2752,8 +2761,14 @@ fn pump_until(condition: impl Fn() -> bool) {
     let deadline = std::time::Instant::now() + Duration::from_secs(30);
     while !condition() {
         assert!(std::time::Instant::now() < deadline, "timeout GTK");
-        while glib::MainContext::default().pending() {
-            glib::MainContext::default().iteration(false);
+        // Un backend puede mantener eventos pendientes de forma continua.
+        // Ceder tras cada lote permite comprobar la condición y el plazo.
+        let context = glib::MainContext::default();
+        for _ in 0..16 {
+            if !context.pending() {
+                break;
+            }
+            context.iteration(false);
         }
         std::thread::sleep(Duration::from_millis(10));
     }
@@ -2778,6 +2793,124 @@ fn preview_number(cmds: &AppCmds, script: &str) -> f64 {
     result.get().unwrap()
 }
 
+fn wait_preview_allocation(cmds: &AppCmds) -> Result<(), String> {
+    let native = cmds.preview.native_widget();
+    // El primer tick precede al layout; el siguiente ya observa su allocation.
+    let laid_out = Rc::new(Cell::new(false));
+    let ready = laid_out.clone();
+    let frames = Cell::new(0);
+    // El reloj de la ventana sigue activo aunque el host sea una caja vacía
+    // sobre la que el sistema dibuja la vista nativa.
+    cmds.window.add_tick_callback(move |_, _| {
+        frames.set(frames.get() + 1);
+        if frames.get() >= 2 {
+            ready.set(true);
+            glib::ControlFlow::Break
+        } else {
+            glib::ControlFlow::Continue
+        }
+    });
+    pump_until(|| laid_out.get());
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let (expected_width, expected_height) = (native.width(), native.height());
+        let actual_width = preview_number(cmds, "window.innerWidth");
+        let actual_height = preview_number(cmds, "window.innerHeight");
+        if expected_width > 0
+            && expected_height > 0
+            && (actual_width - f64::from(expected_width)).abs() <= 2.0
+            && (actual_height - f64::from(expected_height)).abs() <= 2.0
+        {
+            return Ok(());
+        }
+        if std::time::Instant::now() > deadline {
+            return Err(format!("Preview desajustada tras redimensionar: GTK {expected_width}x{expected_height}, web {actual_width}x{actual_height}"));
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+fn check_preview_allocation(cmds: &AppCmds) -> Result<(), String> {
+    #[cfg(any(windows, target_os = "macos"))]
+    if cmds.preview.native_widget().layout_manager().is_some() {
+        return Err("el host nativo no debe interceptar size_allocate con BoxLayout".into());
+    }
+    let native = cmds.preview.native_widget();
+    let mut allocations = std::collections::BTreeSet::new();
+    for (width, height) in [(760, 520), (1180, 760), (860, 560)] {
+        println!("preview-check: solicitar ventana {width}x{height}");
+        cmds.window.set_default_size(width, height);
+        wait_preview_allocation(cmds)?;
+        let actual = (cmds.window.width(), cmds.window.height());
+        println!("preview-check: ventana actual {}x{}", actual.0, actual.1);
+        allocations.insert((native.width(), native.height()));
+    }
+    #[cfg(windows)]
+    {
+        cmds.window.maximize();
+        pump_until(|| cmds.window.is_maximized());
+        wait_preview_allocation(cmds)?;
+        cmds.window.unmaximize();
+        pump_until(|| !cmds.window.is_maximized());
+        wait_preview_allocation(cmds)?;
+    }
+    for mode in [ViewMode::Preview, ViewMode::Split] {
+        cmds.set_view(mode);
+        wait_preview_allocation(cmds)?;
+        allocations.insert((native.width(), native.height()));
+    }
+    cmds.toggle_explorer();
+    wait_preview_allocation(cmds)?;
+    allocations.insert((native.width(), native.height()));
+    cmds.toggle_explorer();
+    wait_preview_allocation(cmds)?;
+    allocations.insert((native.width(), native.height()));
+    // El gestor de ventanas puede limitar los tamaños exteriores (p. ej.
+    // la pantalla de un runner). Exigir cambios REALES del viewport, también
+    // al cambiar vistas/barra lateral, mantiene la regresión de size_allocate.
+    if allocations.len() < 2 {
+        return Err("la Preview no cambió de tamaño durante las pruebas de layout".into());
+    }
+    Ok(())
+}
+
+/// Abre y cancela un selector real: detecta aborts de GSettings que nunca
+/// aparecen al limitar la QA al DOM de la Preview. No escribe ningún archivo.
+// Cocoa requiere validar la interacción del panel manualmente: su bucle
+// modal no siempre devuelve el control al diagnóstico tras cancelar.
+#[cfg(not(target_os = "macos"))]
+fn check_save_dialog(window: &impl IsA<gtk4::Window>) -> Result<(), String> {
+    let dialog = gtk4::FileDialog::builder()
+        .title("Autocomprobación: Guardar como (se cierra automáticamente)")
+        .initial_name("minmark-qa.md")
+        .modal(true)
+        .build();
+    let cancellable = gtk4::gio::Cancellable::new();
+    // Programar la cancelación antes de abrir el selector.
+    glib::timeout_add_local_once(Duration::from_millis(300), {
+        let cancellable = cancellable.clone();
+        move || cancellable.cancel()
+    });
+    let result = Rc::new(RefCell::new(None));
+    let done = result.clone();
+    dialog.save(Some(window), Some(&cancellable), move |outcome| {
+        *done.borrow_mut() = Some(match outcome {
+            Err(error)
+                if error.matches(gtk4::DialogError::Cancelled)
+                    || error.matches(gtk4::DialogError::Dismissed)
+                    || error.matches(gtk4::gio::IOErrorEnum::Cancelled) =>
+            {
+                Ok(())
+            }
+            Err(error) => Err(format!("selector Guardar como: {error}")),
+            Ok(_) => Err("el selector debía cancelarse sin elegir un destino".into()),
+        });
+    });
+    pump_until(|| result.borrow().is_some());
+    let outcome = result.borrow_mut().take().unwrap();
+    outcome
+}
+
 /// Comprobación del Preview (ISSUE-57): debe pintar el documento, seguir las
 /// ediciones, funcionar sobre una «Sin título» recién abierta y renderear el
 /// tema oscuro con contraste real. Si la vista nativa no se presenta, el DOM
@@ -2790,6 +2923,30 @@ fn preview_number(cmds: &AppCmds, script: &str) -> f64 {
 /// camino en macOS, donde GTK exige ese hilo y libtest corre cada test en el
 /// suyo).
 fn preview_check() -> Result<(), String> {
+    // Una API nativa puede bloquear dentro de iteration()/save(), donde el
+    // plazo de pump_until no llega a ejecutarse. Acotar también el proceso
+    // de diagnóstico para conservar la última fase y evitar una CI colgada.
+    struct Completed(std::sync::mpsc::Sender<()>);
+    impl Drop for Completed {
+        fn drop(&mut self) {
+            let _ = self.0.send(());
+        }
+    }
+    let (completed, deadline) = channel();
+    let _completed = Completed(completed);
+    std::thread::spawn(move || {
+        if matches!(
+            deadline.recv_timeout(Duration::from_secs(90)),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+        ) {
+            eprintln!(
+                "preview-check: timeout global de 90s; consultar la última fase del diagnóstico"
+            );
+            std::process::exit(1);
+        }
+    });
+    runtime::configure();
+    runtime::check_file_dialog()?;
     gtk4::init().map_err(|error| format!("no hay sesión gráfica: {error}"))?;
     ensure_sandbox_usable();
     let root = std::env::temp_dir().join(format!("minmark-gtk-preview-{}", std::process::id()));
@@ -2831,6 +2988,35 @@ fn preview_check() -> Result<(), String> {
     if updated != 1.0 {
         return Err("fase fichero/escribir: la preview no se actualiza al escribir".into());
     }
+
+    println!("preview-check: fase ventana/redimensionar");
+    check_preview_allocation(&cmds)?;
+    println!("preview-check: fase fichero/guardar");
+    cmds.save();
+    if std::fs::read_to_string(&path).unwrap() != "# Original\nMarcador\n"
+        || cmds.tabs.borrow().active().editor.document().is_modified()
+    {
+        return Err("guardar no conserva el contenido o el indicador de cambios".into());
+    }
+    std::fs::write(&path, "Cambio externo\n").unwrap();
+    if !matches!(
+        cmds.tabs.borrow_mut().save_active(),
+        Err(minmark_fs::FsError::ExternalModification { .. })
+    ) {
+        return Err("el guardado debe detectar cambios externos".into());
+    }
+    cmds.save_confirmed();
+    if std::fs::read_to_string(&path).unwrap() != "# Original\nMarcador\n" {
+        return Err("la sobrescritura confirmada no guardó el buffer".into());
+    }
+    println!("preview-check: fase pestaña/cerrar-guardada");
+    cmds.close_tab();
+    if cmds.tabs.borrow().active().path.is_some() {
+        return Err("cerrar la pestaña guardada no activó Sin título".into());
+    }
+    // Cerrar cambia también el documento de la WebView. Terminar esa carga
+    // antes de destruir su ventana evita solapar dos vistas en el diagnóstico.
+    settle_preview(&cmds);
 
     cmds.window.destroy();
 
@@ -2897,6 +3083,15 @@ fn preview_check() -> Result<(), String> {
         return Err("fase tema-oscuro: el texto sería invisible (color = fondo)".into());
     }
 
+    #[cfg(not(target_os = "macos"))]
+    {
+        println!("preview-check: fase sin-título/selector-guardar");
+        check_save_dialog(&cmds.window)?;
+        // El selector debe devolver una ventana utilizable después de cancelar.
+        wait_preview_allocation(&cmds)?;
+    }
+    #[cfg(target_os = "macos")]
+    println!("preview-check: selector nativo de macOS pendiente de comprobación manual");
     cmds.window.destroy();
     let _ = std::fs::remove_dir_all(&root);
     Ok(())
@@ -3586,6 +3781,8 @@ mod gtk_integration_tests {
             WindowScope::Project(root.to_owned()),
             std::slice::from_ref(&paper),
         );
+        pump_until(|| cmds.window.is_mapped());
+        wait_preview_allocation(&cmds).unwrap();
         assert_eq!(
             preview_number(&cmds, "document.querySelectorAll('[role=math] svg').length"),
             5.0
@@ -3601,8 +3798,18 @@ mod gtk_integration_tests {
             ),
             2.0
         );
-        assert_eq!(preview_number(&cmds, "(() => { document.querySelector('[role=doc-noteref]').click(); const r = document.getElementById('mm-note-1').getBoundingClientRect(); return r.top >= 0 && r.top < innerHeight ? 1 : 0; })()"), 1.0);
-        assert_eq!(preview_number(&cmds, "(() => { document.querySelector('.mm-footnotes a').click(); const r = document.getElementById('mm-note-ref-1-1').getBoundingClientRect(); return r.top >= 0 && r.top < innerHeight ? 1 : 0; })()"), 1.0);
+        // WebKit puede aplicar scrollIntoView en el siguiente frame. El
+        // resultado debe observarse después del clic, sin exigir sincronía.
+        preview_number(
+            &cmds,
+            "document.querySelector('[role=doc-noteref]').click(); 1",
+        );
+        espera_js(&cmds.preview, "(() => { const r = document.getElementById('mm-note-1').getBoundingClientRect(); return r.top >= 0 && r.top < innerHeight ? 1 : 0; })()", 1.0);
+        preview_number(
+            &cmds,
+            "document.querySelector('.mm-footnotes a').click(); 1",
+        );
+        espera_js(&cmds.preview, "(() => { const r = document.getElementById('mm-note-ref-1-1').getBoundingClientRect(); return r.top >= 0 && r.top < innerHeight ? 1 : 0; })()", 1.0);
         assert_eq!(
             preview_number(&cmds, "document.querySelectorAll('.mm-toc a').length"),
             4.0

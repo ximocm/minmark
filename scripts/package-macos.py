@@ -272,8 +272,14 @@ def smoke_launch(executable, cwd, seconds):
 def check_preview(executable, cwd, timeout):
     """`--check-preview` sobre el paquete (ISSUE-57): la Preview debe pintar,
     seguir las ediciones y renderear el tema oscuro con contraste."""
-    result = subprocess.run([str(executable), "--check-preview"], cwd=str(cwd),
-                            capture_output=True, text=True, timeout=timeout)
+    try:
+        result = subprocess.run([str(executable), "--check-preview"], cwd=str(cwd),
+                                capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired as error:
+        def decoded(value):
+            return value.decode("utf-8", "replace") if isinstance(value, bytes) else (value or "")
+        output = decoded(error.stdout) + decoded(error.stderr)
+        raise SystemExit(f"Preview check timed out after {timeout}s:\n{output[-8000:]}") from None
     output = (result.stdout or "") + (result.stderr or "")
     if result.returncode != 0 or "check_preview: ok" not in output:
         raise SystemExit(
@@ -338,8 +344,10 @@ def main():
             libraries.append(subprocess.check_output(
                 ["otool", "-L", str(image)], text=True).rstrip())
         (stage / "shared-libraries.txt").write_text("\n".join(libraries) + "\n")
-        smoke_launch(app_binary, stage, SMOKE_SECONDS)
         check_preview(app_binary, stage, 240)
+        # Comprobar primero el arranque en frío. El smoke termina a la fuerza
+        # y puede dejar procesos auxiliares de WebKit cerrándose todavía.
+        smoke_launch(app_binary, stage, SMOKE_SECONDS)
 
         archive = dist / f"{name}.tar.gz"
         with tarfile.open(archive, "w:gz") as tar:
