@@ -2865,6 +2865,28 @@ pub fn qa_preview_smoke() {
         "la preview de la «Sin título» no se actualiza al escribir"
     );
 
+    // ISSUE-57: tema oscuro. `innerText` no detecta texto invisible (blanco
+    // sobre blanco, p. ej.) y los runners de CI están en claro, así que se
+    // exige además contraste real: el color del texto no puede ser el fondo.
+    println!("qa_preview: fase tema-oscuro");
+    cmds.settings.borrow_mut().theme = minmark_config::Theme::Dark;
+    cmds.reload_active();
+    settle_preview(&cmds);
+    let dark = preview_number(
+        &cmds,
+        "document.documentElement.dataset.theme === 'dark' ? 1 : 0",
+    );
+    assert_eq!(dark, 1.0, "el documento no se rindea en tema oscuro");
+    let contrast = preview_number(
+        &cmds,
+        "(function(){ const s = getComputedStyle(document.body); \
+         return s.color !== s.backgroundColor ? 1 : 0; })()",
+    );
+    assert_eq!(
+        contrast, 1.0,
+        "el texto del tema oscuro sería invisible (color = fondo)"
+    );
+
     cmds.window.destroy();
     let _ = std::fs::remove_dir_all(&root);
 }
