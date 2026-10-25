@@ -687,7 +687,6 @@ impl PreviewEngine for Webview2Engine {
         }
     }
 
-    #[cfg(test)]
     fn eval_number(&self, script: &str, result: Rc<Cell<Option<f64>>>) {
         let Some(webview) = self.shared.webview.borrow().clone() else {
             eprintln!("minmark: eval sin WebView2 (controlador sin crear)");

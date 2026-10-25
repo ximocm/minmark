@@ -481,7 +481,6 @@ impl PreviewEngine for WkwebviewEngine {
         evaluate(&view, script, Some(&block));
     }
 
-    #[cfg(test)]
     fn eval_number(&self, script: &str, result: Rc<Cell<Option<f64>>>) {
         let view = self.inner.webview.borrow().clone();
         let Some(view) = view else {

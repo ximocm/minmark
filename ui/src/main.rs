@@ -2588,6 +2588,11 @@ fn main() {
     // Antes de tocar ningún widget de WebKit (§4.5: el sandbox es un medio,
     // no el fin; un crash en el arranque no es aceptable).
     ensure_sandbox_usable();
+    // Diagnóstico del Preview (ISSUE-57): termina aquí, sin abrir las
+    // ventanas de edición.
+    if std::env::args().any(|arg| arg == "--check-preview") {
+        std::process::exit(check_preview());
+    }
     // Argumentos (ISSUE-021): cada carpeta abre una ventana de proyecto y los
     // archivos una ventana standalone con sus pestañas (como Notepad++).
     let mut files: Vec<PathBuf> = Vec::new();
@@ -2738,9 +2743,8 @@ pub mod test_support {
     }
 }
 
-/// Espera `condition` drenando el main loop de GTK (tests y escenario QA del
-/// Preview, ISSUE-57).
-#[cfg(test)]
+/// Espera `condition` drenando el main loop de GTK (`--check-preview`, tests
+/// y escenario QA del Preview, ISSUE-57).
 fn pump_until(condition: impl Fn() -> bool) {
     // 30 s: los runners de Windows cargados pueden tardar varios segundos en
     // abrir la primera ventana; un cuelgue real también se detecta (y el
@@ -2756,7 +2760,6 @@ fn pump_until(condition: impl Fn() -> bool) {
 }
 
 /// Espera a que la inteligencia y el Preview terminen sus refrescos.
-#[cfg(test)]
 fn settle_preview(cmds: &AppCmds) {
     pump_until(|| {
         !cmds.intelligence_busy.get()
@@ -2767,7 +2770,6 @@ fn settle_preview(cmds: &AppCmds) {
 }
 
 /// Evalúa `script` en la página del Preview y devuelve su resultado numérico.
-#[cfg(test)]
 fn preview_number(cmds: &AppCmds, script: &str) -> f64 {
     settle_preview(cmds);
     let result = Rc::new(Cell::new(None));
@@ -2776,18 +2778,19 @@ fn preview_number(cmds: &AppCmds, script: &str) -> f64 {
     result.get().unwrap()
 }
 
-/// Escenario QA del Preview (ISSUE-57): la Preview debe pintar el documento y
-/// seguir las ediciones en los tres backends (WebKitGTK, WebView2, WKWebView).
-/// Si la vista nativa no se presenta, el DOM queda vacío (`innerText` exige
-/// layout real) y el escenario falla.
+/// Comprobación del Preview (ISSUE-57): debe pintar el documento, seguir las
+/// ediciones, funcionar sobre una «Sin título» recién abierta y renderear el
+/// tema oscuro con contraste real. Si la vista nativa no se presenta, el DOM
+/// queda vacío (`innerText` exige layout real); si el texto es invisible
+/// (color = fondo), también falla.
 ///
-/// Lo ejecutan el `#[test]` de Linux y el binario de prueba
-/// `tests/qa_preview.rs` (sin harness, hilo principal del proceso), que es el
-/// único camino en macOS: GTK allí exige el hilo principal y libtest corre
-/// cada test en el suyo.
-#[cfg(test)]
-pub fn qa_preview_smoke() {
-    gtk4::init().expect("GTK display");
+/// Es el motor de `minmark --check-preview` (paquetes empaquetados y
+/// máquinas reales), del `#[test]` de Linux y del binario de prueba
+/// `tests/qa_preview.rs` (sin harness, hilo principal del proceso: el único
+/// camino en macOS, donde GTK exige ese hilo y libtest corre cada test en el
+/// suyo).
+fn preview_check() -> Result<(), String> {
+    gtk4::init().map_err(|error| format!("no hay sesión gráfica: {error}"))?;
     ensure_sandbox_usable();
     let root = std::env::temp_dir().join(format!("minmark-gtk-preview-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
@@ -2800,7 +2803,7 @@ pub fn qa_preview_smoke() {
         .build();
     app.register(None::<&gtk4::gio::Cancellable>).unwrap();
     let cmds = build_window(&app, WindowScope::Project(root.clone()), &[path.clone()]);
-    println!("qa_preview: fase fichero/abrir");
+    println!("preview-check: fase fichero/abrir");
     pump_until(|| cmds.index.borrow().is_some());
     cmds.window.set_default_size(900, 600);
     pump_until(|| cmds.window.is_mapped());
@@ -2808,13 +2811,14 @@ pub fn qa_preview_smoke() {
 
     // La preview pinta el documento cargado.
     let painted = preview_number(&cmds, "document.body ? document.body.innerText.length : -1");
-    assert!(
-        painted > 0.0,
-        "la preview no pinta el documento (innerText = {painted})"
-    );
+    if painted <= 0.0 {
+        return Err(format!(
+            "fase fichero/abrir: la preview no pinta el documento (innerText = {painted})"
+        ));
+    }
 
     // Editar actualiza la MISMA página, sin recargarla, con el texto nuevo.
-    println!("qa_preview: fase fichero/escribir");
+    println!("preview-check: fase fichero/escribir");
     cmds.tabs
         .borrow_mut()
         .insert_active(Position::new(1, 0), "Marcador\n");
@@ -2824,7 +2828,9 @@ pub fn qa_preview_smoke() {
         &cmds,
         "document.body.innerText.includes('Marcador') ? 1 : 0",
     );
-    assert_eq!(updated, 1.0, "la preview no se actualiza al escribir");
+    if updated != 1.0 {
+        return Err("fase fichero/escribir: la preview no se actualiza al escribir".into());
+    }
 
     cmds.window.destroy();
 
@@ -2837,7 +2843,7 @@ pub fn qa_preview_smoke() {
         .build();
     app.register(None::<&gtk4::gio::Cancellable>).unwrap();
     let cmds = build_window(&app, WindowScope::Standalone, &[]);
-    println!("qa_preview: fase sin-título/abrir");
+    println!("preview-check: fase sin-título/abrir");
     cmds.window.set_default_size(900, 600);
     pump_until(|| cmds.window.is_mapped());
     cmds.tabs
@@ -2846,11 +2852,12 @@ pub fn qa_preview_smoke() {
     cmds.reload_active();
     settle_preview(&cmds);
     let painted = preview_number(&cmds, "document.body ? document.body.innerText.length : -1");
-    assert!(
-        painted > 0.0,
-        "la preview de la «Sin título» no pinta (innerText = {painted})"
-    );
-    println!("qa_preview: fase sin-título/escribir");
+    if painted <= 0.0 {
+        return Err(format!(
+            "fase sin-título/abrir: la preview de la «Sin título» no pinta (innerText = {painted})"
+        ));
+    }
+    println!("preview-check: fase sin-título/escribir");
     cmds.tabs
         .borrow_mut()
         .insert_active(Position::new(1, 0), "Marcador\n");
@@ -2860,15 +2867,17 @@ pub fn qa_preview_smoke() {
         &cmds,
         "document.body.innerText.includes('Marcador') ? 1 : 0",
     );
-    assert_eq!(
-        updated, 1.0,
-        "la preview de la «Sin título» no se actualiza al escribir"
-    );
+    if updated != 1.0 {
+        return Err(
+            "fase sin-título/escribir: la preview de la «Sin título» no se actualiza al escribir"
+                .into(),
+        );
+    }
 
     // ISSUE-57: tema oscuro. `innerText` no detecta texto invisible (blanco
     // sobre blanco, p. ej.) y los runners de CI están en claro, así que se
     // exige además contraste real: el color del texto no puede ser el fondo.
-    println!("qa_preview: fase tema-oscuro");
+    println!("preview-check: fase tema-oscuro");
     cmds.settings.borrow_mut().theme = minmark_config::Theme::Dark;
     cmds.reload_active();
     settle_preview(&cmds);
@@ -2876,19 +2885,46 @@ pub fn qa_preview_smoke() {
         &cmds,
         "document.documentElement.dataset.theme === 'dark' ? 1 : 0",
     );
-    assert_eq!(dark, 1.0, "el documento no se rindea en tema oscuro");
+    if dark != 1.0 {
+        return Err("fase tema-oscuro: el documento no se rindea en tema oscuro".into());
+    }
     let contrast = preview_number(
         &cmds,
         "(function(){ const s = getComputedStyle(document.body); \
          return s.color !== s.backgroundColor ? 1 : 0; })()",
     );
-    assert_eq!(
-        contrast, 1.0,
-        "el texto del tema oscuro sería invisible (color = fondo)"
-    );
+    if contrast != 1.0 {
+        return Err("fase tema-oscuro: el texto sería invisible (color = fondo)".into());
+    }
 
     cmds.window.destroy();
     let _ = std::fs::remove_dir_all(&root);
+    Ok(())
+}
+
+/// `minmark --check-preview` (ISSUE-57): ejecuta [`preview_check`] sobre la
+/// build real —la de los paquetes en CI y la de las máquinas de los
+/// usuarios—, imprime cada fase y termina con 0 si la Preview pinta y 1 si
+/// no. Es el diagnóstico pedido a los usuarios cuando la Preview falla.
+pub fn check_preview() -> i32 {
+    match preview_check() {
+        Ok(()) => {
+            println!("check_preview: ok");
+            0
+        }
+        Err(error) => {
+            eprintln!("check_preview: {error}");
+            1
+        }
+    }
+}
+
+/// Escenario QA del Preview para las pruebas: paniquea con el fallo.
+#[cfg(test)]
+pub fn qa_preview_smoke() {
+    if let Err(error) = preview_check() {
+        panic!("{error}");
+    }
 }
 
 #[cfg(test)]

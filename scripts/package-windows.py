@@ -315,6 +315,19 @@ def smoke_launch(exe, cwd, seconds):
     print(f"Smoke test: {exe.name} stayed alive for {seconds}s")
 
 
+def check_preview(exe, cwd, timeout):
+    """`--check-preview` sobre el paquete (ISSUE-57): la Preview debe pintar,
+    seguir las ediciones y renderear el tema oscuro con contraste."""
+    result = subprocess.run([str(exe), "--check-preview"], cwd=str(cwd),
+                            capture_output=True, text=True, timeout=timeout)
+    output = (result.stdout or "") + (result.stderr or "")
+    if result.returncode != 0 or "check_preview: ok" not in output:
+        raise SystemExit(
+            f"Preview check failed for {exe.name} "
+            f"(exit {result.returncode}):\n{output[:4000]}")
+    print(f"Preview check: {exe.name} pintó y actualizó la Preview")
+
+
 def webview2_installer():
     raw = os.environ.get("WEBVIEW2_INSTALLER", "")
     if not raw:
@@ -423,6 +436,7 @@ def main():
                     for dll_name, source in
                     sorted(dlls.items(), key=lambda item: item[0].lower())))
         smoke_launch(stage / "minmark.exe", stage, SMOKE_SECONDS)
+        check_preview(stage / "minmark.exe", stage, 240)
 
         archive = dist / f"{name}.zip"
         with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zipped:
