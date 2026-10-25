@@ -2797,6 +2797,7 @@ pub fn qa_preview_smoke() {
         .build();
     app.register(None::<&gtk4::gio::Cancellable>).unwrap();
     let cmds = build_window(&app, WindowScope::Project(root.clone()), &[path.clone()]);
+    println!("qa_preview: fase fichero/abrir");
     pump_until(|| cmds.index.borrow().is_some());
     cmds.window.set_default_size(900, 600);
     pump_until(|| cmds.window.is_mapped());
@@ -2810,6 +2811,7 @@ pub fn qa_preview_smoke() {
     );
 
     // Editar actualiza la MISMA página, sin recargarla, con el texto nuevo.
+    println!("qa_preview: fase fichero/escribir");
     cmds.tabs
         .borrow_mut()
         .insert_active(Position::new(1, 0), "Marcador\n");
@@ -2832,6 +2834,7 @@ pub fn qa_preview_smoke() {
         .build();
     app.register(None::<&gtk4::gio::Cancellable>).unwrap();
     let cmds = build_window(&app, WindowScope::Standalone, &[]);
+    println!("qa_preview: fase sin-título/abrir");
     cmds.window.set_default_size(900, 600);
     pump_until(|| cmds.window.is_mapped());
     cmds.tabs
@@ -2844,6 +2847,7 @@ pub fn qa_preview_smoke() {
         painted > 0.0,
         "la preview de la «Sin título» no pinta (innerText = {painted})"
     );
+    println!("qa_preview: fase sin-título/escribir");
     cmds.tabs
         .borrow_mut()
         .insert_active(Position::new(1, 0), "Marcador\n");
