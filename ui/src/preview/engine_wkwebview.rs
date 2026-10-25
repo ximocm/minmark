@@ -573,15 +573,19 @@ fn gtk_ns_window(host: &PreviewHost) -> Option<&NSWindow> {
 /// `isFlipped()`; ver supuestos 2/3 de la cabecera).
 fn place_view(view: &WKWebView, host: &PreviewHost) {
     let Some(native) = host.native() else {
+        eprintln!("minmark: WKWebView sin GtkNative al colocar; la vista no se presentará");
         return;
     };
     let Some(bounds) = host.compute_bounds(&native) else {
+        eprintln!("minmark: WKWebView sin bounds del widget al colocar; la vista no se presentará");
         return;
     };
     let Some(window) = gtk_ns_window(host) else {
+        eprintln!("minmark: WKWebView sin NSWindow de GTK al colocar; la vista no se presentará");
         return;
     };
     let Some(content) = window.contentView() else {
+        eprintln!("minmark: WKWebView sin contentView al colocar; la vista no se presentará");
         return;
     };
     let x = f64::from(bounds.x());
