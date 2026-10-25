@@ -2761,8 +2761,14 @@ fn pump_until(condition: impl Fn() -> bool) {
     let deadline = std::time::Instant::now() + Duration::from_secs(30);
     while !condition() {
         assert!(std::time::Instant::now() < deadline, "timeout GTK");
-        while glib::MainContext::default().pending() {
-            glib::MainContext::default().iteration(false);
+        // Un backend puede mantener eventos pendientes de forma continua.
+        // Ceder tras cada lote permite comprobar la condición y el plazo.
+        let context = glib::MainContext::default();
+        for _ in 0..16 {
+            if !context.pending() {
+                break;
+            }
+            context.iteration(false);
         }
         std::thread::sleep(Duration::from_millis(10));
     }
@@ -3017,13 +3023,14 @@ fn preview_check() -> Result<(), String> {
     if std::fs::read_to_string(&path).unwrap() != "# Original\nMarcador\n" {
         return Err("la sobrescritura confirmada no guardó el buffer".into());
     }
-    println!("preview-check: fase fichero/selector-guardar");
-    check_save_dialog(&cmds.window)?;
     println!("preview-check: fase pestaña/cerrar-guardada");
     cmds.close_tab();
     if cmds.tabs.borrow().active().path.is_some() {
         return Err("cerrar la pestaña guardada no activó Sin título".into());
     }
+    // Cerrar cambia también el documento de la WebView. Terminar esa carga
+    // antes de destruir su ventana evita solapar dos vistas en el diagnóstico.
+    settle_preview(&cmds);
 
     cmds.window.destroy();
 
@@ -3090,6 +3097,10 @@ fn preview_check() -> Result<(), String> {
         return Err("fase tema-oscuro: el texto sería invisible (color = fondo)".into());
     }
 
+    println!("preview-check: fase sin-título/selector-guardar");
+    check_save_dialog(&cmds.window)?;
+    // El selector debe devolver una ventana utilizable después de cancelar.
+    wait_preview_allocation(&cmds)?;
     cmds.window.destroy();
     let _ = std::fs::remove_dir_all(&root);
     Ok(())
