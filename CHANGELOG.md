@@ -9,7 +9,27 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 
 ## [Unreleased]
 
-Sin cambios pendientes de publicación.
+### Añadido
+
+- `minmark --check-preview`: autocomprobación de la Preview (pinta el
+  documento, sigue las ediciones, funciona sobre una «Sin título» recién
+  abierta y rindea el tema oscuro con contraste real) para diagnosticar
+  instalaciones reales con un comando; los paquetes la ejecutan en CI (#57).
+
+### Corregido
+
+- Windows: la Preview salía en blanco siempre. WebView2 creaba su carpeta de
+  datos junto al ejecutable (su comportamiento por defecto) y el MSI instala
+  en `Program Files`, donde un usuario normal no puede escribir: el entorno
+  del motor no se creaba y nada llegaba a pintarse. Usa ahora la carpeta por
+  usuario `%LOCALAPPDATA%\minmark\webview2` (#57).
+- Windows y macOS: los fallos de enganche o colocación de la vista nativa del
+  Preview dejan rastro en stderr (antes eran retornos silenciosos) y el
+  controlador de WebView2 se reintenta si el `realize` llega antes de que
+  exista la superficie o el HWND (#57).
+- macOS: el `INSTALL.txt` del paquete recomendaba abrir con «clic derecho →
+  Abrir», atajo que Apple eliminó en macOS Sequoia; documenta la vía actual
+  (Ajustes → Privacidad y seguridad → «Abrir de todas formas») (#57).
 
 ## [0.4.1] — 2026-10-22
 

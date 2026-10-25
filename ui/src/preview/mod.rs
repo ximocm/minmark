@@ -165,8 +165,8 @@ trait PreviewEngine {
     /// Evalúa `script` y reporta si la evaluación terminó sin error.
     #[cfg(test)]
     fn eval_ok(&self, script: &str, done: std::rc::Rc<std::cell::Cell<bool>>);
-    /// Evalúa `script` y entrega su resultado numérico.
-    #[cfg(test)]
+    /// Evalúa `script` y entrega su resultado numérico (tests y
+    /// `--check-preview`, ISSUE-57).
     fn eval_number(&self, script: &str, result: std::rc::Rc<std::cell::Cell<Option<f64>>>);
 }
 
@@ -192,11 +192,13 @@ impl PreviewPane {
         self.engine
             .eval_ok("document.querySelector('a[href]').click(); true", done);
     }
-    #[cfg(test)]
+    /// `true` mientras el motor está cargando un documento. Usado por las
+    /// pruebas y por `--check-preview` (ISSUE-57).
     pub fn test_is_loading(&self) -> bool {
         self.engine.is_loading()
     }
-    #[cfg(test)]
+    /// Evalúa `script` en la página y entrega su resultado numérico. Usado
+    /// por las pruebas y por `--check-preview` (ISSUE-57).
     pub fn test_eval_number(
         &self,
         script: &str,

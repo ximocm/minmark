@@ -132,11 +132,16 @@ def install_text(version):
         "needed to run the app.\n"
         "\n"
         "The app is ad-hoc signed in CI: Developer ID signing and notarization\n"
-        "are pending, so Gatekeeper warns on first open. Open it with\n"
-        "right click > Open, or clear the quarantine flag:\n"
+        "are pending, so Gatekeeper warns on first open. Since macOS Sequoia,\n"
+        "Control-click no longer bypasses it: open System Settings > Privacy &\n"
+        "Security and choose \"Open Anyway\" after the first blocked attempt,\n"
+        "or clear the quarantine flag:\n"
         "  xattr -dr com.apple.quarantine minmark.app\n"
         "\n"
-        "Preview uses the system WKWebView engine (ADR-005).\n"
+        "Preview uses the system WKWebView engine (ADR-005). If it stays\n"
+        "blank, run the built-in diagnostic and paste its output when\n"
+        "reporting the problem (ISSUE-57):\n"
+        "  minmark.app/Contents/MacOS/minmark --check-preview\n"
     )
 
 
@@ -264,6 +269,19 @@ def smoke_launch(executable, cwd, seconds):
     print(f"Smoke test: {executable.name} stayed alive for {seconds}s")
 
 
+def check_preview(executable, cwd, timeout):
+    """`--check-preview` sobre el paquete (ISSUE-57): la Preview debe pintar,
+    seguir las ediciones y renderear el tema oscuro con contraste."""
+    result = subprocess.run([str(executable), "--check-preview"], cwd=str(cwd),
+                            capture_output=True, text=True, timeout=timeout)
+    output = (result.stdout or "") + (result.stderr or "")
+    if result.returncode != 0 or "check_preview: ok" not in output:
+        raise SystemExit(
+            f"Preview check failed for {executable.name} "
+            f"(exit {result.returncode}):\n{output[:4000]}")
+    print(f"Preview check: {executable.name} pintó y actualizó la Preview")
+
+
 def build_dmg(stage, dist, name, version):
     with tempfile.TemporaryDirectory(prefix="minmark-dmg-") as temp:
         root = Path(temp) / "dmg"
@@ -321,6 +339,7 @@ def main():
                 ["otool", "-L", str(image)], text=True).rstrip())
         (stage / "shared-libraries.txt").write_text("\n".join(libraries) + "\n")
         smoke_launch(app_binary, stage, SMOKE_SECONDS)
+        check_preview(app_binary, stage, 240)
 
         archive = dist / f"{name}.tar.gz"
         with tarfile.open(archive, "w:gz") as tar:

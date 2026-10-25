@@ -134,13 +134,16 @@ impl Shared {
         // distinto, el error RPC_E_CHANGED_MODE es inofensivo.
         let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
         let Some(surface) = host.native().and_then(|native| native.surface()) else {
+            eprintln!("minmark: WebView2: sin surface GDK todavía; se reintenta en map/size_allocate");
             return;
         };
         let Ok(win32_surface) = surface.downcast::<Win32Surface>() else {
+            eprintln!("minmark: WebView2: la surface del toplevel no es Win32; el Preview no se presentará");
             return;
         };
         let parent = win32_surface.handle();
         if parent.0 == 0 {
+            eprintln!("minmark: WebView2: HWND del toplevel nulo; se reintenta en map/size_allocate");
             return;
         }
         shared.parent_hwnd.set(parent.0);
@@ -164,12 +167,30 @@ impl Shared {
                 Ok(())
             },
         ));
-        // Carpeta de datos del usuario: la predeterminada del runtime; el
-        // empaquetado podrá afinarla después (ADR-005).
+        // Carpeta de datos del usuario EXPLÍCITA (ISSUE-57): la predeterminada
+        // de WebView2 es `<ejecutable>.WebView2` junto al .exe, y el MSI
+        // `perMachine` instala en `Program Files`, donde un usuario normal no
+        // puede escribir: el entorno no se creaba y la preview quedaba en
+        // blanco para siempre. El directorio de datos por usuario del core es
+        // escribible en los tres SO.
+        let user_data: Option<PathBuf> =
+            minmark_config::dirs::data_dir().map(|dir| dir.join("minmark").join("webview2"));
+        let user_data_string = user_data
+            .as_ref()
+            .map(|path| HSTRING::from(path.to_string_lossy().as_ref()));
+        let user_data_ptr = user_data_string.as_ref().map(|value| value.as_ptr());
+        if let Some(path) = &user_data {
+            let _ = std::fs::create_dir_all(path);
+        } else {
+            eprintln!(
+                "minmark: WebView2: sin directorio de datos por usuario; se usa el del \
+                 ejecutable, que fallará si no es escribible (p. ej. Program Files)"
+            );
+        }
         let created = unsafe {
             CreateCoreWebView2EnvironmentWithOptions(
                 PCWSTR::null(),
-                PCWSTR::null(),
+                user_data_ptr.map_or_else(PCWSTR::null, PCWSTR),
                 None::<&ICoreWebView2EnvironmentOptions>,
                 &handler,
             )
@@ -354,15 +375,19 @@ impl Shared {
         };
         let parent = HWND(shared.parent_hwnd.get() as *mut _);
         if parent.0.is_null() {
+            eprintln!("minmark: WebView2: HWND del toplevel nulo al colocar; el Preview no se presentará");
             return;
-        }
+        };
         let Some(root) = host.root() else {
+            eprintln!("minmark: WebView2: widget sin raíz al colocar; el Preview no se presentará");
             return;
         };
         let Ok(window) = root.downcast::<gtk::Window>() else {
+            eprintln!("minmark: WebView2: la raíz no es una ventana al colocar; el Preview no se presentará");
             return;
         };
         let Some(bounds) = host.compute_bounds(&window) else {
+            eprintln!("minmark: WebView2: sin bounds del widget al colocar; el Preview no se presentará");
             return;
         };
         // widget (raíz) → surface: el transform es surface→widget, se resta.
@@ -376,6 +401,7 @@ impl Shared {
         let height = bounds.height().round() as i32;
         let mut client = RECT::default();
         if unsafe { GetClientRect(parent, &mut client) }.is_err() {
+            eprintln!("minmark: WebView2: GetClientRect falló al colocar; el Preview no se presentará");
             return;
         }
         let (left, top) = (x.max(client.left), y.max(client.top));
@@ -497,6 +523,10 @@ mod imp {
         fn map(&self) {
             self.parent_map();
             if let Some(shared) = self.shared.borrow().clone() {
+                // ISSUE-57: `start` es idempotente; si el realize llegó antes
+                // de que existiera la surface o el HWND, este es el reintento
+                // (paridad con `ensure_attached` de WKWebView).
+                Shared::start(&shared, &self.obj());
                 shared.visible.set(true);
                 Shared::apply_visible(&shared);
                 Shared::apply_bounds(&shared);
@@ -514,6 +544,9 @@ mod imp {
         fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
             self.parent_size_allocate(width, height, baseline);
             if let Some(shared) = self.shared.borrow().clone() {
+                // ISSUE-57: reintento de `start` (idempotente), por si el
+                // realize se quedó sin surface/HWND.
+                Shared::start(&shared, &self.obj());
                 Shared::apply_bounds(&shared);
             }
         }
@@ -642,6 +675,7 @@ impl PreviewEngine for Webview2Engine {
     #[cfg(test)]
     fn eval_ok(&self, script: &str, done: Rc<Cell<bool>>) {
         let Some(webview) = self.shared.webview.borrow().clone() else {
+            eprintln!("minmark: eval sin WebView2 (controlador sin crear)");
             return;
         };
         let handler = ExecuteScriptCompletedHandler::create(Box::new(move |result, _json| {
@@ -653,9 +687,9 @@ impl PreviewEngine for Webview2Engine {
         }
     }
 
-    #[cfg(test)]
     fn eval_number(&self, script: &str, result: Rc<Cell<Option<f64>>>) {
         let Some(webview) = self.shared.webview.borrow().clone() else {
+            eprintln!("minmark: eval sin WebView2 (controlador sin crear)");
             return;
         };
         // ExecuteScript serializa el valor como JSON: un número llega como

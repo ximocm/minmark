@@ -9,6 +9,11 @@ description = "UI GTK4 + WebKitGTK 6.0 de minmark (ISSUE-020, ADR-001)"
 name = "minmark"
 path = "src/main.rs"
 
+[[test]]
+name = "qa_preview"
+path = "tests/qa_preview.rs"
+harness = false
+
 [dependencies]
 # `v4_10`: `gtk::FileDialog` y `gtk::AlertDialog` (diálogos §36/§3.7) están
 # tras esa feature; el runtime del sistema es GTK 4.14 (§50.1 Linux primero).

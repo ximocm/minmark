@@ -125,7 +125,6 @@ impl PreviewEngine for WebkitEngine {
         );
     }
 
-    #[cfg(test)]
     fn eval_number(&self, script: &str, result: std::rc::Rc<std::cell::Cell<Option<f64>>>) {
         self.view.evaluate_javascript(
             script,

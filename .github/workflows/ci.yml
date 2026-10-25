@@ -147,9 +147,21 @@ jobs:
           # cargo:rustc-link-search y link.exe no encuentra gtk-4.lib
           # (LNK1181).
           echo "PKG_CONFIG_ALLOW_SYSTEM_LIBS=1" >> "$GITHUB_ENV"
+      - name: Test desktop logic on Windows
+        if: runner.os == 'Windows'
+        # ISSUE-57: la suite de UI completa corre también fuera de Linux.
+        run: cargo test --locked --release --manifest-path ui/Cargo.toml
       - name: Build Windows desktop
         if: runner.os == 'Windows'
         run: cargo build --locked --release --manifest-path ui/Cargo.toml
+      - name: Test graphical preview on Windows
+        if: runner.os == 'Windows'
+        # ISSUE-57: la Preview debe pintar en WebView2. El runner tiene sesión
+        # gráfica (el smoke test ya lanza la app y sigue viva) y el escenario
+        # corre en el hilo principal vía `tests/qa_preview.rs`.
+        env:
+          MINMARK_QA: "1"
+        run: cargo test --locked --release --manifest-path ui/Cargo.toml --test qa_preview
       - name: Package Windows desktop
         if: runner.os == 'Windows'
         env:
@@ -165,9 +177,21 @@ jobs:
       - name: Install macOS desktop dependencies
         if: runner.os == 'macOS'
         run: brew install gtk4 pkg-config
+      - name: Test desktop logic on macOS
+        if: runner.os == 'macOS'
+        # ISSUE-57: después de instalar GTK, que es con lo que enlaza la UI.
+        run: cargo test --locked --release --manifest-path ui/Cargo.toml
       - name: Build macOS desktop
         if: runner.os == 'macOS'
         run: cargo build --locked --release --manifest-path ui/Cargo.toml
+      - name: Test graphical preview on macOS
+        if: runner.os == 'macOS'
+        # ISSUE-57: la Preview debe pintar en WKWebView. GTK en macOS exige el
+        # hilo principal, así que el escenario corre en `tests/qa_preview.rs`
+        # (sin harness) en vez del harness de libtest.
+        env:
+          MINMARK_QA: "1"
+        run: cargo test --locked --release --manifest-path ui/Cargo.toml --test qa_preview
       - name: Package macOS desktop
         if: runner.os == 'macOS'
         run: python3 scripts/package-macos.py
