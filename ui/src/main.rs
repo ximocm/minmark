@@ -2829,6 +2829,7 @@ fn check_preview_allocation(cmds: &AppCmds) -> Result<(), String> {
     if cmds.preview.native_widget().layout_manager().is_some() {
         return Err("el host nativo no debe interceptar size_allocate con BoxLayout".into());
     }
+    let native = cmds.preview.native_widget();
     let mut allocations = std::collections::BTreeSet::new();
     for (width, height) in [(760, 520), (1180, 760), (860, 560)] {
         println!("preview-check: solicitar ventana {width}x{height}");
@@ -2836,12 +2837,7 @@ fn check_preview_allocation(cmds: &AppCmds) -> Result<(), String> {
         wait_preview_allocation(cmds)?;
         let actual = (cmds.window.width(), cmds.window.height());
         println!("preview-check: ventana actual {}x{}", actual.0, actual.1);
-        allocations.insert(actual);
-    }
-    if allocations.len() < 2 {
-        return Err(
-            "la ventana no cambió de tamaño al solicitar tres dimensiones distintas".into(),
-        );
+        allocations.insert((native.width(), native.height()));
     }
     #[cfg(windows)]
     {
@@ -2855,11 +2851,20 @@ fn check_preview_allocation(cmds: &AppCmds) -> Result<(), String> {
     for mode in [ViewMode::Preview, ViewMode::Split] {
         cmds.set_view(mode);
         wait_preview_allocation(cmds)?;
+        allocations.insert((native.width(), native.height()));
     }
     cmds.toggle_explorer();
     wait_preview_allocation(cmds)?;
+    allocations.insert((native.width(), native.height()));
     cmds.toggle_explorer();
     wait_preview_allocation(cmds)?;
+    allocations.insert((native.width(), native.height()));
+    // El gestor de ventanas puede limitar los tamaños exteriores (p. ej.
+    // la pantalla de un runner). Exigir cambios REALES del viewport, también
+    // al cambiar vistas/barra lateral, mantiene la regresión de size_allocate.
+    if allocations.len() < 2 {
+        return Err("la Preview no cambió de tamaño durante las pruebas de layout".into());
+    }
     Ok(())
 }
 

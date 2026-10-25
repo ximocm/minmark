@@ -64,6 +64,9 @@ proceso (`--ignored --exact`), con el nombre devuelto por
 `cargo test --locked --manifest-path ui/Cargo.toml --bin minmark -- --ignored --list`.
 La CI ejecuta los seis escenarios sobre Xvfb en Linux; Windows y macOS
 ejecutan `qa_preview` y el diagnóstico del paquete.
+El diagnóstico exige varios tamaños reales del viewport. El tamaño exterior
+solicitado puede quedar limitado por el gestor de ventanas del runner;
+Split/Preview y la barra lateral también ejercitan la recolocación nativa.
 
 En WSL, `xvfb-run` por sí solo no impide que GTK elija el Wayland heredado:
 se observaron viewports 0×0 al probar ventanas ocultas en ese compositor.
