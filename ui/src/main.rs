@@ -2742,7 +2742,10 @@ pub mod test_support {
 /// Preview, ISSUE-57).
 #[cfg(test)]
 fn pump_until(condition: impl Fn() -> bool) {
-    let deadline = std::time::Instant::now() + Duration::from_secs(8);
+    // 30 s: los runners de Windows cargados pueden tardar varios segundos en
+    // abrir la primera ventana; un cuelgue real también se detecta (y el
+    // mensaje de fase del escenario QA dice dónde).
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
     while !condition() {
         assert!(std::time::Instant::now() < deadline, "timeout GTK");
         while glib::MainContext::default().pending() {

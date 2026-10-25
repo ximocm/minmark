@@ -167,12 +167,30 @@ impl Shared {
                 Ok(())
             },
         ));
-        // Carpeta de datos del usuario: la predeterminada del runtime; el
-        // empaquetado podrá afinarla después (ADR-005).
+        // Carpeta de datos del usuario EXPLÍCITA (ISSUE-57): la predeterminada
+        // de WebView2 es `<ejecutable>.WebView2` junto al .exe, y el MSI
+        // `perMachine` instala en `Program Files`, donde un usuario normal no
+        // puede escribir: el entorno no se creaba y la preview quedaba en
+        // blanco para siempre. El directorio de datos por usuario del core es
+        // escribible en los tres SO.
+        let user_data: Option<PathBuf> =
+            minmark_config::dirs::data_dir().map(|dir| dir.join("minmark").join("webview2"));
+        let user_data_string = user_data
+            .as_ref()
+            .map(|path| HSTRING::from(path.to_string_lossy().as_ref()));
+        let user_data_ptr = user_data_string.as_ref().map(|value| value.as_ptr());
+        if let Some(path) = &user_data {
+            let _ = std::fs::create_dir_all(path);
+        } else {
+            eprintln!(
+                "minmark: WebView2: sin directorio de datos por usuario; se usa el del \
+                 ejecutable, que fallará si no es escribible (p. ej. Program Files)"
+            );
+        }
         let created = unsafe {
             CreateCoreWebView2EnvironmentWithOptions(
                 PCWSTR::null(),
-                PCWSTR::null(),
+                user_data_ptr.map_or_else(PCWSTR::null, PCWSTR),
                 None::<&ICoreWebView2EnvironmentOptions>,
                 &handler,
             )
