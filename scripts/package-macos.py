@@ -132,11 +132,16 @@ def install_text(version):
         "needed to run the app.\n"
         "\n"
         "The app is ad-hoc signed in CI: Developer ID signing and notarization\n"
-        "are pending, so Gatekeeper warns on first open. Open it with\n"
-        "right click > Open, or clear the quarantine flag:\n"
+        "are pending, so Gatekeeper warns on first open. Since macOS Sequoia,\n"
+        "Control-click no longer bypasses it: open System Settings > Privacy &\n"
+        "Security and choose \"Open Anyway\" after the first blocked attempt,\n"
+        "or clear the quarantine flag:\n"
         "  xattr -dr com.apple.quarantine minmark.app\n"
         "\n"
-        "Preview uses the system WKWebView engine (ADR-005).\n"
+        "Preview uses the system WKWebView engine (ADR-005). If it stays\n"
+        "blank, run the built-in diagnostic and paste its output when\n"
+        "reporting the problem (ISSUE-57):\n"
+        "  minmark.app/Contents/MacOS/minmark --check-preview\n"
     )
 
 

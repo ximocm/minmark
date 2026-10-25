@@ -225,6 +225,10 @@ def install_text(version):
         "Privacy: the Evergreen WebView2 Runtime is a Microsoft component and\n"
         "may send its own diagnostics to Microsoft. minmark adds no telemetry\n"
         "and no network access of its own (README.md, ADR-005).\n"
+        "\n"
+        "If the Preview stays blank, run the built-in diagnostic and paste its\n"
+        "output when reporting the problem (ISSUE-57):\n"
+        "  minmark.exe --check-preview\n"
     )
 
 
