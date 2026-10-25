@@ -9,7 +9,31 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 
 ## [Unreleased]
 
-Sin cambios pendientes de publicación.
+### Corregido
+
+- Windows: Guardar un documento nuevo, Guardar como y otros selectores de
+  archivos podían cerrar el proceso con «No GSettings schemas are installed
+  on the system». El ZIP y el MSI incluyen los schemas de GTK compilados, y
+  la app los localiza junto al ejecutable. Un paquete incompleto muestra un
+  error recuperable y conserva el documento abierto.
+- Preview nativa de Windows y macOS: su tamaño se actualiza al redimensionar
+  la ventana y cambiar las vistas; el layout de la caja anfitriona impedía
+  que GTK llamara a la actualización. En Windows también se convierte la
+  escala lógica de GTK a píxeles físicos, incluido el DPI fraccionario.
+- Cerrar una pestaña guardada con Ctrl+W y confirmar una sobrescritura externa
+  ya no mantienen préstamos del modelo durante el refresco de la interfaz,
+  que podían provocar un cierre por `RefCell`.
+
+### Verificación
+
+- La autocomprobación `--check-preview` comprueba también el selector real de
+  guardado, el guardado y la sobrescritura confirmada, cierre de pestaña,
+  redimensionado, cambios Split/Preview y barra lateral. En Windows incluye
+  maximizar/restaurar.
+- Las comprobaciones del paquete Windows eliminan el GTK del entorno de
+  compilación para detectar recursos ausentes en una instalación real.
+- Registro y alcance de la validación adelantada de fase 8:
+  [estabilidad Windows](docs/qa/estabilidad-windows-2026-10-25.md).
 
 ## [0.4.2] — 2026-10-25
 

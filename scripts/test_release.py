@@ -191,6 +191,49 @@ class PeImportParsing(unittest.TestCase):
 
 
 class WindowsPackage(unittest.TestCase):
+    def test_gtk_schemas_are_included_and_compiled(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            prefix = root / "gtk"
+            schemas = prefix / "share/glib-2.0/schemas"
+            schemas.mkdir(parents=True)
+            (schemas / "org.gtk.gtk4.Settings.FileChooser.gschema.xml").write_text("schema")
+            (prefix / "bin").mkdir()
+            compiler = prefix / "bin/glib-compile-schemas.exe"
+            compiler.write_bytes(b"fixture")
+            stage = root / "paquete con espacios á"
+            stage.mkdir()
+            destination = stage / "share/glib-2.0/schemas"
+
+            def compile_schemas(command, **kwargs):
+                self.assertEqual(command, [str(compiler), "--strict", str(destination)])
+                self.assertTrue(kwargs["check"])
+                (destination / "gschemas.compiled").write_bytes(b"compiled")
+
+            with patch.object(self.module.subprocess, "run", side_effect=compile_schemas):
+                self.module.stage_gtk_resources(stage, {"gtk-4-1.dll": prefix / "bin/gtk-4-1.dll"})
+            self.assertEqual((destination / "gschemas.compiled").read_bytes(), b"compiled")
+            self.assertTrue((destination / "org.gtk.gtk4.Settings.FileChooser.gschema.xml").is_file())
+
+    def test_missing_gtk_resources_stop_packaging(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            with self.assertRaises(SystemExit):
+                self.module.stage_gtk_resources(root, {"gtk-4-1.dll": root / "bin/gtk-4-1.dll"})
+            with self.assertRaises(SystemExit):
+                self.module.stage_gtk_resources(root, {})
+
+    def test_package_checks_do_not_inherit_build_resources(self):
+        with patch.dict(os.environ, {"GSETTINGS_SCHEMA_DIR": "build/schemas",
+                                    "GTK_PATH": "build/gtk", "XDG_DATA_DIRS": "build/share",
+                                    "PATH": "build/bin", "SystemRoot": "Windows"}):
+            env = self.module.isolated_environment(Path("package/minmark.exe"))
+        self.assertNotIn("GSETTINGS_SCHEMA_DIR", env)
+        self.assertNotIn("GTK_PATH", env)
+        self.assertNotIn("XDG_DATA_DIRS", env)
+        self.assertNotIn("build/bin", env["PATH"])
+        self.assertIn("package", env["PATH"])
+
     @classmethod
     def setUpClass(cls):
         cls.module = load_script("package_windows", "package-windows.py")

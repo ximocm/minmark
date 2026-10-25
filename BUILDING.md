@@ -148,6 +148,20 @@ python scripts\package-windows.py
   DLLs no-sistema (GTK 4 y el cargador de WebView2 si existe) junto al
   ejecutable, lo lanza brevemente (fallaría con `0xC0000135` si falta una
   DLL) y genera el `.zip` portátil, el `.msi` y el `.exe` del bundle.
+- También incluye y compila los schemas de GTK necesarios para los selectores
+  de archivos. El paquete los localiza junto a `minmark.exe`, con independencia
+  de la carpeta desde la que se arranque. Las comprobaciones del paquete usan
+  un entorno sin rutas del GTK del equipo de compilación.
+
+El diagnóstico `minmark.exe --check-preview` abre y cancela automáticamente
+un selector de guardado, verifica guardado y cierre de pestaña sobre archivos
+temporales, y comprueba el tamaño del Preview al redimensionar y
+maximizar/restaurar. Devuelve 0 si todas las fases pasan. Para capturar un cierre
+inesperado al informar de un fallo, ejecuta desde PowerShell:
+
+```powershell
+& 'C:\Program Files\minmark\minmark.exe' 2> minmark-error.log
+```
 
 ### macOS
 

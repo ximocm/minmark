@@ -385,6 +385,9 @@ impl WkwebviewEngine {
     pub(super) fn new() -> Self {
         let inner = new_state();
         let host: PreviewHost = glib::Object::new();
+        // Host sin hijos GTK: BoxLayout impediría llamar al vfunc
+        // size_allocate y la WKWebView conservaría el tamaño inicial.
+        host.set_layout_manager(None::<gtk::LayoutManager>);
         let _ = host.imp().inner.set(inner.clone());
         *inner.host.borrow_mut() = Some(host.downgrade());
         Self { host, inner }
