@@ -36,7 +36,8 @@ requieren aplicar su [escala para obtener píxeles físicos](https://docs.gtk.or
 ## Ejecución local
 
 Entorno de pruebas: Ubuntu 26.04 en WSL, Rust/Cargo 1.93.1, GTK 4.22.4,
-WebKitGTK 2.52.6 y Xvfb. Las pruebas de permisos se ejecutan como usuario
+WebKitGTK 2.52.6 y Xvfb con `GDK_BACKEND=x11` y renderizado por software.
+Las pruebas de permisos se ejecutan como usuario
 normal. Los documentos empleados son fixtures temporales.
 
 | Batería | Resultado |
@@ -45,7 +46,8 @@ normal. Los documentos empleados son fixtures temporales.
 | Lógica de UI | 122 correctas; seis escenarios gráficos se ejecutan aparte |
 | Política de release y empaquetado | 26 correctas |
 | `MINMARK_QA=1`, `qa_preview` | Correcta; selector, guardado y redimensionado reales |
-| Seis escenarios gráficos de integración | En ejecución |
+| Seis escenarios gráficos de integración | Seis correctos: cambios externos, navegación/academic, composiciones, scroll interno, pestañas y diagnóstico Preview |
+| Recursos de GTK ausentes, ejecutable real | Error legible y salida 1; sin abort de GLib |
 | Build y paquete Windows corregido | Pendiente de CI y comprobación en el equipo |
 
 Comandos reproducibles desde la raíz:
@@ -54,12 +56,24 @@ Comandos reproducibles desde la raíz:
 cargo test --locked --manifest-path core/Cargo.toml --workspace
 cargo test --locked --manifest-path ui/Cargo.toml
 python3 scripts/test_release.py
-MINMARK_QA=1 xvfb-run -a cargo test --locked --manifest-path ui/Cargo.toml --test qa_preview
+GDK_BACKEND=x11 GSK_RENDERER=cairo WEBKIT_DISABLE_COMPOSITING_MODE=1 MINMARK_QA=1 xvfb-run -a cargo test --locked --manifest-path ui/Cargo.toml --test qa_preview
 ```
 
 Cada escenario GTK ignorado por la suite normal debe ejecutarse en su propio
 proceso (`--ignored --exact`), con el nombre devuelto por
 `cargo test --locked --manifest-path ui/Cargo.toml --bin minmark -- --ignored --list`.
+La CI ejecuta los seis escenarios sobre Xvfb en Linux; Windows y macOS
+ejecutan `qa_preview` y el diagnóstico del paquete.
+
+En WSL, `xvfb-run` por sí solo no impide que GTK elija el Wayland heredado:
+se observaron viewports 0×0 al probar ventanas ocultas en ese compositor.
+Forzar X11 permite comprobar el layout visible de forma reproducible. La
+prueba académica espera el layout y el desplazamiento antes de medir notas.
+
+Clippy termina sin errores y conserva avisos preexistentes. Los archivos Rust
+modificados pasan rustfmt. El formato global del repositorio presenta
+diferencias anteriores a esta corrección, también en crates del core; no se
+mezcla su reformateo con estos arreglos.
 
 ## Pendiente para cerrar fase 8
 

@@ -32,6 +32,8 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
   maximizar/restaurar.
 - Las comprobaciones del paquete Windows eliminan el GTK del entorno de
   compilación para detectar recursos ausentes en una instalación real.
+- La CI de Linux ejecuta los seis escenarios gráficos de integración en
+  Xvfb, además de la lógica de UI.
 - Registro y alcance de la validación adelantada de fase 8:
   [estabilidad Windows](docs/qa/estabilidad-windows-2026-10-25.md).
 

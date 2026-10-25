@@ -3721,6 +3721,8 @@ mod gtk_integration_tests {
             WindowScope::Project(root.to_owned()),
             std::slice::from_ref(&paper),
         );
+        pump_until(|| cmds.window.is_mapped());
+        wait_preview_allocation(&cmds).unwrap();
         assert_eq!(
             preview_number(&cmds, "document.querySelectorAll('[role=math] svg').length"),
             5.0
@@ -3736,8 +3738,18 @@ mod gtk_integration_tests {
             ),
             2.0
         );
-        assert_eq!(preview_number(&cmds, "(() => { document.querySelector('[role=doc-noteref]').click(); const r = document.getElementById('mm-note-1').getBoundingClientRect(); return r.top >= 0 && r.top < innerHeight ? 1 : 0; })()"), 1.0);
-        assert_eq!(preview_number(&cmds, "(() => { document.querySelector('.mm-footnotes a').click(); const r = document.getElementById('mm-note-ref-1-1').getBoundingClientRect(); return r.top >= 0 && r.top < innerHeight ? 1 : 0; })()"), 1.0);
+        // WebKit puede aplicar scrollIntoView en el siguiente frame. El
+        // resultado debe observarse después del clic, sin exigir sincronía.
+        preview_number(
+            &cmds,
+            "document.querySelector('[role=doc-noteref]').click(); 1",
+        );
+        espera_js(&cmds.preview, "(() => { const r = document.getElementById('mm-note-1').getBoundingClientRect(); return r.top >= 0 && r.top < innerHeight ? 1 : 0; })()", 1.0);
+        preview_number(
+            &cmds,
+            "document.querySelector('.mm-footnotes a').click(); 1",
+        );
+        espera_js(&cmds.preview, "(() => { const r = document.getElementById('mm-note-ref-1-1').getBoundingClientRect(); return r.top >= 0 && r.top < innerHeight ? 1 : 0; })()", 1.0);
         assert_eq!(
             preview_number(&cmds, "document.querySelectorAll('.mm-toc a').length"),
             4.0
