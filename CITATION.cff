@@ -11,8 +11,8 @@ authors:
   - family-names: "Cabanes Martinez"
     given-names: "Joaquim"
     alias: "ximocm"
-version: "0.4.1"
-date-released: "2026-10-22"
+version: "0.4.2"
+date-released: "2026-10-25"
 repository-code: "https://github.com/ximocm/minmark"
 url: "https://github.com/ximocm/minmark"
 license: Apache-2.0
