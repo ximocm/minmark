@@ -2792,10 +2792,10 @@ fn wait_preview_allocation(cmds: &AppCmds) -> Result<(), String> {
     // El primer tick precede al layout; el siguiente ya observa su allocation.
     let laid_out = Rc::new(Cell::new(false));
     let ready = laid_out.clone();
-    let mut frames = 0;
+    let frames = Cell::new(0);
     native.add_tick_callback(move |_, _| {
-        frames += 1;
-        if frames >= 2 {
+        frames.set(frames.get() + 1);
+        if frames.get() >= 2 {
             ready.set(true);
             glib::ControlFlow::Break
         } else {
