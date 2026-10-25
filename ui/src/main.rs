@@ -2822,6 +2822,43 @@ pub fn qa_preview_smoke() {
     assert_eq!(updated, 1.0, "la preview no se actualiza al escribir");
 
     cmds.window.destroy();
+
+    // ISSUE-57: el caso de uso real es arrancar y escribir en una «Sin título»
+    // (sin path asignado): su ruta es distinta (`document: None`) y es la que
+    // usa todo el que abre la app sin abrir fichero.
+    let app = Application::builder()
+        .application_id("app.minmark.test.preview-untitled")
+        .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+        .build();
+    app.register(None::<&gtk4::gio::Cancellable>).unwrap();
+    let cmds = build_window(&app, WindowScope::Standalone, &[]);
+    cmds.window.set_default_size(900, 600);
+    pump_until(|| cmds.window.is_mapped());
+    cmds.tabs
+        .borrow_mut()
+        .insert_active(Position::new(0, 0), "Desde el arranque\n");
+    cmds.reload_active();
+    settle_preview(&cmds);
+    let painted = preview_number(&cmds, "document.body ? document.body.innerText.length : -1");
+    assert!(
+        painted > 0.0,
+        "la preview de la «Sin título» no pinta (innerText = {painted})"
+    );
+    cmds.tabs
+        .borrow_mut()
+        .insert_active(Position::new(1, 0), "Marcador\n");
+    cmds.reload_active();
+    settle_preview(&cmds);
+    let updated = preview_number(
+        &cmds,
+        "document.body.innerText.includes('Marcador') ? 1 : 0",
+    );
+    assert_eq!(
+        updated, 1.0,
+        "la preview de la «Sin título» no se actualiza al escribir"
+    );
+
+    cmds.window.destroy();
     let _ = std::fs::remove_dir_all(&root);
 }
 
