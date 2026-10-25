@@ -2910,6 +2910,28 @@ fn check_save_dialog(window: &impl IsA<gtk4::Window>) -> Result<(), String> {
 /// camino en macOS, donde GTK exige ese hilo y libtest corre cada test en el
 /// suyo).
 fn preview_check() -> Result<(), String> {
+    // Una API nativa puede bloquear dentro de iteration()/save(), donde el
+    // plazo de pump_until no llega a ejecutarse. Acotar también el proceso
+    // de diagnóstico para conservar la última fase y evitar una CI colgada.
+    struct Completed(std::sync::mpsc::Sender<()>);
+    impl Drop for Completed {
+        fn drop(&mut self) {
+            let _ = self.0.send(());
+        }
+    }
+    let (completed, deadline) = channel();
+    let _completed = Completed(completed);
+    std::thread::spawn(move || {
+        if matches!(
+            deadline.recv_timeout(Duration::from_secs(90)),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+        ) {
+            eprintln!(
+                "preview-check: timeout global de 90s; consultar la última fase del diagnóstico"
+            );
+            std::process::exit(1);
+        }
+    });
     runtime::configure();
     runtime::check_file_dialog()?;
     gtk4::init().map_err(|error| format!("no hay sesión gráfica: {error}"))?;

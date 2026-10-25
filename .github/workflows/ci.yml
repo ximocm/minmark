@@ -168,6 +168,7 @@ jobs:
         if: runner.os == 'Windows'
         run: cargo build --locked --release --manifest-path ui/Cargo.toml
       - name: Test graphical preview on Windows
+        timeout-minutes: 3
         if: runner.os == 'Windows'
         # ISSUE-57: la Preview debe pintar en WebView2. El runner tiene sesión
         # gráfica (el smoke test ya lanza la app y sigue viva) y el escenario
@@ -198,6 +199,7 @@ jobs:
         if: runner.os == 'macOS'
         run: cargo build --locked --release --manifest-path ui/Cargo.toml
       - name: Test graphical preview on macOS
+        timeout-minutes: 3
         if: runner.os == 'macOS'
         # ISSUE-57: la Preview debe pintar en WKWebView. GTK en macOS exige el
         # hilo principal, así que el escenario corre en `tests/qa_preview.rs`

@@ -44,11 +44,11 @@ normal. Los documentos empleados son fixtures temporales.
 | --- | --- |
 | Core, siete crates y pruebas de integración | 422 correctas |
 | Lógica de UI | 122 correctas; seis escenarios gráficos se ejecutan aparte |
-| Política de release y empaquetado | 26 correctas |
+| Política de release y empaquetado | 27 correctas |
 | `MINMARK_QA=1`, `qa_preview` | Correcta; selector, guardado y redimensionado reales |
 | Seis escenarios gráficos de integración | Seis correctos: cambios externos, navegación/academic, composiciones, scroll interno, pestañas y diagnóstico Preview |
 | Recursos de GTK ausentes, ejecutable real | Error legible y salida 1; sin abort de GLib |
-| Build y paquete Windows corregido | Pendiente de CI y comprobación en el equipo |
+| Build y paquete Windows corregido | CI #80 correcta; ZIP portable comprobado también en el equipo Windows |
 
 Comandos reproducibles desde la raíz:
 
@@ -77,6 +77,24 @@ Clippy termina sin errores y conserva avisos preexistentes. Los archivos Rust
 modificados pasan rustfmt. El formato global del repositorio presenta
 diferencias anteriores a esta corrección, también en crates del core; no se
 mezcla su reformateo con estos arreglos.
+
+## Comprobación del paquete Windows en el equipo
+
+Artefacto `windows-x86_64` de [CI #80](https://github.com/ximocm/minmark/actions/runs/40197357521),
+commit `7cd03ba`. SHA-256 del artefacto:
+`1768b7c9c7d9b3a68db0a410a8dfb4aa2921f82bca939e5b5aefe0585eddb4f7`.
+Se verificaron también los hashes de MSI, ZIP y bundle incluidos en SHA256SUMS.
+
+Windows 25H2, build 26200.9711, escritorio de 1920×1080. El ZIP extraído
+se ejecutó desde otra carpeta y su `--check-preview` terminó con salida 0.
+Desde la interfaz real se creó un documento con `$r_0$`, se guardó mediante
+el selector nativo como un archivo nuevo y se comprobó el texto UTF-8 en
+disco. El título perdió el indicador de cambios y Ctrl+W cerró la pestaña
+guardada sin cerrar la aplicación. Al maximizar se comprobó visualmente
+que editor, separador y Preview ocupan las posiciones correctas.
+
+La instalación MSI existente no se ha reemplazado: esta comprobación utiliza
+el paquete portable de la rama de corrección.
 
 ## Pendiente para cerrar fase 8
 
