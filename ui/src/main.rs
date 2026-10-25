@@ -2793,7 +2793,9 @@ fn wait_preview_allocation(cmds: &AppCmds) -> Result<(), String> {
     let laid_out = Rc::new(Cell::new(false));
     let ready = laid_out.clone();
     let frames = Cell::new(0);
-    native.add_tick_callback(move |_, _| {
+    // El reloj de la ventana sigue activo aunque el host sea una caja vacía
+    // sobre la que el sistema dibuja la vista nativa.
+    cmds.window.add_tick_callback(move |_, _| {
         frames.set(frames.get() + 1);
         if frames.get() >= 2 {
             ready.set(true);
@@ -2827,11 +2829,19 @@ fn check_preview_allocation(cmds: &AppCmds) -> Result<(), String> {
     if cmds.preview.native_widget().layout_manager().is_some() {
         return Err("el host nativo no debe interceptar size_allocate con BoxLayout".into());
     }
+    let mut allocations = std::collections::BTreeSet::new();
     for (width, height) in [(760, 520), (1180, 760), (860, 560)] {
-        let previous = (cmds.window.width(), cmds.window.height());
+        println!("preview-check: solicitar ventana {width}x{height}");
         cmds.window.set_default_size(width, height);
-        pump_until(|| (cmds.window.width(), cmds.window.height()) != previous);
         wait_preview_allocation(cmds)?;
+        let actual = (cmds.window.width(), cmds.window.height());
+        println!("preview-check: ventana actual {}x{}", actual.0, actual.1);
+        allocations.insert(actual);
+    }
+    if allocations.len() < 2 {
+        return Err(
+            "la ventana no cambió de tamaño al solicitar tres dimensiones distintas".into(),
+        );
     }
     #[cfg(windows)]
     {
