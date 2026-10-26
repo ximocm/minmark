@@ -42,6 +42,9 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
   activa el mismo comando de guardado de Ctrl+S.
 - Las comprobaciones del paquete Windows eliminan el GTK del entorno de
   compilación para detectar recursos ausentes en una instalación real.
+- La build Windows fija la versión de gvsbuild al GTK validado, y la
+  instalación de dependencias Linux acota esperas de red y evita preguntas
+  interactivas en CI.
 - La CI de Linux ejecuta los seis escenarios gráficos de integración en
   Xvfb, además de la lógica de UI.
 - Registro y alcance de la validación adelantada de fase 8:
