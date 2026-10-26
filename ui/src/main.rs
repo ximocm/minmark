@@ -2998,6 +2998,40 @@ fn preview_check() -> Result<(), String> {
     {
         return Err("guardar no conserva el contenido o el indicador de cambios".into());
     }
+    println!("preview-check: fase unicode/editar-guardar");
+    let scroll = cmds
+        .editor_pane
+        .widget()
+        .first_child()
+        .and_then(|widget| widget.downcast::<gtk4::ScrolledWindow>().ok())
+        .ok_or("no se encontró el contenedor del editor")?;
+    let view = scroll
+        .child()
+        .and_then(|widget| widget.downcast::<gtk4::TextView>().ok())
+        .ok_or("no se encontró el editor de texto")?;
+    let buffer = view.buffer();
+    buffer.insert(&mut buffer.end_iter(), "\n$α_0$.\n");
+    let expected_saved = cmds
+        .tabs
+        .borrow()
+        .active()
+        .editor
+        .document()
+        .content()
+        .to_owned();
+    // Mismo comando que Ctrl+S, justo después de editar el TextBuffer real,
+    // sin esperar al refresco diferido que también interpreta las ecuaciones.
+    gtk4::prelude::WidgetExt::activate_action(&cmds.window, "win.save", None)
+        .map_err(|error| format!("no se pudo activar Guardar: {error}"))?;
+    if std::fs::read_to_string(&path).unwrap() != expected_saved
+        || cmds.tabs.borrow().active().editor.document().is_modified()
+    {
+        return Err("el guardado tras editar una ecuación Unicode no conserva el buffer".into());
+    }
+    settle_preview(&cmds);
+    if preview_number(&cmds, "document.querySelectorAll('[role=math]').length") < 1.0 {
+        return Err("la Preview no muestra la ecuación Unicode guardada".into());
+    }
     std::fs::write(&path, "Cambio externo\n").unwrap();
     if !matches!(
         cmds.tabs.borrow_mut().save_active(),
@@ -3006,7 +3040,7 @@ fn preview_check() -> Result<(), String> {
         return Err("el guardado debe detectar cambios externos".into());
     }
     cmds.save_confirmed();
-    if std::fs::read_to_string(&path).unwrap() != "# Original\nMarcador\n" {
+    if std::fs::read_to_string(&path).unwrap() != expected_saved {
         return Err("la sobrescritura confirmada no guardó el buffer".into());
     }
     println!("preview-check: fase pestaña/cerrar-guardada");

@@ -91,6 +91,36 @@ fn math_latex_inline_y_bloque() {
 }
 
 #[test]
+fn math_inline_unicode_conserva_el_cuerpo_y_tolera_edicion_incompleta() {
+    // Regresión del cierre de Windows al refrescar/guardar una ecuación
+    // cuyo primer carácter tras `$` ocupa varios bytes en UTF-8.
+    for body in ["r_0", "α_0", "é", "₀", "零", "😀", "α + β"] {
+        let source = format!("Antes ${body}$ después.\n");
+        assert!(only_paragraph(&source).contains(&Inline::Math(body.into())));
+        let tokens = minmark_parser::highlight(&source);
+        let math = tokens
+            .iter()
+            .find(|token| token.kind == minmark_parser::HighlightKind::Math)
+            .expect("la ecuación conserva su token de highlighting");
+        assert_eq!(
+            &source[math.span.start as usize..math.span.end as usize],
+            format!("${body}$")
+        );
+        // La UI analiza también ecuaciones todavía sin delimitador de cierre.
+        for end in source
+            .char_indices()
+            .map(|(index, _)| index)
+            .chain([source.len()])
+        {
+            let partial = &source[..end];
+            parse(partial);
+            minmark_parser::highlight(partial);
+            minmark_parser::visual(partial);
+        }
+    }
+}
+
+#[test]
 fn citas_estilo_pandoc() {
     // §25.2.
     assert!(only_paragraph("[@smith2025]\n").contains(&Inline::Citation {

@@ -9,8 +9,13 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 
 ## [Unreleased]
 
+## [0.4.3] — 2026-10-26
+
 ### Corregido
 
+- Las ecuaciones inline cuyo primer carácter es Unicode (por ejemplo
+  `$α_0$`) podían cerrar la app al escribir, abrir o guardar. El analizador
+  conserva los límites UTF-8 y tolera también las ecuaciones incompletas.
 - Windows: Guardar un documento nuevo, Guardar como y otros selectores de
   archivos podían cerrar el proceso con «No GSettings schemas are installed
   on the system». El ZIP y el MSI incluyen los schemas de GTK compilados, y
@@ -24,19 +29,29 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
   ya no mantienen préstamos del modelo durante el refresco de la interfaz,
   que podían provocar un cierre por `RefCell`.
 
-### Verificación
+### Verificación y limitaciones
 
 - La autocomprobación `--check-preview` comprueba también el guardado y la
   sobrescritura confirmada, cierre de pestaña, redimensionado, cambios
   Split/Preview y barra lateral. Abre y cancela un selector real en
   Windows/Linux; en macOS esa interacción requiere comprobación manual.
   En Windows incluye maximizar/restaurar.
+- La regresión de Unicode cubre parseo, highlighting y modo Visual con
+  caracteres de dos, tres y cuatro bytes y sus prefijos durante la edición.
+  El diagnóstico gráfico edita una ecuación Unicode en el editor real y
+  activa el mismo comando de guardado de Ctrl+S.
 - Las comprobaciones del paquete Windows eliminan el GTK del entorno de
   compilación para detectar recursos ausentes en una instalación real.
+- La build Windows fija la versión de gvsbuild al GTK validado, y la
+  instalación de dependencias Linux acota esperas de red y evita preguntas
+  interactivas en CI.
 - La CI de Linux ejecuta los seis escenarios gráficos de integración en
   Xvfb, además de la lógica de UI.
 - Registro y alcance de la validación adelantada de fase 8:
   [estabilidad Windows](docs/qa/estabilidad-windows-2026-10-25.md).
+- Sigue pendiente la matriz manual de instalación/desinstalación MSI en
+  Windows 10/11, los cambios entre monitores con distinto DPI y la
+  interacción del selector nativo de macOS.
 
 ## [0.4.2] — 2026-10-25
 
