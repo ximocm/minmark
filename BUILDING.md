@@ -259,3 +259,24 @@ Un cambio en las dependencias puede requerir actualizar el lockfile del
 manifiesto afectado. En desarrollo, ejecuta Cargo sin `--locked` para resolverlo
 y revisa el diff del `Cargo.lock`. Para reproducir una versión del proyecto,
 utiliza el manifiesto y lockfile del mismo commit.
+
+### Avisos de Intel Vulkan o `GtkGizmo` al editar en Linux
+
+Los mensajes `MESA-INTEL ... FINISHME ... DRM format modifiers` pueden
+aparecer al inicializar el transporte gráfico de WebKit. En Intel con Mesa
+25.2.8 y WebKitGTK 2.52.6 se comprobó esta alternativa por proceso:
+
+```sh
+WEBKIT_DISABLE_DMABUF_RENDERER=1 ./target/release/minmark --check-preview
+WEBKIT_DISABLE_DMABUF_RENDERER=1 ./target/release/minmark
+```
+
+Desactiva el renderer DMA-BUF de WebKit y puede cambiar el rendimiento de la
+vista previa. El diagnóstico integrado pasó y dejaron de aparecer ambos
+avisos de Intel. Forzar `GSK_RENDERER=gl` no los eliminó en esta máquina.
+
+`Trying to snapshot GtkGizmo ... without a current allocation` es otro
+aviso: en GTK 4.14.5 se reprodujo en el `trough` de la barra vertical del
+editor al sustituir texto y redimensionar. No se encontró una corrección
+validada mediante opciones de barra, tema o animación. Véanse la
+[investigación y las evidencias](docs/qa/avisos-linux-intel-2026-10-25.md).

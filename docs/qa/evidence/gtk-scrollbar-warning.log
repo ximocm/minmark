@@ -1,0 +1,94 @@
+Function "__libc_start_main" not defined.
+Temporary breakpoint 1 (__libc_start_main) pending.
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/lib/x86_64-linux-gnu/libthread_db.so.1".
+
+Temporary breakpoint 1, __libc_start_main_impl (main=0x555556becec0, argc=2, argv=0x7fffffffd7f8, init=0x0, fini=0x0, rtld_fini=0x7ffff7fca380 <_dl_fini>, stack_end=0x7fffffffd7e8) at ../csu/libc-start.c:242
+warning: 242	../csu/libc-start.c: No such file or directory
+Breakpoint 2 at 0x7ffff1549940
+Breakpoint 3 at 0x7ffff1549180
+[Detaching after vfork from child process 26308]
+[Detaching after vfork from child process 26324]
+[Detaching after vfork from child process 26333]
+[Detaching after vfork from child process 26352]
+[Detaching after vfork from child process 26357]
+
+** (process:2): WARNING **: 23:26:25.285: Can't connect to a11y bus: Could not connect: No such file or directory
+MESA-INTEL: warning: ../src/intel/vulkan/anv_formats.c:949: FINISHME: support YUV colorspace with DRM format modifiers
+MESA-INTEL: warning: ../src/intel/vulkan/anv_formats.c:981: FINISHME: support more multi-planar formats with DRM modifiers
+MINMARK_SNAPSHOT_WARNING_WIDGET 0x5555583e9d30
+#0  0x00007ffff1549180 in g_log_structured_standard () at /lib/x86_64-linux-gnu/libglib-2.0.so.0
+#1  0x00007ffff1aa21cf in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#2  0x00007ffff1aa28f2 in gtk_widget_snapshot_child () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#3  0x00007ffff1a89c4e in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#4  0x00007ffff1aa1b54 in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#5  0x00007ffff1aa2130 in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#6  0x00007ffff1aa28f2 in gtk_widget_snapshot_child () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#7  0x00007ffff1a89c4e in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#8  0x00007ffff1aa1b54 in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#9  0x00007ffff1aa2130 in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#10 0x00007ffff1aa28f2 in gtk_widget_snapshot_child () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#11 0x00007ffff1a89c4e in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#12 0x00007ffff1a010cd in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#13 0x00007ffff1aa1b54 in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#14 0x00007ffff1aa2130 in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#15 0x00007ffff1aa28f2 in gtk_widget_snapshot_child () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#16 0x00007ffff1a89c4e in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#17 0x00007ffff1aa1b54 in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#18 0x00007ffff1aa2130 in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#19 0x00007ffff1aa28f2 in gtk_widget_snapshot_child () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#20 0x00007ffff1a89c4e in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#21 0x00007ffff1aa1f6c in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#22 0x00007ffff1aa2130 in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#23 0x00007ffff1aa28f2 in gtk_widget_snapshot_child () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#24 0x00007ffff1a89c4e in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#25 0x00007ffff1aa1b54 in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#26 0x00007ffff1aa2130 in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#27 0x00007ffff1aa28f2 in gtk_widget_snapshot_child () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#28 0x00007ffff1a89c4e in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#29 0x00007ffff1aa1f6c in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+MINMARK_WIDGET 0 0x5555583e9d30 GtkGizmo trough 6 790
+MINMARK_WIDGET 1 0x5555583e9b20 GtkRange range 6 790
+MINMARK_WIDGET 2 0x5555583e9830 GtkScrollbar scrollbar 6 790
+MINMARK_WIDGET 3 0x5555583e0ac0 GtkScrolledWindow scrolledwindow 640 790
+MINMARK_WIDGET 4 0x5555583dab90 GtkBox box 640 790
+MINMARK_WIDGET 5 0x555558486cd0 GtkPaned paned 1280 790
+MINMARK_WIDGET 6 0x55555848be30 GtkBox box 1280 850
+MINMARK_WIDGET 7 0x555558361550 GtkApplicationWindow window 1280 850
+
+Thread 1 "minmark" hit Breakpoint 3, 0x00007ffff1549180 in g_log_structured_standard () from /lib/x86_64-linux-gnu/libglib-2.0.so.0
+#0  0x00007ffff1549180 in g_log_structured_standard () at /lib/x86_64-linux-gnu/libglib-2.0.so.0
+#1  0x00007ffff1aa21cf in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#2  0x00007ffff1aa28f2 in gtk_widget_snapshot_child () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#3  0x00007ffff1a89c4e in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#4  0x00007ffff1aa1b54 in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#5  0x00007ffff1aa2130 in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#6  0x00007ffff1aa28f2 in gtk_widget_snapshot_child () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#7  0x00007ffff1a89c4e in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#8  0x00007ffff1aa1b54 in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#9  0x00007ffff1aa2130 in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#10 0x00007ffff1aa28f2 in gtk_widget_snapshot_child () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#11 0x00007ffff1a89c4e in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#12 0x00007ffff1a010cd in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#13 0x00007ffff1aa1b54 in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#14 0x00007ffff1aa2130 in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#15 0x00007ffff1aa28f2 in gtk_widget_snapshot_child () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#16 0x00007ffff1a89c4e in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#17 0x00007ffff1aa1b54 in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#18 0x00007ffff1aa2130 in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#19 0x00007ffff1aa28f2 in gtk_widget_snapshot_child () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#20 0x00007ffff1a89c4e in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#21 0x00007ffff1aa1f6c in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#22 0x00007ffff1aa2130 in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#23 0x00007ffff1aa28f2 in gtk_widget_snapshot_child () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#24 0x00007ffff1a89c4e in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#25 0x00007ffff1aa1b54 in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#26 0x00007ffff1aa2130 in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#27 0x00007ffff1aa28f2 in gtk_widget_snapshot_child () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#28 0x00007ffff1a89c4e in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#29 0x00007ffff1aa1f6c in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#30 0x00007ffff1aa2130 in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#31 0x00007ffff1aa27bb in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#32 0x00007ffff1aa3989 in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#33 0x00007ffff1c04747 in ??? () at /lib/x86_64-linux-gnu/libgtk-4.so.1
+#34 0x00007ffff7ee96bd in ??? () at /lib/x86_64-linux-gnu/libgobject-2.0.so.0

@@ -1,0 +1,22 @@
+preview-check: fase fichero/abrir
+preview-check: fase fichero/escribir
+preview-check: fase ventana/redimensionar
+preview-check: solicitar ventana 760x520
+preview-check: ventana actual 760x520
+preview-check: solicitar ventana 1180x760
+preview-check: ventana actual 1180x760
+preview-check: solicitar ventana 860x560
+preview-check: ventana actual 860x560
+preview-check: fase fichero/guardar
+preview-check: fase pestaña/cerrar-guardada
+preview-check: fase sin-título/abrir
+preview-check: fase sin-título/escribir
+preview-check: fase tema-oscuro
+preview-check: fase sin-título/selector-guardar
+check_preview: ok
+
+(process:2): GLib-GIO-WARNING **: 23:33:59.637: Error releasing name app.minmark.test.preview-render.Sandboxed.WebProcess-6ec93e5b-668b-44e6-947c-0ad9dde3c813: The connection is closed
+
+(process:2): GLib-GIO-WARNING **: 23:33:59.637: Error releasing name app.minmark.test.preview-render.Sandboxed.WebProcess-42e3941b-4914-4bff-914d-07ebc7df0be6: The connection is closed
+
+exit_code=0
