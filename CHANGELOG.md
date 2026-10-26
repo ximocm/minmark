@@ -9,10 +9,13 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 
 ## [Unreleased]
 
-## [0.4.3] — 2026-10-25
+## [0.4.3] — 2026-10-26
 
 ### Corregido
 
+- Las ecuaciones inline cuyo primer carácter es Unicode (por ejemplo
+  `$α_0$`) podían cerrar la app al escribir, abrir o guardar. El analizador
+  conserva los límites UTF-8 y tolera también las ecuaciones incompletas.
 - Windows: Guardar un documento nuevo, Guardar como y otros selectores de
   archivos podían cerrar el proceso con «No GSettings schemas are installed
   on the system». El ZIP y el MSI incluyen los schemas de GTK compilados, y
@@ -33,6 +36,10 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
   Split/Preview y barra lateral. Abre y cancela un selector real en
   Windows/Linux; en macOS esa interacción requiere comprobación manual.
   En Windows incluye maximizar/restaurar.
+- La regresión de Unicode cubre parseo, highlighting y modo Visual con
+  caracteres de dos, tres y cuatro bytes y sus prefijos durante la edición.
+  El diagnóstico gráfico edita una ecuación Unicode en el editor real y
+  activa el mismo comando de guardado de Ctrl+S.
 - Las comprobaciones del paquete Windows eliminan el GTK del entorno de
   compilación para detectar recursos ausentes en una instalación real.
 - La CI de Linux ejecuta los seis escenarios gráficos de integración en

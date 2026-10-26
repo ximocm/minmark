@@ -12,7 +12,7 @@ authors:
     given-names: "Joaquim"
     alias: "ximocm"
 version: "0.4.3"
-date-released: "2026-10-25"
+date-released: "2026-10-26"
 repository-code: "https://github.com/ximocm/minmark"
 url: "https://github.com/ximocm/minmark"
 license: Apache-2.0
