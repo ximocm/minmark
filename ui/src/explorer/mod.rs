@@ -17,7 +17,7 @@
 mod model;
 mod state;
 
-pub use state::{load as load_state, save as save_state, ExplorerState};
+pub use state::{load as load_state, save as save_state, ExplorerState, MIN_WIDTH};
 
 use gtk4 as gtk;
 use gtk4::glib;
@@ -104,7 +104,7 @@ impl ExplorerPane {
         widget.add_css_class("mm-explorer");
 
         // Cabecera §14.4/§14.5: toggles por ventana.
-        let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        let header = gtk::Box::new(gtk::Orientation::Vertical, 4);
         header.set_margin_top(4);
         header.set_margin_bottom(4);
         header.set_margin_start(6);
