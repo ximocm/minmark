@@ -236,7 +236,7 @@ pub fn plan(source: &str, selection: Selection, action: &FormatAction) -> Option
         FormatAction::MathAttrs { id, caption } => {
             math_attrs_plan(source, &starts, a, b, id.as_deref(), caption.as_deref())?
         }
-        FormatAction::CitationInsert { items } => citation_insert_plan(a, b, items)?,
+        FormatAction::CitationInsert { items } => citation_insert_plan(source, a, b, items)?,
         FormatAction::CitationEdit { items } => citation_edit_plan(source, a, b, items)?,
     };
 
@@ -1748,9 +1748,11 @@ struct MathFound {
 /// propia; inline `$…$` sin salto de línea).
 fn math_found(source: &str, starts: &[usize], a: usize, b: usize) -> Option<MathFound> {
     let lines: Vec<&str> = source.split('\n').collect();
+    // El código cercado no contiene sintaxis de ecuación (como el parser).
+    let mask = fenced_mask(&lines);
     let mut open: Option<usize> = None;
     for (index, text) in lines.iter().enumerate() {
-        if text.trim() != "$$" {
+        if mask[index] || text.trim() != "$$" {
             continue;
         }
         let Some(first) = open else {
@@ -1758,6 +1760,9 @@ fn math_found(source: &str, starts: &[usize], a: usize, b: usize) -> Option<Math
             continue;
         };
         open = None;
+        if index == first + 1 {
+            continue; // bloque sin contenido: no es un constructo editable.
+        }
         let (block_start, _) = line_span(source, starts, first);
         let block_end = line_content_end(source, starts, index as u32);
         let (attrs_line, attrs) = attrs_line_after(source, starts, &lines, index);
@@ -1784,9 +1789,10 @@ fn math_found(source: &str, starts: &[usize], a: usize, b: usize) -> Option<Math
         }
     }
 
-    // Inline `$…$` en la línea de la selección.
+    // Inline `$…$` en la línea de la selección (fuera de código cercado).
     let line = position::position_of(source, starts, a).line as usize;
-    if position::position_of(source, starts, b).line as usize != line {
+    if position::position_of(source, starts, b).line as usize != line || mask.get(line) == Some(&true)
+    {
         return None;
     }
     let (line_start, line_end) = line_span(source, starts, line);
@@ -1850,19 +1856,40 @@ fn math_insert_plan(
     }
     // Con selección no vacía, el texto seleccionado es el LaTeX.
     let latex = if a < b { &source[a..b] } else { latex };
-    let (text, content_start) = if block {
+    if block {
+        if latex.lines().any(|line| line.trim() == "$$") {
+            return None; // rompería el pareado de los delimitadores.
+        }
         let nl = LineEnding::detect(source).as_str();
-        (
-            format!("$${nl}{latex}{nl}$$"),
-            2 + nl.len(),
-        )
-    } else {
-        (format!("${latex}$"), 1)
-    };
+        // Los `$$` van en línea propia (§24): se separan del texto vecino.
+        let line_start = source[..a].rfind('\n').map_or(0, |i| i + 1);
+        let line_end = source[a..].find('\n').map_or(source.len(), |i| a + i);
+        let prefix = if a > line_start { nl } else { "" };
+        let suffix = if a < line_end { nl } else { "" };
+        let text = format!("{prefix}$${nl}{latex}{nl}$${suffix}");
+        let content_start = prefix.len() + 2 + nl.len();
+        return Some((
+            vec![(a, b, text)],
+            (a + content_start, a + content_start + latex.len()),
+        ));
+    }
+    if !valid_inline_latex(latex) {
+        return None; // el inline del parser no admite estos contenidos.
+    }
     Some((
-        vec![(a, b, text)],
-        (a + content_start, a + content_start + latex.len()),
+        vec![(a, b, format!("${latex}$"))],
+        (a + 1, a + 1 + latex.len()),
     ))
+}
+
+/// Cuerpo válido para math inline según el parser (`try_math`): no vacío,
+/// sin saltos de línea, sin `$` y sin espacios en los bordes.
+fn valid_inline_latex(latex: &str) -> bool {
+    !latex.is_empty()
+        && !latex.contains('\n')
+        && !latex.contains('$')
+        && !latex.starts_with(char::is_whitespace)
+        && !latex.ends_with(char::is_whitespace)
 }
 
 fn math_edit_plan(source: &str, a: usize, b: usize, latex: &str) -> Option<RawPlan> {
@@ -1871,6 +1898,15 @@ fn math_edit_plan(source: &str, a: usize, b: usize, latex: &str) -> Option<RawPl
     }
     let starts = position::line_starts(source);
     let found = math_found(source, &starts, a, b)?;
+    if !found.block {
+        // Los marcadores se conservan: el contenido debe seguir siendo
+        // inline válido (§24), o la ecuación se volvería texto literal.
+        if !valid_inline_latex(latex) {
+            return None;
+        }
+    } else if latex.lines().any(|line| line.trim() == "$$") {
+        return None; // rompería el pareado de los delimitadores.
+    }
     if &source[found.latex.0..found.latex.1] == latex {
         return None; // no-op.
     }
@@ -1911,7 +1947,24 @@ struct CitationFound {
     items: Vec<CitationItem>,
 }
 
-/// Interior `@clave, localizador; @otra` de una cita (§25.2).
+/// Claves de cita según el parser (`try_citation`): `is_id_char` más
+/// `* + / !`. Cualquier otra cosa no es sintaxis.
+fn valid_citation_key(key: &str) -> bool {
+    !key.is_empty()
+        && key
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, ':' | '.' | '_' | '-' | '*' | '+' | '/' | '!'))
+}
+
+/// Localizador según el parser: texto libre que ni introduce separadores de
+/// items (`;`), ni cierra la cita (`]`), ni salta de línea.
+fn valid_citation_locator(locator: &str) -> bool {
+    !locator.is_empty() && !locator.contains([';', ']', '\n'])
+}
+
+/// Interior `@clave, localizador; @otra` de una cita (§25.2). Mismas reglas
+/// que el parser para que la detección no ofrezca controles sobre texto
+/// literal.
 fn parse_citation_items(inner: &str) -> Option<Vec<CitationItem>> {
     let mut items = Vec::new();
     for part in inner.split(';') {
@@ -1923,8 +1976,13 @@ fn parse_citation_items(inner: &str) -> Option<Vec<CitationItem>> {
             }
             None => (rest.trim(), None),
         };
-        if key.is_empty() {
+        if !valid_citation_key(key) {
             return None;
+        }
+        if let Some(locator) = &locator {
+            if !valid_citation_locator(locator) {
+                return None;
+            }
         }
         items.push(CitationItem {
             key: key.to_string(),
@@ -1959,7 +2017,10 @@ fn citation_found(source: &str, a: usize, b: usize) -> Option<CitationFound> {
         }
         let close = start + source[start..].find(']')?;
         let end = close + 1;
-        let items = parse_citation_items(&source[start + 1..close])?;
+        // Un candidato mal formado no invalida las citas siguientes.
+        let Some(items) = parse_citation_items(&source[start + 1..close]) else {
+            continue;
+        };
         if a >= start && b <= end {
             return Some(CitationFound { start, end, items });
         }
@@ -1981,14 +2042,24 @@ fn citation_at(source: &str, a: usize, b: usize) -> Option<CitationContext> {
 }
 
 fn valid_citation_items(items: &[CitationItem]) -> bool {
-    !items.is_empty() && items.iter().all(|item| !item.key.trim().is_empty())
+    !items.is_empty()
+        && items.iter().all(|item| {
+            valid_citation_key(item.key.trim())
+                && item
+                    .locator
+                    .as_deref()
+                    .is_none_or(|locator| valid_citation_locator(locator.trim()))
+        })
 }
 
-fn citation_insert_plan(a: usize, b: usize, items: &[CitationItem]) -> Option<RawPlan> {
+fn citation_insert_plan(source: &str, a: usize, b: usize, items: &[CitationItem]) -> Option<RawPlan> {
     if !valid_citation_items(items) {
         return None;
     }
     let text = render_citation(items);
+    if a < b && source[a..b] == text {
+        return None; // la selección ya es esta cita: no-op.
+    }
     Some((vec![(a, b, text.clone())], (a, a + text.len())))
 }
 
@@ -3255,6 +3326,105 @@ mod tests {
         assert_eq!(editor.selection(), selection);
         assert!(editor.redo());
         assert_eq!(editor.document().content(), "ver [@b] ya");
+    }
+
+    // ---- Regresiones del review de #31 ----
+
+    #[test]
+    fn math_bloque_en_medio_de_parrafo_gana_lineas_propias() {
+        // Los `$$` deben quedar en línea propia (§24) aunque se inserte en
+        // medio de un párrafo.
+        let text = "uno dos";
+        let action = FormatAction::MathInsert {
+            block: true,
+            latex: "x\ny".into(),
+        };
+        assert_eq!(
+            applied(text, Selection::collapsed(pos(0, 4)), &action),
+            Some("uno \n$$\nx\ny\n$$\ndos".to_string())
+        );
+    }
+
+    #[test]
+    fn math_inline_no_acepta_contenido_multilinea() {
+        // El inline del parser no admite saltos de línea: con los marcadores
+        // conservados, la sustitución se rechaza en vez de romper la ecuación.
+        let text = "$x$";
+        let cursor = text.find('x').unwrap();
+        let at = Selection::collapsed(sel_of(text, cursor, cursor).anchor);
+        assert_eq!(
+            plan(text, at, &FormatAction::MathEdit { latex: "x\ny".into() }),
+            None
+        );
+        assert_eq!(
+            plan("", Selection::collapsed(pos(0, 0)), &FormatAction::MathInsert {
+                block: false,
+                latex: "x\ny".into()
+            }),
+            None
+        );
+    }
+
+    #[test]
+    fn cita_valida_segun_la_gramatica_del_parser() {
+        // Claves con espacios y localizadores con `;` no son sintaxis.
+        assert_eq!(
+            plan("", Selection::collapsed(pos(0, 0)), &FormatAction::CitationInsert {
+                items: vec![CitationItem { key: "smith 2025".into(), locator: None }]
+            }),
+            None
+        );
+        assert_eq!(
+            plan("", Selection::collapsed(pos(0, 0)), &FormatAction::CitationInsert {
+                items: vec![CitationItem { key: "a".into(), locator: Some("p. 1; fig. 2".into()) }]
+            }),
+            None
+        );
+    }
+
+    #[test]
+    fn math_ignora_delimitadores_en_codigo_cercado() {
+        // El `$$` literal del ejemplo cercado no se aparea con la ecuación real.
+        let text = "```\n$$\n```\n\n$$\nE\n$$\n";
+        let cursor = text.find('E').unwrap();
+        let math = context(text, Selection::collapsed(sel_of(text, cursor, cursor).anchor))
+            .math
+            .expect("ecuación real");
+        assert!(math.block);
+        assert_eq!(math.latex, "E");
+    }
+
+    #[test]
+    fn cita_mal_formada_no_bloquea_las_siguientes() {
+        let text = "literal [@] y valida [@smith2025]";
+        let cursor = text.find("smith").unwrap();
+        let citation = context(text, Selection::collapsed(sel_of(text, cursor, cursor).anchor))
+            .citation
+            .expect("cita válida");
+        assert_eq!(
+            citation.items,
+            vec![CitationItem { key: "smith2025".into(), locator: None }]
+        );
+    }
+
+    #[test]
+    fn math_bloque_vacio_no_es_constructo() {
+        let text = "$$\n$$";
+        let at = Selection::collapsed(sel_of(text, 2, 2).anchor);
+        assert_eq!(context(text, at).math, None);
+        assert_eq!(plan(text, at, &FormatAction::MathEdit { latex: "x".into() }), None);
+    }
+
+    #[test]
+    fn cita_insertar_identico_a_la_seleccion_es_no_op() {
+        let text = "ver [@a] ya";
+        let selection = sel_of(text, text.find("[@a]").unwrap(), text.find("[@a]").unwrap() + 4);
+        assert_eq!(
+            plan(text, selection, &FormatAction::CitationInsert {
+                items: vec![CitationItem { key: "a".into(), locator: None }]
+            }),
+            None
+        );
     }
 }
 
