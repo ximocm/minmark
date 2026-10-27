@@ -1,4 +1,4 @@
-//! Popover de controles contextuales §44 (fase 7 #29).
+//! Popover de controles contextuales §44 (fase 7 #29/#30).
 //!
 //! `gtk::Popover` anclado al `TextView` con el patrón de [`super::completion`]
 //! (`set_parent(view)`, `has_arrow(false)`), que se muestra SOLO si aporta
@@ -11,6 +11,9 @@
 //! - cursor dentro de un callout → controles de tono (note, info, tip,
 //!   warning, danger, success) para retonar;
 //! - cursor en un heading → H1–H6;
+//! - cursor/selección dentro de una imagen → botón «Edit Image» (#30, con el
+//!   diálogo de `win.edit-image` prellenado desde `format::context`);
+//! - cursor/selección dentro de una tabla → botón «Table Attributes» (#30);
 //! - cursor plano sin selección → oculto.
 //!
 //! Todo botón activa la MISMA acción `win.*` que menú, atajos y paleta §38
@@ -47,6 +50,12 @@ enum Panel {
     Link,
     Callout,
     Heading,
+    /// Solo la fila «Edit Image» (cursor dentro de un constructo imagen
+    /// sin otro panel; la fila es ortogonal, así que también acompaña al
+    /// panel de texto cuando la selección no vacía cae dentro de la imagen).
+    Image,
+    /// Solo la fila «Table Attributes» (mismo criterio que [`Panel::Image`]).
+    Table,
 }
 
 /// Setter del tono de `win.insert-callout`: fija el estado de la acción en
@@ -60,6 +69,8 @@ pub struct ContextControls {
     action_row: gtk::Box,
     link_row: gtk::Box,
     tone_row: gtk::Box,
+    image_row: gtk::Box,
+    table_row: gtk::Box,
     headings: [gtk::ToggleButton; 6],
     strong: gtk::ToggleButton,
     emphasis: gtk::ToggleButton,
@@ -181,6 +192,25 @@ impl ContextControls {
             tone_row.append(button);
         }
 
+        // Filas #30: «Edit Image» con el cursor/selección dentro de un
+        // constructo imagen y «Table Attributes» dentro de una tabla. Las
+        // filas son ORTOGONALES al panel: también acompañan al panel de
+        // texto (selección no vacía dentro del constructo) y a los tonos/H1–6
+        // si el contexto los pide, y quedan solas cuando no hay otro panel.
+        let image_row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+        let edit_image = gtk::Button::with_label(Command::EditImage.label());
+        edit_image.update_property(&[gtk::accessible::Property::Label(
+            Command::EditImage.label(),
+        )]);
+        image_row.append(&edit_image);
+
+        let table_row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+        let table_attrs = gtk::Button::with_label(Command::EditTableAttrs.label());
+        table_attrs.update_property(&[gtk::accessible::Property::Label(
+            Command::EditTableAttrs.label(),
+        )]);
+        table_row.append(&table_attrs);
+
         let root = gtk::Box::new(gtk::Orientation::Vertical, 6);
         root.set_margin_top(8);
         root.set_margin_bottom(8);
@@ -191,6 +221,8 @@ impl ContextControls {
         root.append(&action_row);
         root.append(&link_row);
         root.append(&tone_row);
+        root.append(&image_row);
+        root.append(&table_row);
         popover.set_child(Some(&root));
 
         // Handlers: guardia de pestaña y activación de la acción win.*
@@ -218,6 +250,15 @@ impl ContextControls {
             // «Edit link» reutiliza el MISMO `win.insert-link`: el diálogo se
             // precarga con la URL del contexto (main.rs).
             (&edit_link, Command::InsertLink.action_id()),
+        ] {
+            activate_action_on_click(button, &popover, &opened, view, action_id);
+        }
+        // «Edit Image» y «Table Attributes» (#30): activan `win.edit-image` y
+        // `win.edit-table-attrs` — MISMO camino que menú y paleta §38, con la
+        // misma guardia de pestaña; los diálogos precargan `format::context`.
+        for (button, action_id) in [
+            (&edit_image, Command::EditImage.action_id()),
+            (&table_attrs, Command::EditTableAttrs.action_id()),
         ] {
             activate_action_on_click(button, &popover, &opened, view, action_id);
         }
@@ -276,6 +317,8 @@ impl ContextControls {
                 action_row.clone(),
                 link_row.clone(),
                 tone_row.clone(),
+                image_row.clone(),
+                table_row.clone(),
             ];
             let popover = popover.clone();
             let opened = Rc::clone(&opened);
@@ -323,6 +366,14 @@ impl ContextControls {
                 callout.upcast::<gtk::Button>(),
             ));
             buttons.push(("Edit link", edit_link.upcast::<gtk::Button>()));
+            buttons.push((
+                Command::EditImage.label(),
+                edit_image.upcast::<gtk::Button>(),
+            ));
+            buttons.push((
+                Command::EditTableAttrs.label(),
+                table_attrs.upcast::<gtk::Button>(),
+            ));
             for (index, button) in tones.iter().enumerate() {
                 buttons.push((
                     CALLOUT_TONES[index],
@@ -339,6 +390,8 @@ impl ContextControls {
             action_row,
             link_row,
             tone_row,
+            image_row,
+            table_row,
             headings,
             strong,
             emphasis,
@@ -390,6 +443,14 @@ impl ContextControls {
             Panel::Callout
         } else if ctx.heading_level.is_some() {
             Panel::Heading
+        } else if ctx.image.is_some() {
+            // Cursor dentro de un constructo imagen (#30): solo «Edit Image»
+            // (si hay selección, el panel de texto manda y la fila ortogonal
+            // se añade en [`Self::render`]).
+            Panel::Image
+        } else if ctx.table.is_some() {
+            // Cursor dentro de una tabla (#30): solo «Table Attributes».
+            Panel::Table
         } else {
             // Cursor plano sin selección: sin utilidad (§UI), oculto.
             self.hide();
@@ -425,6 +486,11 @@ impl ContextControls {
         self.action_row.set_visible(panel == Panel::Text);
         self.link_row.set_visible(panel == Panel::Link);
         self.tone_row.set_visible(panel == Panel::Callout);
+        // Filas #30 ortogonales al panel: dentro del constructo se ven, sea
+        // cual sea el panel activo (texto con selección no vacía, callout,
+        // heading…); fuera del constructo no se muestran.
+        self.image_row.set_visible(ctx.image.is_some());
+        self.table_row.set_visible(ctx.table.is_some());
 
         for (index, button) in self.headings.iter().enumerate() {
             button.set_active(ctx.heading_level == Some(index as u8 + 1));
@@ -607,5 +673,39 @@ mod tests {
             callout.callout.expect("callout bajo el cursor").callout_type,
             DEFAULT_CALLOUT_TONE
         );
+    }
+
+    /// Fase 7 #30: `format::context` detecta la imagen (§26.2) — incluidos
+    /// id y ancho del bloque `{...}` — y la tabla con su línea de atributos
+    /// posterior (§26.3); fuera de ambos no hay constructo. Sin contexto no
+    /// hay fila #30 en el popover (el panel la gobierna).
+    #[test]
+    fn context_detecta_imagen_y_tabla_30() {
+        use minmark_document::Position;
+        let source = "ver ![alt](img.png \"Título\") {#fig:a width=50%}\n\n\
+                      | A | B |\n| --- | --- |\n| 1 | 2 |\n{#tbl:t \"C\"}\n";
+
+        // Cursor dentro del constructo imagen: NO se reporta como enlace
+        // (#29 excluye `![…](…)` de `link`, son los controles de #30).
+        let cursor_imagen = format::context(source, Selection::collapsed(Position::new(0, 6)));
+        let imagen = cursor_imagen.image.expect("imagen bajo el cursor");
+        assert_eq!(imagen.destination, "img.png");
+        assert_eq!(imagen.alt, "alt");
+        assert_eq!(imagen.title.as_deref(), Some("Título"));
+        assert_eq!(imagen.id.as_deref(), Some("fig:a"));
+        assert_eq!(imagen.width_percent, Some(50));
+        assert!(cursor_imagen.link.is_none(), "la imagen no es un enlace #29");
+
+        // Cursor en una celda de cabecera: la tabla y su línea de atributos.
+        let tabla = format::context(source, Selection::collapsed(Position::new(2, 2)))
+            .table
+            .expect("tabla bajo el cursor");
+        assert_eq!(tabla.columns, 2);
+        assert_eq!(tabla.id.as_deref(), Some("tbl:t"));
+        assert_eq!(tabla.caption.as_deref(), Some("C"));
+
+        // Cursor fuera de ambos: sin imagen ni tabla.
+        let fuera = format::context(source, Selection::collapsed(Position::new(0, 0)));
+        assert!(fuera.image.is_none() && fuera.table.is_none());
     }
 }

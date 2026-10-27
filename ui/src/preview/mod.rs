@@ -421,6 +421,54 @@ mod tests {
         assert!(html.contains("<em>cuerpo</em>"));
     }
 
+    /// Fase 7 #30 (§Verificación): la imagen y la tabla EDITADAS con sus
+    /// atributos — `{#fig:…}` por `win.edit-image` y la línea
+    /// `{#tbl:… "caption"}` por `win.edit-table-attrs`, ambas aplicadas vía
+    /// `TabManager::apply_format_active`, el mismo camino que Preview/PDF
+    /// — se renderizan con la numeración y los captions §26.5.
+    #[test]
+    fn render_refleja_imagen_y_tabla_editadas_con_atributos_30() {
+        use minmark_document::format::FormatAction;
+        use minmark_document::{Position, Selection};
+
+        let mut tabs = crate::tabs::TabManager::new();
+        tabs.insert_active(
+            Position::new(0, 0),
+            "Ver ![esquema](diagram.png) fin.\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n",
+        );
+
+        // Editar la imagen pidiendo id de figura (§26.2/§28.1).
+        tabs.set_selection_active(Selection::collapsed(Position::new(0, 6)));
+        assert!(tabs.apply_format_active(&FormatAction::ImageEdit {
+            destination: "diagram.png".to_owned(),
+            alt: "esquema".to_owned(),
+            id: Some("fig:esquema".to_owned()),
+            width_percent: None,
+        }));
+
+        // Atributos de la tabla con caption (§26.3).
+        tabs.set_selection_active(Selection::collapsed(Position::new(4, 2)));
+        assert!(tabs.apply_format_active(&FormatAction::TableAttrs {
+            id: Some("tbl:resultados".to_owned()),
+            caption: Some("Resultados".to_owned()),
+        }));
+
+        let html = render_document(
+            tabs.active().editor.document().content(),
+            &Settings::default(),
+        );
+        assert!(html.contains("Figura 1"), "numeración de figura §26.5: {html}");
+        assert!(html.contains("Tabla 1"), "numeración de tabla §26.5: {html}");
+        assert!(
+            html.contains("Resultados"),
+            "caption de la tabla §26.3 en el render: {html}"
+        );
+        assert!(
+            html.contains("mm-caption"),
+            "los pies caption llegan al HTML del Preview: {html}"
+        );
+    }
+
     /// §7.2: nunca HTML crudo del documento; el contenido sale escapado.
     #[test]
     fn render_document_escapa_el_html_del_documento() {

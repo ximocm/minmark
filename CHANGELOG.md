@@ -40,6 +40,27 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
   URL del enlace bajo el cursor y Cancelar (o Escape) no toca el documento.
   La ✕ de la Command Palette la oculta en lugar de destruirla: se reutiliza
   en la siguiente apertura.
+- Controles para imágenes y tablas (fase 7, #30; §18, §26.3, §35): el
+  popover §44 muestra «Edit Image» cuando el cursor o la selección caen
+  dentro de un constructo imagen y «Table Attributes» dentro de una tabla —
+  mismas garantías de foco, teclado y guardia de pestaña que los controles
+  de #29 —, y los formularios precargan Ruta/Alt/ID/Ancho % e ID/Caption
+  desde `format::context`. El menú **Insert** gana Image y Table junto a
+  Link/Callout: `win.insert-image` abre el selector con los formatos §18.1
+  (PNG, JPG/JPEG, SVG, WebP, GIF) y, solo al aceptar, copia el fichero a
+  `<raíz>/assets/` con el renombrado §18.3 (`diagram.png`, `diagram-2.png`,
+  …, nunca sobrescribe) e inserta la ruta RELATIVA a la carpeta del
+  documento (`<raíz>` = raíz del proyecto o, en standalone, la carpeta del
+  documento); `win.insert-table` pide filas/columnas (1–50 × 1–8, §35) y
+  deja el esqueleto GFM con la selección en la primera celda de cabecera;
+  `win.edit-image` y `win.edit-table-attrs` cambian SOLO los campos
+  editados —título, caption, `clave=valor` extra y la tabla quedan byte a
+  byte intactos— y un campo vacío quita su atributo. Cancelar, Escape o
+  cerrar cualquier diálogo (incluido el selector) es cero cambios: ni
+  copia, ni edición, ni transacción nueva. Los cuatro comandos comparten
+  el destino único `TabManager::apply_format_active` con menús, atajos,
+  paleta §38 y popover §44. Sin atajos nuevos: #30 no registra
+  aceleradores (los de #39/#29 se conservan intactos).
 
 ### Limitaciones aceptadas (#29)
 
@@ -49,6 +70,20 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
   botón Code queda inoperante en ese rango (el documento no se toca).
 - Atajos configurables (§39) fuera de alcance: se registran solo los
   defaults sin conflicto; no hay editor de bindings.
+
+### Limitaciones aceptadas (#30)
+
+- El contenido de las celdas y la alineación de las columnas se editan
+  escribiendo sobre el mismo buffer: los controles de tabla no los tocan.
+- La detección de imagen y tabla sigue la sintaxis canónica: una tabla sin
+  pipes extremos o sin fila de alineación, o una imagen cuyo bloque
+  `{...}` esté separado por líneas en blanco, no se detecta como constructo
+  y su botón contextual no aparece.
+- `Edit Image` y `Table Attributes` no tienen ítem de menú §36: se activan
+  desde el popover §44 y desde la Command Palette §38 sobre la MISMA
+  acción `win.*`.
+- El GIF se renderiza estático (§18.1): es comportamiento de Preview/PDF,
+  no de edición.
 
 ### Verificación
 
@@ -61,6 +96,26 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
   plano/visible con selección, cambio de pestaña y de modo con el popover
   abierto sin aplicar nada, retonado de callout desde el popover y Command
   Palette ejecutando un comando vía `win.*`.
+- Fase 7 #30: `cargo test` del binario UI con 144 en verde (los 130 previos
+  más 14 headless de #30: comandos hasta el receptor, cancelar formulario
+  sin acción, límites §35, parseo de campos —caption verbatim incluido—,
+  plan de importación §18.3/§17, validadores, `apply_format_active` de
+  imagen/tabla con la regresión del caption precargado con espacios y el
+  smoke de render de imagen/tabla editadas con atributos) y 19 ignorados
+  gráficos. `cargo clippy --all-targets` reproduce el recuento del HEAD
+  (15 avisos bin, 15 de `qa_preview` y 22 del target de test, con el
+  mismo reparto de tipos: sin avisos nuevos). Los seis tests gráficos
+  nuevos corren cada uno bajo su propio `xvfb-run … --ignored
+  --test-threads=1`: edición de imagen con y sin atributos conservando los
+  bytes ajenos, diálogo de imagen Cancelar/Escape byte a byte idéntico sin
+  transacción nueva, esqueleto de tabla con validación de límites en
+  abierto, atributos de tabla creando/reemplazando solo su línea,
+  importación a `assets/` con renombrado §18.3 y ruta relativa §17 (proyecto
+  y standalone; cancelar no copia) y guardia de pestaña/modo sobre
+  «Edit Image». Los 13 tests gráficos previos siguen en verde. El smoke de
+  render (§Verificación) comprueba en HTML del Preview que la imagen editada
+  `{#fig:…}` y la tabla con `{#tbl:… "caption"}` producen su numeración y
+  pie §26.5.
 
 ## [0.4.3] — 2026-10-26
 

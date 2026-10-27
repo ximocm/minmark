@@ -18,7 +18,7 @@ use gtk4::prelude::*;
 use crate::preview::ViewMode;
 
 /// Comandos de la aplicación (§36: File, Edit, View, Insert, Format,
-/// Project, Help; Insert/Format con la fase 7, #29).
+/// Project, Help; Insert/Format con la fase 7, #29 e Image/Table con #30).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Command {
     New,
@@ -64,6 +64,21 @@ pub enum Command {
     InsertLink,
     /// Callout `::: tipo` (§22, fase 7 #29, menú Insert).
     InsertCallout,
+    /// Imagen `![alt](ruta)` (fase 7 #30, §18, menú Insert): selector de
+    /// fichero (§18.1) + formulario de campos; copia a `<raíz>/assets/` con
+    /// renombrado §18.3 e inserción con ruta relativa §17.
+    InsertImage,
+    /// Tabla GFM (fase 7 #30, §35, menú Insert): formulario filas/columnas
+    /// (1–50 × 1–8) → `FormatAction::TableInsert`.
+    InsertTable,
+    /// Editar la imagen bajo el cursor/selección (fase 7 #30, §18/§26.2;
+    /// popover y Command Palette): diálogo con Ruta, Alt, ID y Ancho %
+    /// prellenados desde `format::context` → `FormatAction::ImageEdit`.
+    EditImage,
+    /// Editar los atributos `{#id "caption"}` de la tabla (fase 7 #30,
+    /// §26.3; popover y Command Palette): diálogo ID/Caption prellenado →
+    /// `FormatAction::TableAttrs`.
+    EditTableAttrs,
     /// Heading ATX 1–6 (fase 7 #29, menú Format, `Ctrl+1..6`).
     FormatHeading1,
     FormatHeading2,
@@ -118,6 +133,10 @@ impl Command {
             Command::View(ViewMode::Preview) => "win.view-preview",
             Command::InsertLink => "win.insert-link",
             Command::InsertCallout => "win.insert-callout",
+            Command::InsertImage => "win.insert-image",
+            Command::InsertTable => "win.insert-table",
+            Command::EditImage => "win.edit-image",
+            Command::EditTableAttrs => "win.edit-table-attrs",
             Command::FormatHeading1 => "win.format-heading1",
             Command::FormatHeading2 => "win.format-heading2",
             Command::FormatHeading3 => "win.format-heading3",
@@ -165,6 +184,10 @@ impl Command {
             Command::View(mode) => mode.label(),
             Command::InsertLink => "Link",
             Command::InsertCallout => "Callout",
+            Command::InsertImage => "Image",
+            Command::InsertTable => "Table",
+            Command::EditImage => "Edit Image",
+            Command::EditTableAttrs => "Table Attributes",
             Command::FormatHeading1 => "Heading 1",
             Command::FormatHeading2 => "Heading 2",
             Command::FormatHeading3 => "Heading 3",
@@ -267,6 +290,20 @@ pub trait Commands {
     /// `win.insert-callout`: envuelve o retona el callout con `tone`
     /// (tono inicial `note`; la acción guarda el último tono elegido).
     fn insert_callout(&self, _tone: &str) {}
+    /// `win.insert-image` (fase 7 #30): selector de fichero §18.1 +
+    /// formulario de campos; copia a `<raíz>/assets/` §18.3 e
+    /// `FormatAction::ImageInsert` con ruta relativa §17. Cancelar en
+    /// cualquier punto ⇒ cero cambios y NO hay copia.
+    fn insert_image(&self) {}
+    /// `win.insert-table` (fase 7 #30): diálogo filas/columnas (1–50 × 1–8)
+    /// → `FormatAction::TableInsert` sobre la pestaña activa.
+    fn insert_table(&self) {}
+    /// `win.edit-image` (fase 7 #30): diálogo de imagen prellenado con el
+    /// constructo bajo el cursor/selección → `FormatAction::ImageEdit`.
+    fn edit_image(&self) {}
+    /// `win.edit-table-attrs` (fase 7 #30): diálogo ID/Caption prellenado
+    /// con la tabla bajo el cursor/selección → `FormatAction::TableAttrs`.
+    fn edit_table_attrs(&self) {}
     /// Command Palette §38 (§39: `Ctrl+Shift+P`).
     fn command_palette(&self) {}
     fn about(&self);
@@ -312,7 +349,9 @@ pub const ACCELERATORS: &[(&str, &str)] = &[
 
 /// Todos los comandos, en orden de aparición en los menús §36. §38: es la
 /// lista completa que la Command Palette ejecuta — pública para que la
-/// paleta se alimente de ella — y todo comando es alcanzable desde el menú.
+/// paleta se alimente de ella — y todo comando es alcanzable desde el menú
+/// (los dos comandos de constructo #30 llegan por el popover §44 y la
+/// paleta; ver `menu_y_comandos_coherentes`).
 pub const ALL_COMMANDS: &[Command] = &[
     Command::New,
     Command::NewWindow,
@@ -342,6 +381,10 @@ pub const ALL_COMMANDS: &[Command] = &[
     Command::View(ViewMode::Preview),
     Command::InsertLink,
     Command::InsertCallout,
+    Command::InsertImage,
+    Command::InsertTable,
+    Command::EditImage,
+    Command::EditTableAttrs,
     Command::FormatHeading1,
     Command::FormatHeading2,
     Command::FormatHeading3,
@@ -373,9 +416,9 @@ type SubmenuSpec = (&'static str, &'static [SectionSpec]);
 /// Modelo de menú §36 en datos puros: File, Edit, View, Insert, Format,
 /// Project y Help. View agrupa «Markdown/Visual» (ToggleMode) y la sección
 /// radio implícita Editor/Split/Preview (§36) más la Command Palette §38;
-/// Insert (Link, Callout) y Format (Heading 1–6, Bold, Italic, Strikethrough,
-/// Code) llegan con la fase 7 (#29); Project nace con las composiciones
-/// (§20, ISSUE-022).
+/// Insert (Link, Callout, Image, Table) y Format (Heading 1–6, Bold, Italic,
+/// Strikethrough, Code) llegan con la fase 7 (#29/#30); Project nace con las
+/// composiciones (§20, ISSUE-022).
 const MENUBAR_SPEC: &[SubmenuSpec] = &[
     (
         "File",
@@ -424,7 +467,16 @@ const MENUBAR_SPEC: &[SubmenuSpec] = &[
     ),
     (
         "Insert",
-        &[&[("Link", "win.insert-link"), ("Callout", "win.insert-callout")]],
+        &[&[
+            ("Link", "win.insert-link"),
+            ("Callout", "win.insert-callout"),
+            // Fase 7 #30 (§UI): Image y Table junto a Link/Callout. Los
+            // comandos de edición de constructo (Edit Image, Table
+            // Attributes) viven en el popover §44 y la paleta §38, sin
+            // ítem de menú.
+            ("Image", "win.insert-image"),
+            ("Table", "win.insert-table"),
+        ]],
     ),
     (
         "Format",
@@ -500,6 +552,10 @@ fn dispatch(cmd: Command, host: &dyn Commands, callout_tone: &str) {
         Command::View(mode) => host.set_view(mode),
         Command::InsertLink => host.insert_link(),
         Command::InsertCallout => host.insert_callout(callout_tone),
+        Command::InsertImage => host.insert_image(),
+        Command::InsertTable => host.insert_table(),
+        Command::EditImage => host.edit_image(),
+        Command::EditTableAttrs => host.edit_table_attrs(),
         Command::FormatHeading1 => host.format_heading1(),
         Command::FormatHeading2 => host.format_heading2(),
         Command::FormatHeading3 => host.format_heading3(),
@@ -706,6 +762,113 @@ mod tests {
         }
     }
 
+    /// Fase 7 #30: los comandos nuevos tienen el `action_id` y la etiqueta
+    /// fijados por el contrato §UI (Insert ▸ Image/Table, popover §44 y
+    /// Command Palette §38) y NO registran aceleradores nuevos (el
+    /// contrato §UI exige documentar que no los hay).
+    #[test]
+    fn comandos_fase_7_30_ids_y_etiquetas_sin_atajos() {
+        let nuevos = [
+            (Command::InsertImage, "win.insert-image", "Image"),
+            (Command::InsertTable, "win.insert-table", "Table"),
+            (Command::EditImage, "win.edit-image", "Edit Image"),
+            (
+                Command::EditTableAttrs,
+                "win.edit-table-attrs",
+                "Table Attributes",
+            ),
+        ];
+        for (cmd, id, label) in nuevos {
+            assert_eq!(cmd.action_id(), id, "action_id de {label}");
+            assert_eq!(cmd.label(), label, "etiqueta de {id}");
+            assert!(
+                ALL_COMMANDS.contains(&cmd),
+                "{id} ausente de ALL_COMMANDS (§38)"
+            );
+            assert!(!cmd.requires_composition(), "{id} sin composiciones (§20)");
+            assert!(
+                !ACCELERATORS.iter().any(|(accel_id, _)| *accel_id == id),
+                "{id} no debe tener acelerador (#30 añade los comandos sin atajos)"
+            );
+        }
+        // Imagen y Table están en el menú Insert junto a Link/Callout (§UI);
+        // los dos de edición no llevan ítem de menú (popover + paleta).
+        for id in ["win.insert-image", "win.insert-table"] {
+            assert!(
+                ALL_COMMANDS.iter().any(|cmd| cmd.action_id() == id),
+                "{id} registrado"
+            );
+        }
+    }
+
+    /// Fase 7 #30: los cuatro comandos se activan como las MISMAS acciones
+    /// `win.*` del grupo (menú, paleta §38 y popover §44) y llegan al
+    /// receptor que main.rs enlaza con `TabManager::apply_format_active`
+    /// (destino único de edición, contrato #30 §UI).
+    #[test]
+    fn comandos_30_llegan_al_receptor() {
+        /// Receptor que solo registra los comandos #30 recibidos.
+        struct Recorder(Rc<std::cell::RefCell<Vec<&'static str>>>);
+        impl Commands for Recorder {
+            fn new(&self) {}
+            fn new_window(&self) {}
+            fn open(&self) {}
+            fn quick_open(&self) {}
+            fn open_folder(&self) {}
+            fn import_markdown(&self) {}
+            fn save(&self) {}
+            fn save_as(&self) {}
+            fn export_pdf(&self) {}
+            fn close_tab(&self) {}
+            fn undo(&self) {}
+            fn redo(&self) {}
+            fn find(&self) {}
+            fn replace(&self) {}
+            fn project_search(&self) {}
+            fn toggle_mode(&self) {}
+            fn toggle_visual_syntax(&self) {}
+            fn toggle_explorer(&self) {}
+            fn set_view(&self, _mode: ViewMode) {}
+            fn about(&self) {}
+            fn shortcuts(&self) {}
+            fn insert_image(&self) {
+                self.0.borrow_mut().push("insert-image");
+            }
+            fn insert_table(&self) {
+                self.0.borrow_mut().push("insert-table");
+            }
+            fn edit_image(&self) {
+                self.0.borrow_mut().push("edit-image");
+            }
+            fn edit_table_attrs(&self) {
+                self.0.borrow_mut().push("edit-table-attrs");
+            }
+        }
+
+        let received = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let host: Rc<dyn Commands> = Rc::new(Recorder(Rc::clone(&received)));
+        let group = action_group(&host);
+        for id in ["insert-image", "insert-table", "edit-image", "edit-table-attrs"] {
+            let action = group
+                .lookup_action(id)
+                .unwrap_or_else(|| panic!("falta la acción win.{id} (§36)"))
+                .downcast::<gio::SimpleAction>()
+                .expect("SimpleAction");
+            assert!(action.is_enabled(), "win.{id} habilitada");
+            action.activate(None::<&glib::Variant>);
+        }
+        assert_eq!(
+            received.borrow().as_slice(),
+            [
+                "insert-image",
+                "insert-table",
+                "edit-image",
+                "edit-table-attrs"
+            ],
+            "las cuatro activaciones llegan al receptor (dispatch §3.7)"
+        );
+    }
+
     /// Fase 7 #29: `win.insert-callout` es stateful con tono inicial `note`
     /// (activable con `activate_action(id, None)` §38) y la activación
     /// entrega el tono del estado — el popover lo fija antes de activarla.
@@ -774,10 +937,11 @@ mod tests {
     /// Open/Open Folder/Import Markdown/Save/Save As/Export PDF/Export
     /// Composition PDF/Close Tab, ISSUE-021/029/035/023), Edit (Undo/Redo/
     /// Find/Replace/Project Search, §40.1/§40.2), View (Markdown/Visual +
-    /// Editor/Split/Preview + Command Palette §38), Insert (Link/Callout),
-    /// Format (Heading 1–6/Bold/Italic/Strikethrough/Code), Project (Preview
+    /// Editor/Split/Preview + Command Palette §38), Insert (Link/Callout/
+    /// Image/Table), Format (Heading 1–6/Bold/Italic/Strikethrough/Code),
+    /// Project (Preview
     /// Composition, §20/ISSUE-022) y Help (Atajos/About) — en el orden §36
-    /// `File Edit View Insert Format Project Help` (fase 7 #29).
+    /// `File Edit View Insert Format Project Help` (fase 7 #29/#30).
     #[test]
     fn estructura_menu_36() {
         let esperado: &[(&str, &[&[(&str, &str)]])] = &[
@@ -828,7 +992,12 @@ mod tests {
             ),
             (
                 "Insert",
-                &[&[("Link", "win.insert-link"), ("Callout", "win.insert-callout")]],
+                &[&[
+                    ("Link", "win.insert-link"),
+                    ("Callout", "win.insert-callout"),
+                    ("Image", "win.insert-image"),
+                    ("Table", "win.insert-table"),
+                ]],
             ),
             (
                 "Format",
@@ -911,9 +1080,13 @@ mod tests {
     }
 
     /// Coherencia §36/§37: todo ítem del menú corresponde a un comando
-    /// registrado con su etiqueta y todo comando es alcanzable desde el menú.
+    /// registrado con su etiqueta y todo comando es alcanzable desde el
+    /// menú — salvo los dos comandos de constructo #30, que el contrato §UI
+    /// mantiene fuera del menú (se activan desde el popover §44 y desde la
+    /// Command Palette §38 sobre la MISMA acción `win.*`).
     #[test]
     fn menu_y_comandos_coherentes() {
+        const SIN_ITEM_DE_MENU: [Command; 2] = [Command::EditImage, Command::EditTableAttrs];
         let mut en_menu = HashSet::new();
         for &(_, sections) in MENUBAR_SPEC {
             for entries in sections {
@@ -928,6 +1101,9 @@ mod tests {
             }
         }
         for &cmd in ALL_COMMANDS {
+            if SIN_ITEM_DE_MENU.contains(&cmd) {
+                continue;
+            }
             assert!(
                 en_menu.contains(cmd.action_id()),
                 "comando sin ítem de menú §36: {}",
