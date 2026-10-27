@@ -6,7 +6,7 @@
 //! no en los modos, y cambiar de modo no lo reinicia.
 
 use crate::document::Document;
-use crate::position::{Position, Range, Selection};
+use crate::position::{self, Position, Range, Selection};
 use std::fmt;
 
 /// Error de edición: posición o rango inválido.
@@ -70,7 +70,7 @@ struct Change {
 
 impl Editor {
     pub fn new(document: Document) -> Self {
-        let line_starts = compute_line_starts(document.content());
+        let line_starts = position::line_starts(document.content());
         Self {
             document,
             selection: Selection::collapsed(Position::new(0, 0)),
@@ -151,6 +151,32 @@ impl Editor {
     /// del último texto insertado. Una lista vacía o solo con operaciones
     /// nulas no entra en el historial.
     pub fn replace_all(&mut self, edits: &[(Range, String)]) -> Result<(), EditError> {
+        self.replace_all_impl(edits, None)
+    }
+
+    /// Como [`Editor::replace_all`], pero la transacción registra `after`
+    /// como selección posterior (§8.6): `undo` restaura la selección previa y
+    /// `redo` restaura `after`, no un cursor colapsado al final. Es la vía de
+    /// las acciones editoriales contextuales (§44), que preservan selección y
+    /// cursor como una operación coherente de undo/redo.
+    ///
+    /// Si `after` no valida sobre el buffer resultante se usa el cursor al
+    /// final del último texto insertado (comportamiento de [`Self::replace_all`])
+    /// y la transacción registra esa selección real: undo/redo nunca quedan
+    /// desincronizados del buffer.
+    pub fn replace_all_selecting(
+        &mut self,
+        edits: &[(Range, String)],
+        after: Selection,
+    ) -> Result<(), EditError> {
+        self.replace_all_impl(edits, Some(after))
+    }
+
+    fn replace_all_impl(
+        &mut self,
+        edits: &[(Range, String)],
+        after: Option<Selection>,
+    ) -> Result<(), EditError> {
         // Coordenadas del buffer original y textos, ordenados por inicio.
         let mut plan: Vec<(usize, usize, &str)> = Vec::with_capacity(edits.len());
         for (range, text) in edits {
@@ -162,7 +188,7 @@ impl Editor {
             }
             plan.push((start, end, text.as_str()));
         }
-        plan.sort_by(|x, y| (x.0, x.1).cmp(&(y.0, y.1)));
+        plan.sort_by_key(|x| (x.0, x.1));
         for pair in plan.windows(2) {
             if pair[0].1 > pair[1].0 {
                 let (start, end) = (pair[1].0, pair[1].1);
@@ -196,7 +222,15 @@ impl Editor {
         for change in &changes {
             self.apply(change);
         }
-        let after = Selection::collapsed(self.position_of(end_after));
+        let after = match after {
+            Some(selection)
+                if self.offset_of(selection.anchor).is_ok()
+                    && self.offset_of(selection.head).is_ok() =>
+            {
+                selection
+            }
+            _ => Selection::collapsed(self.position_of(end_after)),
+        };
         self.history.undo.push(Transaction {
             changes,
             before,
@@ -218,7 +252,7 @@ impl Editor {
     /// líneas de las posiciones semánticas (§8.6).
     pub fn replace_content(&mut self, content: &str) {
         self.document.replace_content(content);
-        self.line_starts = compute_line_starts(self.document.content());
+        self.line_starts = position::line_starts(self.document.content());
         let valida = self.offset_of(self.selection.anchor).is_ok()
             && self.offset_of(self.selection.head).is_ok();
         if !valida {
@@ -299,46 +333,15 @@ impl Editor {
     /// También es la frontera Preview ↔ Editor (§9.1): el doble clic en un
     /// elemento del Preview usa `position_of` sobre el rango del elemento.
     pub fn offset_of(&self, position: Position) -> Result<usize, EditError> {
-        let line = position.line as usize;
-        let invalid = || EditError::InvalidPosition(position);
-        let &line_start = self.line_starts.get(line).ok_or_else(invalid)?;
-        let segment_end = self
-            .line_starts
-            .get(line + 1)
-            .copied()
-            .unwrap_or(self.document.content().len());
-        let segment = &self.document.content()[line_start..segment_end];
-        let column = position.column as usize;
-        if column == segment.chars().count() {
-            return Ok(segment_end);
-        }
-        segment
-            .char_indices()
-            .nth(column)
-            .map(|(i, _)| line_start + i)
-            .ok_or_else(invalid)
+        position::offset_of(self.document.content(), &self.line_starts, position)
+            .ok_or(EditError::InvalidPosition(position))
     }
 
     /// Posición semántica de un offset de bytes del fuente (§9.1: doble clic
     /// en Preview → cursor en el editor).
     pub fn position_of(&self, offset: usize) -> Position {
-        let line = self.line_starts.partition_point(|&p| p <= offset) - 1;
-        let line_start = self.line_starts[line];
-        let column = self.document.content()[line_start..offset].chars().count();
-        Position::new(line as u32, column as u32)
+        position::position_of(self.document.content(), &self.line_starts, offset)
     }
-}
-
-fn compute_line_starts(content: &str) -> Vec<usize> {
-    let mut starts = vec![0];
-    starts.extend(
-        content
-            .bytes()
-            .enumerate()
-            .filter(|(_, b)| *b == b'\n')
-            .map(|(i, _)| i + 1),
-    );
-    starts
 }
 
 #[cfg(test)]

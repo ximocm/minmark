@@ -18,6 +18,7 @@ mod attrs;
 mod compose;
 mod document;
 mod editor;
+pub mod format;
 mod position;
 mod references;
 mod regex;
