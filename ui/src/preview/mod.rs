@@ -62,8 +62,8 @@ pub enum ViewMode {
 }
 
 impl ViewMode {
-    /// Etiqueta del modo para el menú View (§9): "Editor" / "Split" / "Preview".
-    #[cfg(test)]
+    /// Etiqueta del modo para el menú View (§9): "Editor" / "Split" /
+    /// "Preview"; §38: también la etiqueta que filtra la Command Palette.
     pub fn label(self) -> &'static str {
         match self {
             ViewMode::Editor => "Editor",

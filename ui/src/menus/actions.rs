@@ -12,11 +12,13 @@ use std::rc::Rc;
 
 use gtk4 as gtk;
 use gtk4::gio;
+use gtk4::glib;
 use gtk4::prelude::*;
 
 use crate::preview::ViewMode;
 
-/// Comandos de la aplicación (§36). Insert/Format/Project llegan con sus fases.
+/// Comandos de la aplicación (§36: File, Edit, View, Insert, Format,
+/// Project, Help; Insert/Format con la fase 7, #29).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Command {
     New,
@@ -53,8 +55,30 @@ pub enum Command {
     VisualSyntax,
     /// Muestra/oculta el explorador de archivos (§14.3, §39: `Ctrl+B`).
     ToggleExplorer,
+    /// Command Palette §38 (§39: `Ctrl+Shift+P`), menú View.
+    CommandPalette,
     /// Cambio de modo de vista (§36, menú View).
     View(ViewMode), // ViewMode de crate::preview
+    /// Enlace `[texto](url)` (fase 7 #29, menú Insert, `Ctrl+K`): diálogo de
+    /// URL prellenado con la del enlace bajo el cursor si lo hay.
+    InsertLink,
+    /// Callout `::: tipo` (§22, fase 7 #29, menú Insert).
+    InsertCallout,
+    /// Heading ATX 1–6 (fase 7 #29, menú Format, `Ctrl+1..6`).
+    FormatHeading1,
+    FormatHeading2,
+    FormatHeading3,
+    FormatHeading4,
+    FormatHeading5,
+    FormatHeading6,
+    /// Negrita `**texto**` (fase 7 #29, menú Format, `Ctrl+Shift+B`).
+    FormatStrong,
+    /// Cursiva `*texto*` (fase 7 #29, menú Format, `Ctrl+I`).
+    FormatEmphasis,
+    /// Tachado `~~texto~~` (fase 7 #29, menú Format, `Ctrl+Shift+X`).
+    FormatStrikethrough,
+    /// Código inline `` `texto` `` (fase 7 #29, menú Format, `Ctrl+Shift+C`).
+    FormatCode,
     /// Preview combinado de una composición (§20.4, ISSUE-023, menú Project).
     PreviewComposition,
     About,
@@ -88,9 +112,22 @@ impl Command {
             Command::ToggleMode => "win.toggle-mode",
             Command::VisualSyntax => "win.visual-syntax",
             Command::ToggleExplorer => "win.toggle-explorer",
+            Command::CommandPalette => "win.command-palette",
             Command::View(ViewMode::Editor) => "win.view-editor",
             Command::View(ViewMode::Split) => "win.view-split",
             Command::View(ViewMode::Preview) => "win.view-preview",
+            Command::InsertLink => "win.insert-link",
+            Command::InsertCallout => "win.insert-callout",
+            Command::FormatHeading1 => "win.format-heading1",
+            Command::FormatHeading2 => "win.format-heading2",
+            Command::FormatHeading3 => "win.format-heading3",
+            Command::FormatHeading4 => "win.format-heading4",
+            Command::FormatHeading5 => "win.format-heading5",
+            Command::FormatHeading6 => "win.format-heading6",
+            Command::FormatStrong => "win.format-strong",
+            Command::FormatEmphasis => "win.format-emphasis",
+            Command::FormatStrikethrough => "win.format-strikethrough",
+            Command::FormatCode => "win.format-code",
             Command::PreviewComposition => "win.preview-composition",
             Command::About => "win.about",
             Command::Shortcuts => "win.shortcuts",
@@ -98,8 +135,8 @@ impl Command {
     }
 
     /// Etiqueta de menú en inglés (§36: File, Edit, …). El ítem de atajos
-    /// conserva «Atajos», el nombre con el que §36 lo lista en Help.
-    #[cfg(test)]
+    /// conserva «Atajos», el nombre con el que §36 lo lista en Help. §38:
+    /// es también la etiqueta que filtra la Command Palette.
     pub fn label(&self) -> &'static str {
         match self {
             Command::New => "New",
@@ -124,7 +161,20 @@ impl Command {
             Command::ToggleMode => "Markdown/Visual",
             Command::VisualSyntax => "Toggle Visual Syntax",
             Command::ToggleExplorer => "Toggle Explorer",
+            Command::CommandPalette => "Command Palette",
             Command::View(mode) => mode.label(),
+            Command::InsertLink => "Link",
+            Command::InsertCallout => "Callout",
+            Command::FormatHeading1 => "Heading 1",
+            Command::FormatHeading2 => "Heading 2",
+            Command::FormatHeading3 => "Heading 3",
+            Command::FormatHeading4 => "Heading 4",
+            Command::FormatHeading5 => "Heading 5",
+            Command::FormatHeading6 => "Heading 6",
+            Command::FormatStrong => "Bold",
+            Command::FormatEmphasis => "Italic",
+            Command::FormatStrikethrough => "Strikethrough",
+            Command::FormatCode => "Code",
             Command::PreviewComposition => "Preview Composition",
             Command::About => "About",
             Command::Shortcuts => "Atajos",
@@ -189,6 +239,36 @@ pub trait Commands {
     /// Muestra/oculta el explorador (§14.3); sin-op en ventanas standalone.
     fn toggle_explorer(&self);
     fn set_view(&self, mode: ViewMode);
+    /// Aplica `win.format-strong` (negrita) sobre la selección o el bloque
+    /// del cursor vía [`TabManager::apply_format_active`](crate::tabs::TabManager::apply_format_active)
+    /// (fase 7 #29); sin-op por defecto para no romper implementadores.
+    fn format_strong(&self) {}
+    /// Cursiva `win.format-emphasis` (fase 7 #29).
+    fn format_emphasis(&self) {}
+    /// Tachado `win.format-strikethrough` (fase 7 #29).
+    fn format_strikethrough(&self) {}
+    /// Código inline `win.format-code` (fase 7 #29).
+    fn format_code(&self) {}
+    /// Heading 1 `win.format-heading1` (fase 7 #29).
+    fn format_heading1(&self) {}
+    /// Heading 2 `win.format-heading2` (fase 7 #29).
+    fn format_heading2(&self) {}
+    /// Heading 3 `win.format-heading3` (fase 7 #29).
+    fn format_heading3(&self) {}
+    /// Heading 4 `win.format-heading4` (fase 7 #29).
+    fn format_heading4(&self) {}
+    /// Heading 5 `win.format-heading5` (fase 7 #29).
+    fn format_heading5(&self) {}
+    /// Heading 6 `win.format-heading6` (fase 7 #29).
+    fn format_heading6(&self) {}
+    /// `win.insert-link`: diálogo de URL prellenado con la del enlace bajo
+    /// el cursor si lo hay; Cancelar no toca el documento (fase 7 #29).
+    fn insert_link(&self) {}
+    /// `win.insert-callout`: envuelve o retona el callout con `tone`
+    /// (tono inicial `note`; la acción guarda el último tono elegido).
+    fn insert_callout(&self, _tone: &str) {}
+    /// Command Palette §38 (§39: `Ctrl+Shift+P`).
+    fn command_palette(&self) {}
     fn about(&self);
     fn shortcuts(&self);
 }
@@ -214,6 +294,20 @@ pub const ACCELERATORS: &[(&str, &str)] = &[
     ("win.project-search", "<Control><Shift>f"),
     ("win.toggle-mode", "<Control><Alt>m"),
     ("win.toggle-explorer", "<Control>b"),
+    ("win.command-palette", "<Control><Shift>p"),
+    // Controles contextuales §44 (fase 7 #29): sin conflicto con §39
+    // (`Ctrl+B` sigue siendo Toggle Explorer, `Ctrl+P` Quick Open).
+    ("win.format-strong", "<Control><Shift>b"),
+    ("win.format-emphasis", "<Control>i"),
+    ("win.format-strikethrough", "<Control><Shift>x"),
+    ("win.format-code", "<Control><Shift>c"),
+    ("win.format-heading1", "<Control>1"),
+    ("win.format-heading2", "<Control>2"),
+    ("win.format-heading3", "<Control>3"),
+    ("win.format-heading4", "<Control>4"),
+    ("win.format-heading5", "<Control>5"),
+    ("win.format-heading6", "<Control>6"),
+    ("win.insert-link", "<Control>k"),
 ];
 
 /// Todos los comandos, en orden de aparición en los menús §36. §38: es la
@@ -242,13 +336,32 @@ pub const ALL_COMMANDS: &[Command] = &[
     Command::ToggleMode,
     Command::VisualSyntax,
     Command::ToggleExplorer,
+    Command::CommandPalette,
     Command::View(ViewMode::Editor),
     Command::View(ViewMode::Split),
     Command::View(ViewMode::Preview),
+    Command::InsertLink,
+    Command::InsertCallout,
+    Command::FormatHeading1,
+    Command::FormatHeading2,
+    Command::FormatHeading3,
+    Command::FormatHeading4,
+    Command::FormatHeading5,
+    Command::FormatHeading6,
+    Command::FormatStrong,
+    Command::FormatEmphasis,
+    Command::FormatStrikethrough,
+    Command::FormatCode,
     Command::PreviewComposition,
     Command::About,
     Command::Shortcuts,
 ];
+
+/// Tono inicial de `win.insert-callout` (fase 7 #29): la acción es
+/// stateful con estado de tipo string — sigue siendo activable con
+/// `activate_action(id, None)` (menú y paleta §38) y el popover de
+/// controles actualiza el estado antes de activarla para retonar.
+pub const DEFAULT_CALLOUT_TONE: &str = "note";
 
 /// Ítem puro del modelo de menú §36: `(etiqueta, action_id)`.
 type EntrySpec = (&'static str, &'static str);
@@ -257,10 +370,12 @@ type SectionSpec = &'static [EntrySpec];
 /// Submenú puro §36: `(título, secciones)`.
 type SubmenuSpec = (&'static str, &'static [SectionSpec]);
 
-/// Modelo de menú §36 en datos puros: File, Edit, View, Project y Help
-/// (Insert/Format llegan con sus fases). View agrupa «Markdown/Visual»
-/// (ToggleMode) y la sección radio implícita Editor/Split/Preview (§36);
-/// Project nace con las composiciones (§20, ISSUE-022).
+/// Modelo de menú §36 en datos puros: File, Edit, View, Insert, Format,
+/// Project y Help. View agrupa «Markdown/Visual» (ToggleMode) y la sección
+/// radio implícita Editor/Split/Preview (§36) más la Command Palette §38;
+/// Insert (Link, Callout) y Format (Heading 1–6, Bold, Italic, Strikethrough,
+/// Code) llegan con la fase 7 (#29); Project nace con las composiciones
+/// (§20, ISSUE-022).
 const MENUBAR_SPEC: &[SubmenuSpec] = &[
     (
         "File",
@@ -298,6 +413,7 @@ const MENUBAR_SPEC: &[SubmenuSpec] = &[
                 ("Toggle Explorer", "win.toggle-explorer"),
                 ("Outline", "win.outline"),
                 ("Backlinks", "win.backlinks"),
+                ("Command Palette", "win.command-palette"),
             ],
             &[
                 ("Editor", "win.view-editor"),
@@ -305,6 +421,25 @@ const MENUBAR_SPEC: &[SubmenuSpec] = &[
                 ("Preview", "win.view-preview"),
             ],
         ],
+    ),
+    (
+        "Insert",
+        &[&[("Link", "win.insert-link"), ("Callout", "win.insert-callout")]],
+    ),
+    (
+        "Format",
+        &[&[
+            ("Heading 1", "win.format-heading1"),
+            ("Heading 2", "win.format-heading2"),
+            ("Heading 3", "win.format-heading3"),
+            ("Heading 4", "win.format-heading4"),
+            ("Heading 5", "win.format-heading5"),
+            ("Heading 6", "win.format-heading6"),
+            ("Bold", "win.format-strong"),
+            ("Italic", "win.format-emphasis"),
+            ("Strikethrough", "win.format-strikethrough"),
+            ("Code", "win.format-code"),
+        ]],
     ),
     (
         "Project",
@@ -316,8 +451,7 @@ const MENUBAR_SPEC: &[SubmenuSpec] = &[
     ),
 ];
 
-/// Modelo de menú §36: File, Edit, View, Project, Help (Insert/Format llegan
-/// con sus fases).
+/// Modelo de menú §36: File, Edit, View, Insert, Format, Project, Help.
 pub fn build_menubar() -> gio::Menu {
     let menubar = gio::Menu::new();
     for &(title, sections) in MENUBAR_SPEC {
@@ -335,8 +469,10 @@ pub fn build_menubar() -> gio::Menu {
 }
 
 /// Enruta un comando activado al receptor [`Commands`] (§3.7: toda acción de
-/// la UI es explícita y observable en el host).
-fn dispatch(cmd: Command, host: &dyn Commands) {
+/// la UI es explícita y observable en el host). `callout_tone` solo lo usa
+/// [`Command::InsertCallout`]: el tono vive en el estado de la acción (tono
+/// inicial [`DEFAULT_CALLOUT_TONE`], último elegido en el popover después).
+fn dispatch(cmd: Command, host: &dyn Commands, callout_tone: &str) {
     match cmd {
         Command::New => host.new(),
         Command::NewWindow => host.new_window(),
@@ -360,7 +496,20 @@ fn dispatch(cmd: Command, host: &dyn Commands) {
         Command::ToggleMode => host.toggle_mode(),
         Command::VisualSyntax => host.toggle_visual_syntax(),
         Command::ToggleExplorer => host.toggle_explorer(),
+        Command::CommandPalette => host.command_palette(),
         Command::View(mode) => host.set_view(mode),
+        Command::InsertLink => host.insert_link(),
+        Command::InsertCallout => host.insert_callout(callout_tone),
+        Command::FormatHeading1 => host.format_heading1(),
+        Command::FormatHeading2 => host.format_heading2(),
+        Command::FormatHeading3 => host.format_heading3(),
+        Command::FormatHeading4 => host.format_heading4(),
+        Command::FormatHeading5 => host.format_heading5(),
+        Command::FormatHeading6 => host.format_heading6(),
+        Command::FormatStrong => host.format_strong(),
+        Command::FormatEmphasis => host.format_emphasis(),
+        Command::FormatStrikethrough => host.format_strikethrough(),
+        Command::FormatCode => host.format_code(),
         Command::PreviewComposition => host.preview_composition(),
         Command::About => host.about(),
         Command::Shortcuts => host.shortcuts(),
@@ -383,12 +532,26 @@ pub fn action_group(host: &Rc<dyn Commands>) -> gio::SimpleActionGroup {
             .action_id()
             .strip_prefix("win.")
             .expect("los action_id usan el prefijo «win.» (§36)");
-        let action = gio::SimpleAction::new(name, None);
+        // `insert-callout` lleva el tono en su estado (parámetro `None`:
+        // la paleta §38 la activa con `activate_action(id, None)`); el
+        // popover de controles fija el estado antes de activarla para
+        // retonar, y menú/atajos usan el último tono (inicial `note`).
+        let action = if cmd == Command::InsertCallout {
+            gio::SimpleAction::new_stateful(name, None, &glib::Variant::from(DEFAULT_CALLOUT_TONE))
+        } else {
+            gio::SimpleAction::new(name, None)
+        };
         if cmd.requires_composition() {
             action.set_enabled(host.compositions_available());
         }
         let host = Rc::clone(host);
-        action.connect_activate(move |_, _| dispatch(cmd, &*host));
+        action.connect_activate(move |action, _| {
+            let tone = action
+                .state()
+                .and_then(|state| state.str().map(str::to_owned))
+                .unwrap_or_else(|| DEFAULT_CALLOUT_TONE.to_owned());
+            dispatch(cmd, &*host, &tone);
+        });
         group.add_action(&action);
     }
     group
@@ -463,6 +626,19 @@ mod tests {
             ("win.replace", "<Control>h"),
             ("win.project-search", "<Control><Shift>f"),
             ("win.toggle-explorer", "<Control>b"),
+            // Fase 7 #29 (§UI): atajos nuevos sin conflicto con §39.
+            ("win.command-palette", "<Control><Shift>p"),
+            ("win.format-strong", "<Control><Shift>b"),
+            ("win.format-emphasis", "<Control>i"),
+            ("win.format-strikethrough", "<Control><Shift>x"),
+            ("win.format-code", "<Control><Shift>c"),
+            ("win.format-heading1", "<Control>1"),
+            ("win.format-heading2", "<Control>2"),
+            ("win.format-heading3", "<Control>3"),
+            ("win.format-heading4", "<Control>4"),
+            ("win.format-heading5", "<Control>5"),
+            ("win.format-heading6", "<Control>6"),
+            ("win.insert-link", "<Control>k"),
         ] {
             assert!(
                 ACCELERATORS.contains(&(id, accel)),
@@ -498,12 +674,110 @@ mod tests {
         assert_eq!(vistos.len(), ALL_COMMANDS.len());
     }
 
+    /// Fase 7 #29: los comandos nuevos tienen el `action_id` y la etiqueta
+    /// fijados por el contrato §UI (menús Insert/Format, Command Palette).
+    #[test]
+    fn comandos_fase_7_29_ids_y_etiquetas() {
+        for (cmd, id, label) in [
+            (Command::CommandPalette, "win.command-palette", "Command Palette"),
+            (Command::InsertLink, "win.insert-link", "Link"),
+            (Command::InsertCallout, "win.insert-callout", "Callout"),
+            (Command::FormatHeading1, "win.format-heading1", "Heading 1"),
+            (Command::FormatHeading2, "win.format-heading2", "Heading 2"),
+            (Command::FormatHeading3, "win.format-heading3", "Heading 3"),
+            (Command::FormatHeading4, "win.format-heading4", "Heading 4"),
+            (Command::FormatHeading5, "win.format-heading5", "Heading 5"),
+            (Command::FormatHeading6, "win.format-heading6", "Heading 6"),
+            (Command::FormatStrong, "win.format-strong", "Bold"),
+            (Command::FormatEmphasis, "win.format-emphasis", "Italic"),
+            (
+                Command::FormatStrikethrough,
+                "win.format-strikethrough",
+                "Strikethrough",
+            ),
+            (Command::FormatCode, "win.format-code", "Code"),
+        ] {
+            assert_eq!(cmd.action_id(), id, "action_id de {label}");
+            assert_eq!(cmd.label(), label, "etiqueta de {id}");
+            assert!(
+                ALL_COMMANDS.contains(&cmd),
+                "{id} ausente de ALL_COMMANDS (§38)"
+            );
+        }
+    }
+
+    /// Fase 7 #29: `win.insert-callout` es stateful con tono inicial `note`
+    /// (activable con `activate_action(id, None)` §38) y la activación
+    /// entrega el tono del estado — el popover lo fija antes de activarla.
+    #[test]
+    fn insert_callout_lleva_el_tono_en_su_estado() {
+        /// Receptor que solo registra los tonos recibidos.
+        struct Tones(Rc<std::cell::RefCell<Vec<String>>>);
+        impl Commands for Tones {
+            fn new(&self) {}
+            fn new_window(&self) {}
+            fn open(&self) {}
+            fn quick_open(&self) {}
+            fn open_folder(&self) {}
+            fn import_markdown(&self) {}
+            fn save(&self) {}
+            fn save_as(&self) {}
+            fn export_pdf(&self) {}
+            fn close_tab(&self) {}
+            fn undo(&self) {}
+            fn redo(&self) {}
+            fn find(&self) {}
+            fn replace(&self) {}
+            fn project_search(&self) {}
+            fn toggle_mode(&self) {}
+            fn toggle_visual_syntax(&self) {}
+            fn toggle_explorer(&self) {}
+            fn set_view(&self, _mode: ViewMode) {}
+            fn about(&self) {}
+            fn shortcuts(&self) {}
+            fn insert_callout(&self, tone: &str) {
+                self.0.borrow_mut().push(tone.to_owned());
+            }
+        }
+
+        let received = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let host: Rc<dyn Commands> = Rc::new(Tones(Rc::clone(&received)));
+        let group = action_group(&host);
+        let action = group
+            .lookup_action("insert-callout")
+            .expect("win.insert-callout registrada")
+            .downcast::<gio::SimpleAction>()
+            .expect("SimpleAction");
+        assert!(
+            action.state_type().is_some(),
+            "acción stateful (estado de tipo string)"
+        );
+        assert_eq!(
+            action.state().and_then(|s| s.str().map(str::to_owned)),
+            Some(DEFAULT_CALLOUT_TONE.to_owned()),
+            "tono inicial note (§22)"
+        );
+
+        // Activación sin parámetro (menú/paleta §38) usa el estado actual.
+        action.activate(None::<&glib::Variant>);
+        // El popover fija el tono antes de activar la MISMA acción.
+        action.set_state(&glib::Variant::from("tip"));
+        action.activate(None::<&glib::Variant>);
+        assert_eq!(
+            received.borrow().as_slice(),
+            ["note".to_owned(), "tip".to_owned()],
+            "el tono viaja en el estado de la acción"
+        );
+    }
+
     /// §36: estructura exacta del menú — File (New/New Window/Open/Quick
     /// Open/Open Folder/Import Markdown/Save/Save As/Export PDF/Export
     /// Composition PDF/Close Tab, ISSUE-021/029/035/023), Edit (Undo/Redo/
     /// Find/Replace/Project Search, §40.1/§40.2), View (Markdown/Visual +
-    /// Editor/Split/Preview), Project (Preview Composition, §20/ISSUE-022)
-    /// y Help (Atajos/About).
+    /// Editor/Split/Preview + Command Palette §38), Insert (Link/Callout),
+    /// Format (Heading 1–6/Bold/Italic/Strikethrough/Code), Project (Preview
+    /// Composition, §20/ISSUE-022) y Help (Atajos/About) — en el orden §36
+    /// `File Edit View Insert Format Project Help` (fase 7 #29).
     #[test]
     fn estructura_menu_36() {
         let esperado: &[(&str, &[&[(&str, &str)]])] = &[
@@ -543,6 +817,7 @@ mod tests {
                         ("Toggle Explorer", "win.toggle-explorer"),
                         ("Outline", "win.outline"),
                         ("Backlinks", "win.backlinks"),
+                        ("Command Palette", "win.command-palette"),
                     ],
                     &[
                         ("Editor", "win.view-editor"),
@@ -550,6 +825,25 @@ mod tests {
                         ("Preview", "win.view-preview"),
                     ],
                 ],
+            ),
+            (
+                "Insert",
+                &[&[("Link", "win.insert-link"), ("Callout", "win.insert-callout")]],
+            ),
+            (
+                "Format",
+                &[&[
+                    ("Heading 1", "win.format-heading1"),
+                    ("Heading 2", "win.format-heading2"),
+                    ("Heading 3", "win.format-heading3"),
+                    ("Heading 4", "win.format-heading4"),
+                    ("Heading 5", "win.format-heading5"),
+                    ("Heading 6", "win.format-heading6"),
+                    ("Bold", "win.format-strong"),
+                    ("Italic", "win.format-emphasis"),
+                    ("Strikethrough", "win.format-strikethrough"),
+                    ("Code", "win.format-code"),
+                ]],
             ),
             (
                 "Project",

@@ -253,6 +253,22 @@ pub fn prompt_text(
             on_submit(None);
         });
     }
+    // Escape cancela (§3.7 / #29: mismo camino que «Cancelar» y el cierre
+    // de la ventana ⇒ `on_submit(None)`, cero cambios en el documento).
+    {
+        let on_escape = window.clone();
+        let on_submit = Rc::clone(&on_submit);
+        let controller = gtk::EventControllerKey::new();
+        controller.connect_key_pressed(move |_, key, _, _| {
+            if key == gtk4::gdk::Key::Escape {
+                on_escape.destroy();
+                on_submit(None);
+                return glib::Propagation::Stop;
+            }
+            glib::Propagation::Proceed
+        });
+        window.add_controller(controller);
+    }
     window.connect_close_request({
         let on_submit = Rc::clone(&on_submit);
         move |_| {

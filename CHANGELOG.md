@@ -9,6 +9,59 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 
 ## [Unreleased]
 
+### Añadido
+
+- Controles editoriales contextuales (fase 7, #29; §44): popover flotante
+  anclado al cursor/selección del editor que se muestra solo cuando aporta
+  utilidad — panel de texto (Heading 1–6, Bold, Italic, Strikethrough, Code,
+  Link, Callout) con selección no vacía, «Edit link» con el cursor dentro de
+  un enlace, controles de tono (note, info, tip, warning, danger, success)
+  dentro de un callout y H1–H6 bajo el cursor en un heading; cursor plano
+  sin selección lo mantiene oculto. Escape (y el clic fuera) lo cierra sin
+  tocar el documento, `Ctrl+.` lleva el foco del editor a los controles
+  —con foco en ellos, Tab los recorre, Enter/Space los activan (GTK
+  nativo) y Escape los cierra devolviendo el foco al editor—, y cambiar de
+  pestaña o de modo lo cierra sin aplicar nada a otra pestaña.
+- Menús **Insert** (Link, Callout) y **Format** (Heading 1–6, Bold, Italic,
+  Strikethrough, Code) en el orden §36 `File Edit View Insert Format Project
+  Help`, sin toolbar permanente (§36/§44).
+- Command Palette §38 (`Ctrl+Shift+P`): ventana fuzzy sobre las etiquetas de
+  todos los comandos; Enter o doble click ejecutan el comando, Escape
+  cierra.
+- Atajos §39 nuevos, sin conflicto con los existentes: `Ctrl+Shift+B` Bold,
+  `Ctrl+I` Italic, `Ctrl+K` Link, `Ctrl+Shift+X` Strikethrough,
+  `Ctrl+Shift+C` Code, `Ctrl+1..6` Heading 1–6 y `Ctrl+Shift+P` Command
+  Palette (`Ctrl+B` sigue siendo Toggle Explorer y `Ctrl+P` Quick Open).
+- Cada acción editorial es UNA transacción de undo/redo (§8.5) que registra
+  la selección anterior y posterior (§8.6): undo restaura la selección
+  original y redo la resultante. Todas las vías de entrada — menús, atajos,
+  Command Palette y popover — ejecutan la misma acción `win.*` con destino
+  única `TabManager::apply_format_active`; el diálogo de enlace precarga la
+  URL del enlace bajo el cursor y Cancelar (o Escape) no toca el documento.
+  La ✕ de la Command Palette la oculta en lugar de destruirla: se reutiliza
+  en la siguiente apertura.
+
+### Limitaciones aceptadas (#29)
+
+- Solo enlaces `[texto](url)`: wiki links y reference links no tienen
+  controles contextuales.
+- Code inline multilínea no es aplicable: `format::plan` lo rechaza y el
+  botón Code queda inoperante en ese rango (el documento no se toca).
+- Atajos configurables (§39) fuera de alcance: se registran solo los
+  defaults sin conflicto; no hay editor de bindings.
+
+### Verificación
+
+- `cargo test` del binario UI: 130 en verde (12 ignorados que requieren
+  sesión gráfica) y `cargo clippy --all-targets` sin avisos nuevos respecto
+  al HEAD (mismo conjunto de 15 avisos preexistentes del toolchain 1.98).
+- Las seis pruebas gráficas nuevas corren bajo Xvfb con `--ignored`:
+  Bold vía `win.format-strong` con selección y undo únicos, diálogo de
+  enlace cancelado byte a byte idéntico, popover oculto con cursor
+  plano/visible con selección, cambio de pestaña y de modo con el popover
+  abierto sin aplicar nada, retonado de callout desde el popover y Command
+  Palette ejecutando un comando vía `win.*`.
+
 ## [0.4.3] — 2026-10-26
 
 ### Corregido
