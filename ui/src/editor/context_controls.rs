@@ -14,6 +14,9 @@
 //! - cursor/selección dentro de una imagen → botón «Edit Image» (#30, con el
 //!   diálogo de `win.edit-image` prellenado desde `format::context`);
 //! - cursor/selección dentro de una tabla → botón «Table Attributes» (#30);
+//! - cursor/selección dentro de una ecuación → «Edit Equation» + «Equation
+//!   Attributes» (solo bloque, §26.4; #31);
+//! - cursor/selección dentro de una cita → «Edit Citation» (#31);
 //! - cursor plano sin selección → oculto.
 //!
 //! Todo botón activa la MISMA acción `win.*` que menú, atajos y paleta §38
@@ -56,6 +59,11 @@ enum Panel {
     Image,
     /// Solo la fila «Table Attributes» (mismo criterio que [`Panel::Image`]).
     Table,
+    /// Solo las filas de ecuación (cursor dentro de `$…$`/`$$…$$` sin otro
+    /// panel; #31). Ortogonales al panel, igual que las de imagen/tabla.
+    Math,
+    /// Solo la fila «Edit Citation» (cursor dentro de una cita `[@…]`, #31).
+    Citation,
 }
 
 /// Setter del tono de `win.insert-callout`: fija el estado de la acción en
@@ -71,6 +79,12 @@ pub struct ContextControls {
     tone_row: gtk::Box,
     image_row: gtk::Box,
     table_row: gtk::Box,
+    /// Filas #31: «Edit Equation» + «Equation Attributes» (solo bloque)
+    /// dentro de una ecuación, «Edit Citation» dentro de una cita.
+    equation_row: gtk::Box,
+    citation_row: gtk::Box,
+    /// «Equation Attributes»: visible SOLO con ecuación de bloque (#31 §UI).
+    equation_attrs: gtk::Button,
     headings: [gtk::ToggleButton; 6],
     strong: gtk::ToggleButton,
     emphasis: gtk::ToggleButton,
@@ -211,6 +225,29 @@ impl ContextControls {
         )]);
         table_row.append(&table_attrs);
 
+        // Filas #31: «Edit Equation» + «Equation Attributes» dentro de una
+        // ecuación —los atributos SOLO para bloque (§26.4)— y «Edit
+        // Citation» dentro de una cita; ortogonales al panel como las de
+        // #30, con el MISMO camino `win.*` y guardia de pestaña.
+        let equation_row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+        let edit_equation = gtk::Button::with_label(Command::EditEquation.label());
+        edit_equation.update_property(&[gtk::accessible::Property::Label(
+            Command::EditEquation.label(),
+        )]);
+        let equation_attrs = gtk::Button::with_label(Command::EquationAttrs.label());
+        equation_attrs.update_property(&[gtk::accessible::Property::Label(
+            Command::EquationAttrs.label(),
+        )]);
+        equation_row.append(&edit_equation);
+        equation_row.append(&equation_attrs);
+
+        let citation_row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+        let edit_citation = gtk::Button::with_label(Command::EditCitation.label());
+        edit_citation.update_property(&[gtk::accessible::Property::Label(
+            Command::EditCitation.label(),
+        )]);
+        citation_row.append(&edit_citation);
+
         let root = gtk::Box::new(gtk::Orientation::Vertical, 6);
         root.set_margin_top(8);
         root.set_margin_bottom(8);
@@ -223,6 +260,8 @@ impl ContextControls {
         root.append(&tone_row);
         root.append(&image_row);
         root.append(&table_row);
+        root.append(&equation_row);
+        root.append(&citation_row);
         popover.set_child(Some(&root));
 
         // Handlers: guardia de pestaña y activación de la acción win.*
@@ -256,9 +295,15 @@ impl ContextControls {
         // «Edit Image» y «Table Attributes» (#30): activan `win.edit-image` y
         // `win.edit-table-attrs` — MISMO camino que menú y paleta §38, con la
         // misma guardia de pestaña; los diálogos precargan `format::context`.
+        // Las filas #31 (Edit Equation, Equation Attributes, Edit Citation)
+        // siguen el mismo patrón sobre `win.edit-equation`,
+        // `win.equation-attrs` y `win.edit-citation`.
         for (button, action_id) in [
             (&edit_image, Command::EditImage.action_id()),
             (&table_attrs, Command::EditTableAttrs.action_id()),
+            (&edit_equation, Command::EditEquation.action_id()),
+            (&equation_attrs, Command::EquationAttrs.action_id()),
+            (&edit_citation, Command::EditCitation.action_id()),
         ] {
             activate_action_on_click(button, &popover, &opened, view, action_id);
         }
@@ -319,6 +364,8 @@ impl ContextControls {
                 tone_row.clone(),
                 image_row.clone(),
                 table_row.clone(),
+                equation_row.clone(),
+                citation_row.clone(),
             ];
             let popover = popover.clone();
             let opened = Rc::clone(&opened);
@@ -374,6 +421,18 @@ impl ContextControls {
                 Command::EditTableAttrs.label(),
                 table_attrs.upcast::<gtk::Button>(),
             ));
+            buttons.push((
+                Command::EditEquation.label(),
+                edit_equation.upcast::<gtk::Button>(),
+            ));
+            buttons.push((
+                Command::EquationAttrs.label(),
+                equation_attrs.clone().upcast::<gtk::Button>(),
+            ));
+            buttons.push((
+                Command::EditCitation.label(),
+                edit_citation.upcast::<gtk::Button>(),
+            ));
             for (index, button) in tones.iter().enumerate() {
                 buttons.push((
                     CALLOUT_TONES[index],
@@ -392,6 +451,9 @@ impl ContextControls {
             tone_row,
             image_row,
             table_row,
+            equation_row,
+            citation_row,
+            equation_attrs,
             headings,
             strong,
             emphasis,
@@ -443,6 +505,13 @@ impl ContextControls {
             Panel::Callout
         } else if ctx.heading_level.is_some() {
             Panel::Heading
+        } else if ctx.math.is_some() {
+            // Cursor dentro de una ecuación (#31): «Edit Equation» +
+            // «Equation Attributes» (bloque; la fila se gobierna en render).
+            Panel::Math
+        } else if ctx.citation.is_some() {
+            // Cursor dentro de una cita (#31): solo «Edit Citation».
+            Panel::Citation
         } else if ctx.image.is_some() {
             // Cursor dentro de un constructo imagen (#30): solo «Edit Image»
             // (si hay selección, el panel de texto manda y la fila ortogonal
@@ -491,6 +560,12 @@ impl ContextControls {
         // heading…); fuera del constructo no se muestran.
         self.image_row.set_visible(ctx.image.is_some());
         self.table_row.set_visible(ctx.table.is_some());
+        // Filas #31 con el mismo criterio ortogonal: ecuación (los atributos
+        // SOLO en bloque, §26.4) y cita (§25.2).
+        self.equation_row.set_visible(ctx.math.is_some());
+        self.equation_attrs
+            .set_visible(ctx.math.as_ref().is_some_and(|math| math.block));
+        self.citation_row.set_visible(ctx.citation.is_some());
 
         for (index, button) in self.headings.iter().enumerate() {
             button.set_active(ctx.heading_level == Some(index as u8 + 1));
@@ -707,5 +782,52 @@ mod tests {
         // Cursor fuera de ambos: sin imagen ni tabla.
         let fuera = format::context(source, Selection::collapsed(Position::new(0, 0)));
         assert!(fuera.image.is_none() && fuera.table.is_none());
+    }
+
+    /// Fase 7 #31: `format::context` detecta la ecuación (§24, inline y
+    /// bloque con su línea de atributos §26.4) y la cita con sus items
+    /// (§25.2); fuera de ambos no hay constructo, así que el popover no
+    /// ofrece los controles #31.
+    #[test]
+    fn context_detecta_ecuacion_y_cita_31() {
+        use minmark_document::Position;
+        let source = "Ver $E = mc^2$ y [@smith2025, p. 42; @jones2024] fin\n\n\
+                      $$\n\\int_0^1 x\\,dx\n$$\n{#eq:i \"Integral\"}\n";
+
+        // Inline bajo el cursor: ecuación sin atributos.
+        let inline = format::context(source, Selection::collapsed(Position::new(0, 6)));
+        let math = inline.math.expect("ecuación inline bajo el cursor");
+        assert!(!math.block, "los atributos son de bloque (§26.4)");
+        assert_eq!(math.latex, "E = mc^2");
+        assert!(math.id.is_none() && math.caption.is_none());
+        assert!(inline.citation.is_none());
+
+        // Cita bajo el cursor: los dos items con su localizador.
+        let cita = format::context(source, Selection::collapsed(Position::new(0, 22)));
+        let cita = cita.citation.expect("cita bajo el cursor");
+        assert_eq!(
+            cita.items,
+            vec![
+                minmark_document::CitationItem {
+                    key: "smith2025".to_owned(),
+                    locator: Some("p. 42".to_owned()),
+                },
+                minmark_document::CitationItem {
+                    key: "jones2024".to_owned(),
+                    locator: None,
+                },
+            ]
+        );
+
+        // Bloque con línea de atributos (§26.4).
+        let bloque = format::context(source, Selection::collapsed(Position::new(3, 2)));
+        let math = bloque.math.expect("ecuación de bloque bajo el cursor");
+        assert!(math.block);
+        assert_eq!(math.id.as_deref(), Some("eq:i"));
+        assert_eq!(math.caption.as_deref(), Some("Integral"));
+
+        // Fuera de ambos: sin controles #31.
+        let fuera = format::context("texto plano\n", Selection::collapsed(Position::new(0, 3)));
+        assert!(fuera.math.is_none() && fuera.citation.is_none());
     }
 }

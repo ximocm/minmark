@@ -24,6 +24,9 @@ minmark-pdf = { path = "../core/minmark-pdf" }
 minmark-renderer = { path = "../core/minmark-renderer" }
 minmark-config = { path = "../core/minmark-config" }
 minmark-fs = { path = "../core/minmark-fs" }
+# Diagnóstico en vivo del diálogo de ecuaciones (fase 7 #31, ADR-002): la UI
+# reutiliza `minmark_math::translate` en lugar de reimplementar el traductor.
+minmark-math = { path = "../core/minmark-math" }
 
 # Linux (ADR-001/ADR-005): el motor del Preview es WebKitGTK 6.0, biblioteca
 # del sistema que solo existe en Linux.

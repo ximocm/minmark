@@ -1240,4 +1240,237 @@ mod tests {
         assert_eq!(tabs.active().editor.document().content(), "");
         assert!(!tabs.undo_active(), "el no-op del caption no dejó transacción");
     }
+
+    /// Fase 7 #31: los cinco comandos de ecuaciones/citas llegan a
+    /// `apply_format_active` — destino único de todos los `win.*` — con UNA
+    /// transacción por acción (§8.5): `MathInsert` con selección (el texto
+    /// seleccionado es el LaTeX, §24) y desde cursor, `MathEdit` que solo
+    /// sustituye el contenido LaTeX, `MathAttrs` creando/reemplazando/
+    /// quitando la línea de atributos del bloque (§26.4),
+    /// `CitationInsert`/`CitationEdit` con items múltiples y localizador
+    /// (§25.2), no-op y fuera de constructo ⇒ `false` sin tocar nada.
+    #[test]
+    fn apply_format_active_ecuaciones_y_citas_31() {
+        use minmark_document::format::FormatAction;
+        use minmark_document::CitationItem;
+
+        let mut tabs = TabManager::new();
+
+        // ── Ecuaciones (§24) ────────────────────────────────────────────
+        // Base con texto FUERA de todo constructo (para «fuera ⇒ false»).
+        tabs.insert_active(Position::new(0, 0), "Intro\n");
+
+        // `win.insert-equation` SIN selección: el diálogo entrega el LaTeX.
+        tabs.set_selection_active(Selection::collapsed(Position::new(1, 0)));
+        assert!(tabs.apply_format_active(&FormatAction::MathInsert {
+            block: false,
+            latex: "E=mc^2".to_owned(),
+        }));
+        assert_eq!(
+            tabs.active().editor.document().content(),
+            "Intro\n$E=mc^2$"
+        );
+        assert_eq!(
+            tabs.active().editor.selection(),
+            Selection {
+                anchor: Position::new(1, 1),
+                head: Position::new(1, 7),
+            },
+            "§8.6: la selección posterior es el contenido LaTeX"
+        );
+
+        // `MathEdit` sustituye SOLO el contenido LaTeX (marcadores intactos)
+        // y la selección posterior es el contenido nuevo (§8.6).
+        tabs.set_selection_active(Selection::collapsed(Position::new(1, 3)));
+        assert!(tabs.apply_format_active(&FormatAction::MathEdit {
+            latex: "x".to_owned(),
+        }));
+        assert_eq!(tabs.active().editor.document().content(), "Intro\n$x$");
+        assert_eq!(
+            tabs.active().editor.selection(),
+            Selection {
+                anchor: Position::new(1, 1),
+                head: Position::new(1, 2),
+            },
+            "§8.6: el contenido editado queda seleccionado"
+        );
+
+        // No-op (mismo LaTeX), LaTeX vacío y cursor FUERA del constructo:
+        // `false`, sin cambios y sin transacción nueva (§8.4).
+        assert!(!tabs.apply_format_active(&FormatAction::MathEdit {
+            latex: "x".to_owned(),
+        }));
+        assert!(!tabs.apply_format_active(&FormatAction::MathEdit {
+            latex: String::new(),
+        }));
+        tabs.set_selection_active(Selection::collapsed(Position::new(0, 1)));
+        assert!(
+            !tabs.apply_format_active(&FormatAction::MathEdit {
+                latex: "y".to_owned(),
+            }),
+            "cursor en «Intro», fuera de la ecuación"
+        );
+        assert_eq!(tabs.active().editor.document().content(), "Intro\n$x$");
+
+        // `win.insert-equation` CON selección: el texto seleccionado es el
+        // LaTeX (§24) — el plan lo usa aunque la acción traiga otro — y la
+        // selección posterior es el contenido envuelto.
+        tabs.set_selection_active(Selection {
+            anchor: Position::new(0, 0),
+            head: Position::new(0, 5),
+        });
+        assert!(tabs.apply_format_active(&FormatAction::MathInsert {
+            block: false,
+            latex: "ignorado".to_owned(),
+        }));
+        assert_eq!(
+            tabs.active().editor.document().content(),
+            "$Intro$\n$x$",
+            "la selección «Intro» es el LaTeX; el resto de bytes intacto"
+        );
+        assert_eq!(
+            tabs.active().editor.selection(),
+            Selection {
+                anchor: Position::new(0, 1),
+                head: Position::new(0, 6),
+            }
+        );
+
+        // ── Atributos de bloque (§26.4) ────────────────────────────────
+        let mut tabs = TabManager::new();
+        let bloque = "Ver\n\n$$\nE=mc^2\n$$\n";
+        tabs.insert_active(Position::new(0, 0), bloque);
+        tabs.set_selection_active(Selection::collapsed(Position::new(3, 2)));
+        // Crear la línea de atributos sin tocar el bloque.
+        assert!(tabs.apply_format_active(&FormatAction::MathAttrs {
+            id: Some("eq:energy".to_owned()),
+            caption: Some("Equivalencia".to_owned()),
+        }));
+        let con_atributos = "Ver\n\n$$\nE=mc^2\n$$\n{#eq:energy \"Equivalencia\"}\n";
+        assert_eq!(tabs.active().editor.document().content(), con_atributos);
+        // Reemplazar SOLO la línea.
+        assert!(tabs.apply_format_active(&FormatAction::MathAttrs {
+            id: Some("eq:energy".to_owned()),
+            caption: Some("Nueva caption".to_owned()),
+        }));
+        assert_eq!(
+            tabs.active().editor.document().content(),
+            "Ver\n\n$$\nE=mc^2\n$$\n{#eq:energy \"Nueva caption\"}\n"
+        );
+        // Vaciar ambos campos ⇒ la línea desaparece; el bloque es byte a
+        // byte el original.
+        assert!(tabs.apply_format_active(&FormatAction::MathAttrs {
+            id: None,
+            caption: None,
+        }));
+        assert_eq!(tabs.active().editor.document().content(), bloque);
+        // Cada aplicación es UNA transacción (§8.5): tres edits ⇒ tres undos.
+        assert!(tabs.undo_active());
+        assert_eq!(
+            tabs.active().editor.document().content(),
+            "Ver\n\n$$\nE=mc^2\n$$\n{#eq:energy \"Nueva caption\"}\n"
+        );
+        assert!(tabs.undo_active());
+        assert_eq!(tabs.active().editor.document().content(), con_atributos);
+        assert!(tabs.undo_active());
+        assert_eq!(tabs.active().editor.document().content(), bloque);
+
+        // En ECUACIÓN INLINE los atributos no aplican (§26.4): `false`,
+        // sin cambios y sin transacción (§8.4).
+        let mut tabs = TabManager::new();
+        tabs.insert_active(Position::new(0, 0), "Ajá $x$\n");
+        tabs.set_selection_active(Selection::collapsed(Position::new(0, 5)));
+        assert!(!tabs.apply_format_active(&FormatAction::MathAttrs {
+            id: Some("eq:z".to_owned()),
+            caption: None,
+        }));
+        assert_eq!(tabs.active().editor.document().content(), "Ajá $x$\n");
+        // El ÚNICO undo es el insert inicial: el rechazo en inline no dejó
+        // transacción (§8.5).
+        assert!(tabs.undo_active());
+        assert_eq!(tabs.active().editor.document().content(), "");
+        assert!(!tabs.undo_active());
+
+        // ── Citas (§25.2) ───────────────────────────────────────────────
+        let mut tabs = TabManager::new();
+        let cita = "ver [@a] ya\n";
+        tabs.insert_active(Position::new(0, 0), cita);
+
+        // `CitationInsert` (cursor): items múltiples con localizador en
+        // forma canónica `[@k1, loc; @k2]`.
+        tabs.set_selection_active(Selection::collapsed(Position::new(0, 11)));
+        assert!(tabs.apply_format_active(&FormatAction::CitationInsert {
+            items: vec![
+                CitationItem {
+                    key: "smith2025".to_owned(),
+                    locator: Some("p. 42".to_owned()),
+                },
+                CitationItem {
+                    key: "jones2024".to_owned(),
+                    locator: None,
+                },
+            ],
+        }));
+        assert_eq!(
+            tabs.active().editor.document().content(),
+            "ver [@a] ya[@smith2025, p. 42; @jones2024]\n",
+            "forma canónica §25.2: [@k1, loc; @k2]"
+        );
+        assert!(tabs.undo_active(), "UNA transacción (§8.5)");
+        assert_eq!(tabs.active().editor.document().content(), cita);
+
+        // `CitationEdit` (cursor dentro de la cita) reemplaza la cita
+        // entera; no-op y fuera de la cita ⇒ `false` sin cambios.
+        tabs.set_selection_active(Selection::collapsed(Position::new(0, 5)));
+        assert!(tabs.apply_format_active(&FormatAction::CitationEdit {
+            items: vec![
+                CitationItem {
+                    key: "a".to_owned(),
+                    locator: Some("p. 7".to_owned()),
+                },
+                CitationItem {
+                    key: "b".to_owned(),
+                    locator: None,
+                },
+            ],
+        }));
+        assert_eq!(
+            tabs.active().editor.document().content(),
+            "ver [@a, p. 7; @b] ya\n"
+        );
+        assert!(!tabs.apply_format_active(&FormatAction::CitationEdit {
+            items: vec![
+                CitationItem {
+                    key: "a".to_owned(),
+                    locator: Some("p. 7".to_owned()),
+                },
+                CitationItem {
+                    key: "b".to_owned(),
+                    locator: None,
+                },
+            ],
+        }), "mismos items: no-op §8.4");
+        tabs.set_selection_active(Selection::collapsed(Position::new(0, 1)));
+        assert!(!tabs.apply_format_active(&FormatAction::CitationEdit {
+            items: vec![CitationItem {
+                key: "c".to_owned(),
+                locator: None,
+            }],
+        }), "fuera de la cita: cero cambios");
+        assert_eq!(
+            tabs.active().editor.document().content(),
+            "ver [@a, p. 7; @b] ya\n"
+        );
+        // Items vacíos: nunca aplican (§25.2).
+        assert!(!tabs.apply_format_active(&FormatAction::CitationInsert {
+            items: Vec::new(),
+        }));
+        // Cada edición es UNA transacción (§8.5): undo restaura la cita
+        // anterior; los no-op no dejaron ninguna.
+        assert!(tabs.undo_active());
+        assert_eq!(tabs.active().editor.document().content(), cita);
+        assert!(tabs.undo_active(), "el insert inicial de la fuente");
+        assert_eq!(tabs.active().editor.document().content(), "");
+        assert!(!tabs.undo_active(), "los no-op no dejaron transacción");
+    }
 }

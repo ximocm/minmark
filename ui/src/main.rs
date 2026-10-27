@@ -2,13 +2,14 @@
 //!
 //! Integra el core (`core/`) con la UI decidida en ADR-001:
 //! - menús §36 (File, Edit, View, Insert, Format, Project, Help) y menú
-//!   Insert/Format de los controles contextuales (fase 7, #29/#30: Image y
-//!   Table con #30);
+//!   Insert/Format de los controles contextuales (fase 7, #29/#30/#31:
+//!   Image y Table con #30, Equation y Citation con #31);
 //! - atajos §39 (Ctrl+N/O/S, Ctrl+Shift+S, Ctrl+W, Ctrl+Alt+M, más los de
 //!   la fase 7: Ctrl+Shift+B/C/X, Ctrl+I/K, Ctrl+1..6, Ctrl+Shift+P);
 //! - Command Palette §38 (`Ctrl+Shift+P`) y popover de controles
-//!   contextuales §44 (#29/#30, con «Edit Image» y «Table Attributes»):
-//!   mismas acciones `win.*` que menú y atajos, con destino único
+//!   contextuales §44 (#29/#30/#31, con «Edit Image», «Table Attributes»,
+//!   «Edit Equation», «Equation Attributes» y «Edit Citation»): mismas
+//!   acciones `win.*` que menú y atajos, con destino único
 //!   `TabManager::apply_format_active`;
 //! - composiciones (§20, ISSUE-022/023): Preview combinado y PDF único desde
 //!   el menú Project/File, con la cadena de ajustes §58 y la bibliografía
@@ -2289,6 +2290,196 @@ impl Commands for AppCmds {
         );
     }
 
+    // Flujos de ecuaciones y citas (fase 7 #31): menú Insert, paleta §38 y
+    // popover §44 activan estas MISMAS acciones `win.*` con destino único
+    // `TabManager::apply_format_active`; Cancelar/Escape en cualquier
+    // diálogo ⇒ cero cambios.
+
+    fn insert_equation(&self) {
+        // §24/#31: con selección no vacía el texto seleccionado es el LaTeX
+        // (semántica de `MathInsert`): se envuelve SIN diálogo — monolínea →
+        // `$…$` y multilínea → `$$…$$` (la forma canónica sigue al
+        // contenido). Sin selección se pide el LaTeX en el diálogo
+        // multilinea con diagnóstico ADR-002 y SIN atributos: los edita
+        // `win.equation-attrs` (§UI #31).
+        let seleccion = {
+            let tabs = self.tabs.borrow();
+            tabs.active().editor.selection()
+        };
+        if !seleccion.is_empty() {
+            let latex = {
+                let tabs = self.tabs.borrow();
+                let tab = tabs.active();
+                let (Ok(anchor), Ok(head)) = (
+                    tab.editor.offset_of(seleccion.anchor),
+                    tab.editor.offset_of(seleccion.head),
+                ) else {
+                    return;
+                };
+                let (start, end) = (anchor.min(head), anchor.max(head));
+                tab.editor
+                    .document()
+                    .content()
+                    .get(start..end)
+                    .map(str::to_owned)
+            };
+            let Some(latex) = latex else { return };
+            if latex.trim().is_empty() {
+                return;
+            }
+            let block = latex.contains('\n');
+            self.apply_format(&minmark_document::format::FormatAction::MathInsert {
+                block,
+                latex,
+            });
+            return;
+        }
+        let slot = Rc::clone(&self.slot);
+        dialogs::equation_dialog(
+            &self.window,
+            actions::Command::InsertEquation.label(),
+            "",
+            Rc::new(move |latex| {
+                let Some(action) = equation_insert_action(latex) else {
+                    return;
+                };
+                let Some(me) = slot.borrow().as_ref().and_then(Weak::upgrade) else {
+                    return;
+                };
+                me.apply_format(&action);
+            }),
+        );
+    }
+
+    fn edit_equation(&self) {
+        // Precarga el LaTeX de `format::context` (§UI #31); sin ecuación
+        // bajo la selección no hay diálogo (cero cambios). ADR-002: el
+        // marcador de «math no soportado» en el diálogo es un aviso NO
+        // bloqueante — aceptar sigue siendo válido y el contenido se
+        // conserva visible y editable (§24).
+        let latex = {
+            let tabs = self.tabs.borrow();
+            let tab = tabs.active();
+            minmark_document::format::context(
+                tab.editor.document().content(),
+                tab.editor.selection(),
+            )
+            .math
+            .map(|math| math.latex)
+        };
+        let Some(latex) = latex else { return };
+        let slot = Rc::clone(&self.slot);
+        dialogs::equation_dialog(
+            &self.window,
+            actions::Command::EditEquation.label(),
+            &latex,
+            Rc::new(move |latex| {
+                let Some(action) = equation_edit_action(latex) else {
+                    return;
+                };
+                let Some(me) = slot.borrow().as_ref().and_then(Weak::upgrade) else {
+                    return;
+                };
+                me.apply_format(&action);
+            }),
+        );
+    }
+
+    fn equation_attrs(&self) {
+        // Atributos SOLO de ecuación de BLOQUE (§26.4/#31): en inline — o
+        // fuera de ecuación — no hay diálogo ⇒ cero cambios. Precarga
+        // ID/Caption como en Table Attributes (#30, mismo formulario y
+        // validador §7.4.3).
+        let attrs = {
+            let tabs = self.tabs.borrow();
+            let tab = tabs.active();
+            minmark_document::format::context(
+                tab.editor.document().content(),
+                tab.editor.selection(),
+            )
+            .math
+            .filter(|math| math.block)
+            .map(|math| (math.id, math.caption))
+        };
+        let Some((id, caption)) = attrs else { return };
+        let slot = Rc::clone(&self.slot);
+        dialogs::form_dialog(
+            &self.window,
+            actions::Command::EquationAttrs.label(),
+            &[
+                dialogs::FormField::new("ID", id.unwrap_or_default()),
+                dialogs::FormField::new("Caption", caption.unwrap_or_default()),
+            ],
+            Some(validate_table_attrs_form),
+            Rc::new(move |values| {
+                let Some(action) = math_attrs_action(values) else {
+                    return;
+                };
+                let Some(me) = slot.borrow().as_ref().and_then(Weak::upgrade) else {
+                    return;
+                };
+                me.apply_format(&action);
+            }),
+        );
+    }
+
+    fn insert_citation(&self) {
+        // Diálogo de items (§25.2) con autocompletado §25.3 sobre la MISMA
+        // bibliografía que la inteligencia de la fase 5 (`academic::load`);
+        // arranca con una fila vacía. Aceptar ⇒ CitationInsert; Cancelar ⇒
+        // cero cambios.
+        let bibliography = Rc::new(academic::load(&self.settings.borrow()));
+        let slot = Rc::clone(&self.slot);
+        dialogs::citation_dialog(
+            &self.window,
+            actions::Command::InsertCitation.label(),
+            &[],
+            bibliography,
+            Rc::new(move |items| {
+                let Some(action) = citation_insert_action(items) else {
+                    return;
+                };
+                let Some(me) = slot.borrow().as_ref().and_then(Weak::upgrade) else {
+                    return;
+                };
+                me.apply_format(&action);
+            }),
+        );
+    }
+
+    fn edit_citation(&self) {
+        // Precarga los items de `format::context` (§UI #31) en el MISMO
+        // diálogo; sin cita bajo la selección no hay diálogo (cero cambios).
+        let items = {
+            let tabs = self.tabs.borrow();
+            let tab = tabs.active();
+            minmark_document::format::context(
+                tab.editor.document().content(),
+                tab.editor.selection(),
+            )
+            .citation
+            .map(|cita| cita.items)
+        };
+        let Some(items) = items else { return };
+        let bibliography = Rc::new(academic::load(&self.settings.borrow()));
+        let slot = Rc::clone(&self.slot);
+        dialogs::citation_dialog(
+            &self.window,
+            actions::Command::EditCitation.label(),
+            &items,
+            bibliography,
+            Rc::new(move |items| {
+                let Some(action) = citation_edit_action(items) else {
+                    return;
+                };
+                let Some(me) = slot.borrow().as_ref().and_then(Weak::upgrade) else {
+                    return;
+                };
+                me.apply_format(&action);
+            }),
+        );
+    }
+
     fn command_palette(&self) {
         // §38/§39: `Ctrl+Shift+P` presenta la paleta modal; aceptar activa
         // la MISMA acción `win.*` del comando elegido.
@@ -2585,15 +2776,15 @@ fn image_edit_action(form: Option<Vec<String>>) -> Option<minmark_document::form
     })
 }
 
-/// #30: valores aceptados del formulario de atributos (ID, Caption) →
-/// `TableAttrs`; `None` = cancelación o id inválido: cero cambios. Un campo
-/// vacío llega como `None` y quita ese atributo (§26.3). El caption se
-/// entrega VERBATIM —los espacios del valor precargado son bytes del
-/// documento, así que un valor intacto sigue siendo no-op byte a byte
-/// (hallazgo 7)—; solo un valor vacío o de solo espacios lo quita.
-fn table_attrs_action(
+/// #30/#31: campos (ID, Caption) del formulario de atributos →
+/// `Some((id, caption))` con la gramática §7.4.3; `None` = cancelación o id
+/// inválido. Un campo vacío llega como `None` y quita ese atributo (§26.3/
+/// §26.4). El caption se entrega VERBATIM —los espacios del valor precargado
+/// son bytes del documento, así que un valor intacto sigue siendo no-op byte
+/// a byte (hallazgo 7)—; solo un valor vacío o de solo espacios lo quita.
+fn parse_attrs_form(
     form: Option<Vec<String>>,
-) -> Option<minmark_document::format::FormatAction> {
+) -> Option<(Option<String>, Option<String>)> {
     let values = form?;
     let [id, caption] = values.as_slice() else {
         return None;
@@ -2603,7 +2794,85 @@ fn table_attrs_action(
         return None;
     }
     let caption = (!caption.trim().is_empty()).then(|| caption.clone());
+    Some((id, caption))
+}
+
+/// #30: valores aceptados del formulario de atributos (ID, Caption) →
+/// `TableAttrs`; `None` = cancelación o id inválido: cero cambios.
+fn table_attrs_action(
+    form: Option<Vec<String>>,
+) -> Option<minmark_document::format::FormatAction> {
+    let (id, caption) = parse_attrs_form(form)?;
     Some(minmark_document::format::FormatAction::TableAttrs { id, caption })
+}
+
+/// #31: mismos campos que Table Attributes (§26.4, mismo formulario) →
+/// `MathAttrs`; `None` = cancelación o id inválido: cero cambios. En inline
+/// el plan núcleo lo rechaza (los atributos son de bloque).
+fn math_attrs_action(
+    form: Option<Vec<String>>,
+) -> Option<minmark_document::format::FormatAction> {
+    let (id, caption) = parse_attrs_form(form)?;
+    Some(minmark_document::format::FormatAction::MathAttrs { id, caption })
+}
+
+/// #31 §24: LaTeX aceptado del diálogo de edición → `MathEdit` VERBATIM;
+/// `None` = cancelación (cero cambios) o LaTeX vacío (el diálogo lo
+/// retiene y el plan núcleo también lo rechaza: doble red de seguridad).
+fn equation_edit_action(
+    latex: Option<String>,
+) -> Option<minmark_document::format::FormatAction> {
+    let latex = latex?;
+    if latex.trim().is_empty() {
+        return None;
+    }
+    Some(minmark_document::format::FormatAction::MathEdit { latex })
+}
+
+/// #31 §24: LaTeX aceptado del diálogo de inserción → `MathInsert` con la
+/// forma canónica derivada del contenido — multilínea ⇒ bloque `$$…$$`,
+/// monolínea ⇒ inline `$…$` (el inline nunca lleva salto de línea); `None`
+/// = cancelación o LaTeX vacío: cero cambios.
+fn equation_insert_action(
+    latex: Option<String>,
+) -> Option<minmark_document::format::FormatAction> {
+    let latex = latex?;
+    if latex.trim().is_empty() {
+        return None;
+    }
+    let block = latex.contains('\n');
+    Some(minmark_document::format::FormatAction::MathInsert { block, latex })
+}
+
+/// §25.2: los items aceptados pasan la gramática consumidora que valida el
+/// diálogo ([`dialogs::validate_citation_items`], espejo de
+/// `try_citation`/del núcleo); `None` de las builders ⇒ cero cambios.
+fn citation_items_validos(items: &[minmark_document::CitationItem]) -> bool {
+    dialogs::validate_citation_items(items).is_none()
+}
+
+/// #31 §25.2: items aceptados del diálogo → `CitationInsert`;
+/// `None` = cancelación (cero cambios) o items inválidos.
+fn citation_insert_action(
+    items: Option<Vec<minmark_document::CitationItem>>,
+) -> Option<minmark_document::format::FormatAction> {
+    let items = items?;
+    if !citation_items_validos(&items) {
+        return None;
+    }
+    Some(minmark_document::format::FormatAction::CitationInsert { items })
+}
+
+/// #31 §25.2: items aceptados del diálogo → `CitationEdit`;
+/// `None` = cancelación (cero cambios) o items inválidos.
+fn citation_edit_action(
+    items: Option<Vec<minmark_document::CitationItem>>,
+) -> Option<minmark_document::format::FormatAction> {
+    let items = items?;
+    if !citation_items_validos(&items) {
+        return None;
+    }
+    Some(minmark_document::format::FormatAction::CitationEdit { items })
 }
 
 /// #30: valores aceptados del diálogo de dimensiones (Filas, Columnas) →
@@ -3519,6 +3788,176 @@ mod tests {
             }
         );
         assert!(table_attrs_action(form("mal id", "c")).is_none());
+    }
+
+    /// #31 §UI: cancelar (o cerrar) cualquier diálogo de ecuaciones o citas
+    /// no produce ninguna acción ⇒ cero cambios; tampoco el LaTeX vacío ni
+    /// los items inválidos que el diálogo retiene con error visible.
+    #[test]
+    fn formularios_31_cancelar_no_producen_accion() {
+        use minmark_document::CitationItem;
+        assert!(equation_edit_action(None).is_none());
+        assert!(equation_insert_action(None).is_none());
+        assert!(math_attrs_action(None).is_none());
+        assert!(citation_insert_action(None).is_none());
+        assert!(citation_edit_action(None).is_none());
+        // LaTeX vacío o de solo espacios: sin acción (§24; el diálogo lo
+        // retiene, el plan núcleo también lo rechaza).
+        assert!(equation_edit_action(Some("   \n".to_owned())).is_none());
+        assert!(equation_insert_action(Some(String::new())).is_none());
+        // Items sin ítems o con clave vacía: sin acción (§25.2).
+        assert!(citation_insert_action(Some(Vec::new())).is_none());
+        assert!(
+            citation_edit_action(Some(vec![CitationItem {
+                key: " ".to_owned(),
+                locator: None,
+            }]))
+            .is_none()
+        );
+    }
+
+    /// #31 §24: `MathEdit` entrega el LaTeX VERBATIM (un valor intacto sigue
+    /// siendo no-op byte a byte) y `MathInsert` deriva la forma canónica del
+    /// contenido — monolínea ⇒ `$…$`, multilínea ⇒ `$$…$$`.
+    #[test]
+    fn ecuacion_actions_derivan_la_forma_canonica_31() {
+        use minmark_document::format::FormatAction;
+        assert_eq!(
+            equation_edit_action(Some("E = mc^2 + 1".to_owned())).unwrap(),
+            FormatAction::MathEdit {
+                latex: "E = mc^2 + 1".to_owned()
+            }
+        );
+        assert_eq!(
+            equation_edit_action(Some("E = mc^2".to_owned())).unwrap(),
+            FormatAction::MathEdit {
+                latex: "E = mc^2".to_owned()
+            }
+        );
+        assert_eq!(
+            equation_insert_action(Some("E = mc^2".to_owned())).unwrap(),
+            FormatAction::MathInsert {
+                block: false,
+                latex: "E = mc^2".to_owned()
+            }
+        );
+        assert_eq!(
+            equation_insert_action(Some("\\int_0^1 x\\,dx\n+ c".to_owned())).unwrap(),
+            FormatAction::MathInsert {
+                block: true,
+                latex: "\\int_0^1 x\\,dx\n+ c".to_owned()
+            }
+        );
+    }
+
+    /// #31 §26.4: `MathAttrs` reutiliza los campos de Table Attributes (el
+    /// MISMO formulario, §7.4.3 y caption verbatim); id inválido ⇒ sin
+    /// acción.
+    #[test]
+    fn math_attrs_action_parsea_campos_31() {
+        use minmark_document::format::FormatAction;
+        let form = |id: &str, caption: &str| Some(vec![id.to_owned(), caption.to_owned()]);
+        assert_eq!(
+            math_attrs_action(form("eq:energy", " Equivalencia ")).unwrap(),
+            FormatAction::MathAttrs {
+                id: Some("eq:energy".to_owned()),
+                caption: Some(" Equivalencia ".to_owned()),
+            }
+        );
+        assert_eq!(
+            math_attrs_action(form("", "")).unwrap(),
+            FormatAction::MathAttrs {
+                id: None,
+                caption: None,
+            }
+        );
+        assert!(math_attrs_action(form("mal id", "c")).is_none());
+    }
+
+    /// #31 §25.2: los items del diálogo (clave + localizador) llegan como
+    /// `CitationInsert`/`CitationEdit`; el localizador vacío es `None` (el
+    /// diálogo lo recorta al recogerlo) y la clave vacía no genera acción.
+    #[test]
+    fn cita_actions_parsean_items_31() {
+        use minmark_document::format::FormatAction;
+        use minmark_document::CitationItem;
+        let items = || {
+            vec![
+                CitationItem {
+                    key: "smith2025".to_owned(),
+                    locator: Some("p. 42".to_owned()),
+                },
+                CitationItem {
+                    key: "jones2024".to_owned(),
+                    locator: None,
+                },
+            ]
+        };
+        assert_eq!(
+            citation_insert_action(Some(items())).unwrap(),
+            FormatAction::CitationInsert { items: items() }
+        );
+        assert_eq!(
+            citation_edit_action(Some(items())).unwrap(),
+            FormatAction::CitationEdit { items: items() }
+        );
+        assert!(
+            citation_insert_action(Some(vec![CitationItem {
+                key: String::new(),
+                locator: None,
+            }]))
+            .is_none(),
+            "clave vacía ⇒ sin acción (§25.2)"
+        );
+
+        // Revisión #31 (finding 3): gramática consumidora — espejo de
+        // `try_citation`/del núcleo. Clave ingrávida o localizador con
+        // separador/cierre ⇒ el diálogo RETIENE (mensaje visible) y las
+        // builders NO producen acción: la cita válida del documento nunca
+        // se reemplaza por texto que el renderer no pueda parsear.
+        let clave_mala = || {
+            vec![CitationItem {
+                key: "smith 2025".to_owned(),
+                locator: None,
+            }]
+        };
+        let localizador_malo = |locator: &str| {
+            vec![CitationItem {
+                key: "smith2025".to_owned(),
+                locator: Some(locator.to_owned()),
+            }]
+        };
+        assert!(
+            citation_insert_action(Some(clave_mala())).is_none(),
+            "espacio en la clave no es sintaxis (§25.2)"
+        );
+        assert!(
+            citation_edit_action(Some(clave_mala())).is_none(),
+            "espacio en la clave no es sintaxis (§25.2)"
+        );
+        for locator in ["p. 1; fig. 2", "p. 42]", "dos\nlíneas"] {
+            assert!(
+                citation_edit_action(Some(localizador_malo(locator))).is_none(),
+                "localizador {locator:?} no admisible (§25.2)"
+            );
+        }
+        // El validador del diálogo (retención con error, patrón
+        // FormValidator) apunta exactamente a esos casos y deja pasar la
+        // forma válida `smith2025` + `p. 42`.
+        let mensaje = dialogs::validate_citation_items(&clave_mala())
+            .expect("clave con espacio: RETIENE el diálogo");
+        assert!(mensaje.contains("no válida"), "{mensaje}");
+        let mensaje = dialogs::validate_citation_items(&localizador_malo("p. 1; fig. 2"))
+            .expect("localizador con «;»: RETIENE el diálogo");
+        assert!(mensaje.contains("no válido"), "{mensaje}");
+        assert!(
+            dialogs::validate_citation_items(&items()).is_none(),
+            "smith2025 + p. 42 + jones2024: válida"
+        );
+        assert!(
+            citation_insert_action(Some(items())).is_some(),
+            "la forma válida sigue produciendo acción"
+        );
     }
 
     /// #30 §18.2/§18.3/§17: el plan de importación elige el destino libre
@@ -5653,10 +6092,110 @@ mod gtk_integration_tests {
         }
     }
 
+    /// TextViews de `widget` en orden de aparición (campo multilinea #31).
+    fn collect_text_views(widget: &Widget, out: &mut Vec<gtk4::TextView>) {
+        if let Some(view) = widget.downcast_ref::<gtk4::TextView>() {
+            out.push(view.clone());
+        }
+        let mut child = widget.first_child();
+        while let Some(widget) = child {
+            collect_text_views(&widget, out);
+            child = widget.next_sibling();
+        }
+    }
+
+    /// Texto completo de un TextView (campo LaTeX del diálogo #31).
+    fn text_view_text(view: &gtk4::TextView) -> String {
+        let buffer = view.buffer();
+        buffer
+            .text(&buffer.start_iter(), &buffer.end_iter(), true)
+            .to_string()
+    }
+
+    /// Etiqueta cuyo texto contiene `needle` (avisos ADR-002 y errores #31).
+    fn find_label_containing(widget: &Widget, needle: &str) -> Option<gtk4::Label> {
+        if let Some(label) = widget.downcast_ref::<gtk4::Label>() {
+            if label.text().contains(needle) {
+                return Some(label.clone());
+            }
+        }
+        let mut child = widget.first_child();
+        while let Some(widget) = child {
+            if let Some(label) = find_label_containing(&widget, needle) {
+                return Some(label);
+            }
+            child = widget.next_sibling();
+        }
+        None
+    }
+
+    /// Pulsación sintética sobre los controllers de `widget` (patrón del
+    /// Escape de #30); devuelve `true` si algún controller la consumió.
+    fn emit_key(
+        widget: &Widget,
+        key: gtk4::gdk::Key,
+        modifiers: gtk4::gdk::ModifierType,
+    ) -> bool {
+        let controllers = widget.observe_controllers();
+        for i in 0..controllers.n_items() {
+            if let Some(controller) = controllers
+                .item(i)
+                .and_then(|c| c.downcast::<gtk4::EventControllerKey>().ok())
+            {
+                if controller.emit_by_name::<bool>("key-pressed", &[&key, &0u32, &modifiers]) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Popover de completado (#31) visible bajo `widget`: GTK mantiene el
+    /// popover en la lista de hijos de su entrada.
+    fn visible_popover_in(widget: &Widget) -> Option<gtk4::Popover> {
+        if let Some(popover) = widget.downcast_ref::<gtk4::Popover>() {
+            if popover.is_visible() {
+                return Some(popover.clone());
+            }
+        }
+        let mut child = widget.first_child();
+        while let Some(widget) = child {
+            if let Some(found) = visible_popover_in(&widget) {
+                return Some(found);
+            }
+            child = widget.next_sibling();
+        }
+        None
+    }
+
+    /// Etiquetas (sugerencias §25.3) dentro del popover de completado.
+    fn popover_labels(popover: &gtk4::Popover) -> Vec<String> {
+        fn walk(widget: &Widget, out: &mut Vec<String>) {
+            if let Some(label) = widget.downcast_ref::<gtk4::Label>() {
+                out.push(label.text().to_string());
+            }
+            let mut child = widget.first_child();
+            while let Some(widget) = child {
+                walk(&widget, out);
+                child = widget.next_sibling();
+            }
+        }
+        let mut labels = Vec::new();
+        walk(popover.upcast_ref::<gtk4::Widget>(), &mut labels);
+        labels
+    }
+
     fn dialog_entries(dialog: &Widget) -> Vec<gtk4::Entry> {
         let mut entries = Vec::new();
         collect_entries(dialog, &mut entries);
         entries
+    }
+
+    /// TextViews del diálogo (#31: el campo LaTeX multilinea).
+    fn dialog_text_views(dialog: &Widget) -> Vec<gtk4::TextView> {
+        let mut views = Vec::new();
+        collect_text_views(dialog, &mut views);
+        views
     }
 
     /// Botón por etiqueta dentro del árbol (patrón de los tests #29).
@@ -6299,6 +6838,794 @@ mod gtk_integration_tests {
         assert_eq!(
             cmds.tabs.borrow().active().editor.document().content(),
             imagen
+        );
+
+        cmds.window.destroy();
+    }
+
+    // ── Fase 7 #31: ecuaciones LaTeX (§24, §26.4) y citas (§25.2) ────────
+
+    /// #31 §UI: dentro de una ecuación INLINE el popover muestra «Edit
+    /// Equation» (operable con teclado) y NO «Equation Attributes» (§26.4);
+    /// el diálogo multilinea prellena el LaTeX del contexto y aplicar cambia
+    /// SOLO el contenido (marcadores y bloque intactos) en UNA transacción.
+    /// Escape (vía menú/paleta, MISMA acción `win.*`) ⇒ cero cambios byte a
+    /// byte, selección intacta y sin transacción nueva.
+    #[test]
+    #[ignore = "requiere sesión gráfica GTK/WebKit"]
+    fn gtk_edit_equation_valido_y_cancelar_31() {
+        gtk4::init().expect("GTK display");
+        ensure_sandbox_usable();
+        let app = Application::builder()
+            .application_id("app.minmark.test.fase731-edit-equation")
+            .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk4::gio::Cancellable>).unwrap();
+        let cmds = build_window(&app, WindowScope::Standalone, &[]);
+        let fuente = "La energía es $E = mc^2$ hoy.\n\n$$\nE=mc^2\n$$\n";
+        cmds.tabs
+            .borrow_mut()
+            .insert_active(Position::new(0, 0), fuente);
+        cmds.reload_active();
+
+        // Cursor dentro de la ecuación INLINE con selección vacía.
+        cmds.editor_pane
+            .focus_find_match(Range::new(Position::new(0, 16), Position::new(0, 16)));
+        pump_until(|| cmds.editor_pane.test_context_visible());
+        let boton = cmds
+            .editor_pane
+            .test_context_button("Edit Equation")
+            .expect("botón «Edit Equation» (§UI #31)");
+        assert!(boton.is_visible(), "la fila de ecuación está visible");
+        assert!(boton.can_focus(), "operable con teclado (§29 ⇒ #31)");
+        assert!(
+            !cmds
+                .editor_pane
+                .test_context_button("Equation Attributes")
+                .expect("botón «Equation Attributes»")
+                .is_visible(),
+            "los atributos son solo de bloque (§26.4)"
+        );
+        assert!(
+            !cmds
+                .editor_pane
+                .test_context_button("Bold")
+                .expect("botón Bold")
+                .is_visible(),
+            "cursor sin selección: el panel de texto sigue oculto (#29 intacto)"
+        );
+
+        // Con SELECCIÓN dentro de la ecuación conviven el panel de texto
+        // (#29) y la fila de ecuación (#31): el criterio es «cursor o
+        // selección dentro del constructo».
+        cmds.editor_pane
+            .focus_find_match(Range::new(Position::new(0, 15), Position::new(0, 22)));
+        pump_until(|| cmds.editor_pane.test_context_visible());
+        assert!(
+            cmds.editor_pane
+                .test_context_button("Edit Equation")
+                .expect("botón «Edit Equation»")
+                .is_visible(),
+            "selección dentro de la ecuación: la fila #31 acompaña al panel"
+        );
+        assert!(
+            cmds.editor_pane
+                .test_context_button("Bold")
+                .expect("botón Bold")
+                .is_visible(),
+            "selección no vacía ⇒ panel de texto (#29 intacto)"
+        );
+
+        // El botón del popover abre el MISMO diálogo prellenado.
+        assert!(cmds.editor_pane.test_context_click("Edit Equation"));
+        pump_until(|| dialog_titled("Edit Equation").is_some());
+        let dialog = dialog_titled("Edit Equation").expect("diálogo de ecuación");
+        let views = dialog_text_views(&dialog);
+        assert_eq!(views.len(), 1, "campo LaTeX multilinea (§UI #31)");
+        assert_eq!(text_view_text(&views[0]), "E = mc^2", "precarga del contexto");
+        assert!(
+            find_label_containing(&dialog, "math no soportado").is_none(),
+            "ADR-002: sin aviso con LaTeX soportado"
+        );
+
+        // Aplicar: SOLO el contenido LaTeX cambia (marcadores y bloque intactos).
+        views[0].buffer().set_text("x^2 + y^2");
+        find_button_in(&dialog, "Aceptar")
+            .expect("botón Aceptar")
+            .emit_clicked();
+        pump_until(|| dialog_titled("Edit Equation").is_none());
+        let esperado = "La energía es $x^2 + y^2$ hoy.\n\n$$\nE=mc^2\n$$\n";
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content(),
+            esperado,
+            "solo cambia el LaTeX (§24)"
+        );
+
+        // UNA transacción (§8.5): undo restaura la fuente y luego el insert.
+        assert!(cmds.tabs.borrow_mut().undo_active());
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content(),
+            fuente
+        );
+        assert!(cmds.tabs.borrow_mut().undo_active(), "el insert inicial");
+        assert_eq!(cmds.tabs.borrow().active().editor.document().content(), "");
+
+        // Escape ⇒ cero cambios byte a byte, selección intacta y sin
+        // transacción nueva — entrando por la MISMA acción `win.*` (menú,
+        // paleta §38 y popover comparten este camino).
+        cmds.tabs
+            .borrow_mut()
+            .insert_active(Position::new(0, 0), fuente);
+        cmds.reload_active();
+        cmds.editor_pane
+            .focus_find_match(Range::new(Position::new(0, 16), Position::new(0, 16)));
+        let seleccion = Selection::collapsed(Position::new(0, 16));
+        gtk4::prelude::WidgetExt::activate_action(&cmds.window, "win.edit-equation", None)
+            .expect("win.edit-equation registrada (§36)");
+        pump_until(|| dialog_titled("Edit Equation").is_some());
+        let dialog = dialog_titled("Edit Equation").expect("diálogo reabierto");
+        let views = dialog_text_views(&dialog);
+        views[0].buffer().set_text("TEXTO QUE NO SE GUARDA");
+        emit_escape_key(&dialog);
+        pump_until(|| dialog_titled("Edit Equation").is_none());
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content().as_bytes(),
+            fuente.as_bytes(),
+            "Escape deja el buffer byte a byte idéntico"
+        );
+        assert_eq!(cmds.tabs.borrow().active().editor.selection(), seleccion);
+        assert!(
+            cmds.tabs.borrow_mut().undo_active(),
+            "el insert inicial de la fuente"
+        );
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content(),
+            "",
+            "el único undo es el insert inicial"
+        );
+        assert!(
+            !cmds.tabs.borrow_mut().undo_active(),
+            "Escape no añadió transacción"
+        );
+
+        cmds.window.destroy();
+    }
+
+    /// #31 ADR-002/§24: con LaTeX FUERA del subconjunto el diálogo muestra
+    /// el marcador «⚠ [math no soportado: …]» como aviso NO bloqueante — el
+    /// contenido sigue editable y aceptar aplica la edición —; Cancelar y
+    /// Escape dejan el documento byte a byte intacto sin transacción nueva.
+    #[test]
+    #[ignore = "requiere sesión gráfica GTK/WebKit"]
+    fn gtk_edit_equation_no_soportado_avisa_sin_bloquear_31() {
+        gtk4::init().expect("GTK display");
+        ensure_sandbox_usable();
+        let app = Application::builder()
+            .application_id("app.minmark.test.fase731-eq-unsupported")
+            .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk4::gio::Cancellable>).unwrap();
+        let cmds = build_window(&app, WindowScope::Standalone, &[]);
+        let fuente = "sea $\\foo{x}$ hoy\n";
+        cmds.tabs
+            .borrow_mut()
+            .insert_active(Position::new(0, 0), fuente);
+        cmds.reload_active();
+
+        // Cursor dentro de la ecuación no soportada: diálogo con el marcador
+        // ADR-002 visible (el aviso NO bloquea el diálogo).
+        cmds.editor_pane
+            .focus_find_match(Range::new(Position::new(0, 7), Position::new(0, 7)));
+        pump_until(|| cmds.editor_pane.test_context_visible());
+        assert!(cmds.editor_pane.test_context_click("Edit Equation"));
+        pump_until(|| dialog_titled("Edit Equation").is_some());
+        let dialog = dialog_titled("Edit Equation").expect("diálogo de ecuación");
+        let views = dialog_text_views(&dialog);
+        assert_eq!(text_view_text(&views[0]), "\\foo{x}", "precarga del contexto");
+        let aviso = find_label_containing(&dialog, "⚠ [math no soportado:")
+            .expect("marcador ADR-002 visible (§24/ADR-002)");
+        assert!(aviso.is_visible());
+        assert_eq!(aviso.text(), "⚠ [math no soportado: \\foo]");
+
+        // El contenido sigue EDITABLE: el aviso sigue al LaTeX en vivo.
+        views[0].buffer().set_text("x + 1");
+        assert!(
+            find_label_containing(&dialog, "⚠ [math no soportado:").is_none(),
+            "con LaTeX soportado el aviso desaparece"
+        );
+        views[0].buffer().set_text("\\foo{x} + 1");
+        assert!(
+            find_label_containing(&dialog, "⚠ [math no soportado:").is_some(),
+            "el aviso vuelve con el comando no soportado"
+        );
+
+        // Aceptar NO está bloqueado: la edición aplica y el contenido queda
+        // visible y editable también en el documento (§24).
+        find_button_in(&dialog, "Aceptar")
+            .expect("botón Aceptar")
+            .emit_clicked();
+        pump_until(|| dialog_titled("Edit Equation").is_none());
+        let editado = "sea $\\foo{x} + 1$ hoy\n";
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content(),
+            editado,
+            "aceptar con el aviso aplica el LaTeX editado"
+        );
+
+        // Escape ⇒ cero cambios byte a byte y SIN transacción nueva.
+        gtk4::prelude::WidgetExt::activate_action(&cmds.window, "win.edit-equation", None)
+            .expect("win.edit-equation registrada (§36)");
+        pump_until(|| dialog_titled("Edit Equation").is_some());
+        let dialog = dialog_titled("Edit Equation").expect("diálogo reabierto");
+        let views = dialog_text_views(&dialog);
+        views[0].buffer().set_text("otro \\foo");
+        emit_escape_key(&dialog);
+        pump_until(|| dialog_titled("Edit Equation").is_none());
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content().as_bytes(),
+            editado.as_bytes(),
+            "Escape deja el buffer byte a byte idéntico"
+        );
+
+        // Transacciones: el insert inicial y la edición aceptada — ni una más.
+        assert!(cmds.tabs.borrow_mut().undo_active());
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content(),
+            fuente
+        );
+        assert!(cmds.tabs.borrow_mut().undo_active(), "el insert inicial");
+        assert_eq!(cmds.tabs.borrow().active().editor.document().content(), "");
+        assert!(
+            !cmds.tabs.borrow_mut().undo_active(),
+            "Escape no añadió transacción"
+        );
+
+        cmds.window.destroy();
+    }
+
+    /// #31 §26.4: «Equation Attributes» aparece en el popover SOLO con
+    /// ecuación de bloque y su botón abre el MISMO formulario ID/Caption
+    /// que Table Attributes; aplicar crea la línea `{#id "caption"}`,
+    /// después reemplaza SOLO esa línea y vaciar ambos campos la elimina
+    /// (el bloque queda byte a byte intacto). Menú/paleta usan la MISMA
+    /// acción `win.equation-attrs`; cada edición es UNA transacción (§8.5).
+    #[test]
+    #[ignore = "requiere sesión gráfica GTK/WebKit"]
+    fn gtk_equation_attrs_crea_reemplaza_y_quita_31() {
+        gtk4::init().expect("GTK display");
+        ensure_sandbox_usable();
+        let app = Application::builder()
+            .application_id("app.minmark.test.fase731-equation-attrs")
+            .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk4::gio::Cancellable>).unwrap();
+        let cmds = build_window(&app, WindowScope::Standalone, &[]);
+        let fuente = "Bloque\n\n$$\nE=mc^2\n$$\n\nInline $x$ fin\n";
+        cmds.tabs
+            .borrow_mut()
+            .insert_active(Position::new(0, 0), fuente);
+        cmds.reload_active();
+
+        // Cursor dentro del BLOQUE: popover con ambas filas #31.
+        cmds.editor_pane
+            .focus_find_match(Range::new(Position::new(3, 2), Position::new(3, 2)));
+        pump_until(|| cmds.editor_pane.test_context_visible());
+        assert!(
+            cmds.editor_pane
+                .test_context_button("Edit Equation")
+                .expect("botón «Edit Equation»")
+                .is_visible()
+        );
+        assert!(
+            cmds.editor_pane
+                .test_context_button("Equation Attributes")
+                .expect("botón «Equation Attributes»")
+                .is_visible(),
+            "bloque: los atributos están disponibles (§26.4)"
+        );
+
+        // Crear la línea de atributos (form vacío: el bloque no tiene aún).
+        assert!(cmds.editor_pane.test_context_click("Equation Attributes"));
+        pump_until(|| dialog_titled("Equation Attributes").is_some());
+        let dialog = dialog_titled("Equation Attributes").expect("formulario");
+        let entries = dialog_entries(&dialog);
+        assert_eq!(entries.len(), 2, "ID, Caption (§UI: mismo formulario que #30)");
+        assert_eq!(entries[0].text(), "");
+        assert_eq!(entries[1].text(), "");
+        entries[0].set_text("eq:energy");
+        entries[1].set_text("Equivalencia");
+        find_button_in(&dialog, "Aceptar")
+            .expect("botón Aceptar")
+            .emit_clicked();
+        pump_until(|| dialog_titled("Equation Attributes").is_none());
+        let con_atributos =
+            "Bloque\n\n$$\nE=mc^2\n$$\n{#eq:energy \"Equivalencia\"}\n\nInline $x$ fin\n";
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content(),
+            con_atributos,
+            "crea la línea tras el bloque sin tocar el bloque"
+        );
+
+        // Reemplazar SOLO la línea por la vía menú/paleta (MISMA acción) —
+        // el diálogo precarga el estado detectado.
+        gtk4::prelude::WidgetExt::activate_action(&cmds.window, "win.equation-attrs", None)
+            .expect("win.equation-attrs registrada (§36)");
+        pump_until(|| dialog_titled("Equation Attributes").is_some());
+        let dialog = dialog_titled("Equation Attributes").expect("formulario");
+        let entries = dialog_entries(&dialog);
+        assert_eq!(entries[0].text(), "eq:energy", "precarga ID del contexto");
+        assert_eq!(entries[1].text(), "Equivalencia", "precarga Caption");
+        entries[1].set_text("Nueva caption");
+        find_button_in(&dialog, "Aceptar")
+            .expect("botón Aceptar")
+            .emit_clicked();
+        pump_until(|| dialog_titled("Equation Attributes").is_none());
+        let reemplazada =
+            "Bloque\n\n$$\nE=mc^2\n$$\n{#eq:energy \"Nueva caption\"}\n\nInline $x$ fin\n";
+        let contenido = cmds
+            .tabs
+            .borrow()
+            .active()
+            .editor
+            .document()
+            .content()
+            .to_owned();
+        assert_eq!(contenido, reemplazada);
+        assert!(
+            contenido.starts_with("Bloque\n\n$$\nE=mc^2\n$$\n"),
+            "los bytes del bloque quedan intactos"
+        );
+
+        // Vaciar ambos campos ⇒ la línea desaparece entera (§26.4).
+        gtk4::prelude::WidgetExt::activate_action(&cmds.window, "win.equation-attrs", None)
+            .expect("win.equation-attrs reabre el formulario");
+        pump_until(|| dialog_titled("Equation Attributes").is_some());
+        let dialog = dialog_titled("Equation Attributes").expect("formulario");
+        let entries = dialog_entries(&dialog);
+        entries[0].set_text("");
+        entries[1].set_text("");
+        find_button_in(&dialog, "Aceptar")
+            .expect("botón Aceptar")
+            .emit_clicked();
+        pump_until(|| dialog_titled("Equation Attributes").is_none());
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content(),
+            fuente,
+            "sin id ni caption la línea se elimina; la fuente vuelve byte a byte"
+        );
+
+        // En ECUACIÓN INLINE el popover NO ofrece Equation Attributes.
+        cmds.editor_pane
+            .focus_find_match(Range::new(Position::new(6, 8), Position::new(6, 8)));
+        pump_until(|| cmds.editor_pane.test_context_visible());
+        assert!(
+            cmds.editor_pane
+                .test_context_button("Edit Equation")
+                .expect("botón «Edit Equation»")
+                .is_visible()
+        );
+        assert!(
+            !cmds
+                .editor_pane
+                .test_context_button("Equation Attributes")
+                .expect("botón «Equation Attributes»")
+                .is_visible(),
+            "atributos solo en bloque (§26.4)"
+        );
+
+        // Tres ediciones ⇒ tres transacciones (§8.5); los undos vuelven paso
+        // a paso hasta la fuente original.
+        assert!(cmds.tabs.borrow_mut().undo_active());
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content(),
+            reemplazada
+        );
+        assert!(cmds.tabs.borrow_mut().undo_active());
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content(),
+            con_atributos
+        );
+        assert!(cmds.tabs.borrow_mut().undo_active());
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content(),
+            fuente
+        );
+
+        cmds.window.destroy();
+    }
+
+    /// #31 §25.2: `win.insert-citation` abre el diálogo de items (clave +
+    /// localizador) con añadir/quitar — y RETIENE el diálogo con el error
+    /// visible cuando un campo sale de la gramática consumidora (revisión
+    /// #31, finding 3)— y aceptar deja la cita canónica `[@k1, loc; @k2]`
+    /// en UNA transacción; `win.edit-citation` (popover) reutiliza el MISMO
+    /// diálogo prellenado con los items de la cita, y Escape ⇒ cero cambios
+    /// byte a byte.
+    #[test]
+    #[ignore = "requiere sesión gráfica GTK/WebKit"]
+    fn gtk_insert_y_edit_citation_items_31() {
+        gtk4::init().expect("GTK display");
+        ensure_sandbox_usable();
+        let app = Application::builder()
+            .application_id("app.minmark.test.fase731-citations")
+            .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk4::gio::Cancellable>).unwrap();
+        let cmds = build_window(&app, WindowScope::Standalone, &[]);
+        cmds.tabs
+            .borrow_mut()
+            .insert_active(Position::new(0, 0), "Ver\n");
+        cmds.reload_active();
+        cmds.editor_pane
+            .focus_find_match(Range::new(Position::new(0, 3), Position::new(0, 3)));
+
+        // Diálogo de inserción: una fila inicial + añadir/quitar.
+        gtk4::prelude::WidgetExt::activate_action(&cmds.window, "win.insert-citation", None)
+            .expect("win.insert-citation registrada (§36)");
+        pump_until(|| dialog_titled("Citation").is_some());
+        let dialog = dialog_titled("Citation").expect("diálogo de citas");
+        let entries = dialog_entries(&dialog);
+        assert_eq!(entries.len(), 2, "una fila: clave + localizador (§UI)");
+        assert_eq!(entries[0].placeholder_text().as_deref(), Some("Clave"));
+        assert_eq!(
+            entries[1].placeholder_text().as_deref(),
+            Some("Localizador (p. 42)")
+        );
+        for entry in &entries {
+            assert!(entry.can_focus(), "operable con teclado (§29 ⇒ #31)");
+        }
+        let add = find_button_in(&dialog, "Añadir ítem")
+            .expect("botón «Añadir ítem»")
+            .clone();
+        assert!(add.can_focus());
+        assert!(find_button_in(&dialog, "Cancelar").is_some());
+
+        // §25.2 (revisión #31, finding 3): claves o localizadores fuera de
+        // la gramática consumidora RETIENEN el diálogo con el error visible
+        // (patrón FormValidator) — el documento no se toca.
+        entries[0].set_text("smith 2025");
+        find_button_in(&dialog, "Aceptar")
+            .expect("botón Aceptar")
+            .emit_clicked();
+        assert!(
+            dialog_titled("Citation").is_some(),
+            "clave con espacio: el diálogo sigue ABIERTO"
+        );
+        let error = find_label_containing(&dialog, "no válida")
+            .expect("error de clave visible");
+        assert!(error.is_visible());
+        entries[0].set_text("smith2025");
+        entries[1].set_text("p. 1; fig. 2");
+        find_button_in(&dialog, "Aceptar")
+            .expect("botón Aceptar")
+            .emit_clicked();
+        assert!(
+            dialog_titled("Citation").is_some(),
+            "localizador con «;»: el diálogo sigue ABIERTO"
+        );
+        let error = find_label_containing(&dialog, "no válido")
+            .expect("error de localizador visible");
+        assert!(error.is_visible());
+
+        // Con ambos campos válidos el flujo continúa en el MISMO diálogo.
+        entries[0].set_text("smith2025");
+        entries[1].set_text("p. 42");
+        add.emit_clicked();
+        let entries = dialog_entries(&dialog);
+        assert_eq!(entries.len(), 4, "segunda fila añadida");
+        entries[2].set_text("jones2024");
+
+        // Quitar la PRIMERA fila (renumeración incluida) y añadir otra:
+        // el resultado final son dos items, el segundo con localizador.
+        find_button_in(&dialog, "Quitar")
+            .expect("botón «Quitar» de la fila 1")
+            .emit_clicked();
+        let entries = dialog_entries(&dialog);
+        assert_eq!(entries.len(), 2, "fila quitable");
+        assert_eq!(entries[0].text(), "jones2024", "sobrevive la fila 2");
+        find_button_in(&dialog, "Añadir ítem")
+            .expect("«Añadir ítem»")
+            .emit_clicked();
+        let entries = dialog_entries(&dialog);
+        entries[2].set_text("reyes2026");
+        entries[3].set_text("p. 9");
+        find_button_in(&dialog, "Aceptar")
+            .expect("botón Aceptar")
+            .emit_clicked();
+        pump_until(|| dialog_titled("Citation").is_none());
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content(),
+            "Ver[@jones2024; @reyes2026, p. 9]\n",
+            "forma canónica §25.2 en el cursor"
+        );
+
+        // UNA transacción (§8.5): undo → insert inicial → vacío.
+        assert!(cmds.tabs.borrow_mut().undo_active());
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content(),
+            "Ver\n"
+        );
+        assert!(cmds.tabs.borrow_mut().undo_active());
+        assert_eq!(cmds.tabs.borrow().active().editor.document().content(), "");
+
+        // Editar una cita existente desde el popover (MISMA acción que
+        // menú/paleta): diálogo prellenado con los items detectados.
+        cmds.tabs
+            .borrow_mut()
+            .insert_active(Position::new(0, 0), "notas [@vieja] hoy\n");
+        cmds.reload_active();
+        cmds.editor_pane
+            .focus_find_match(Range::new(Position::new(0, 7), Position::new(0, 7)));
+        pump_until(|| cmds.editor_pane.test_context_visible());
+        assert!(
+            cmds.editor_pane
+                .test_context_button("Edit Citation")
+                .expect("botón «Edit Citation» (§UI #31)")
+                .is_visible(),
+            "cursor dentro de la cita: la fila de cita se muestra"
+        );
+        assert!(cmds.editor_pane.test_context_click("Edit Citation"));
+        pump_until(|| dialog_titled("Edit Citation").is_some());
+        let dialog = dialog_titled("Edit Citation").expect("diálogo de edición");
+        let entries = dialog_entries(&dialog);
+        assert_eq!(entries.len(), 2, "una fila por item de la cita");
+        assert_eq!(entries[0].text(), "vieja", "precarga de la clave (§25.2)");
+        assert_eq!(entries[1].text(), "", "sin localizador ⇒ vacío");
+
+        entries[0].set_text("a");
+        entries[1].set_text("p. 7");
+        find_button_in(&dialog, "Añadir ítem")
+            .expect("«Añadir ítem»")
+            .emit_clicked();
+        let entries = dialog_entries(&dialog);
+        entries[2].set_text("b");
+        find_button_in(&dialog, "Aceptar")
+            .expect("botón Aceptar")
+            .emit_clicked();
+        pump_until(|| dialog_titled("Edit Citation").is_none());
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content(),
+            "notas [@a, p. 7; @b] hoy\n",
+            "CitationEdit reemplaza la cita entera (§25.2)"
+        );
+
+        // Escape ⇒ cero cambios byte a byte y SIN transacción nueva.
+        gtk4::prelude::WidgetExt::activate_action(&cmds.window, "win.edit-citation", None)
+            .expect("win.edit-citation registrada (§36)");
+        pump_until(|| dialog_titled("Edit Citation").is_some());
+        let dialog = dialog_titled("Edit Citation").expect("diálogo reabierto");
+        let entries = dialog_entries(&dialog);
+        entries[0].set_text("borrar-esto");
+        emit_escape_key(&dialog);
+        pump_until(|| dialog_titled("Edit Citation").is_none());
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content().as_bytes(),
+            "notas [@a, p. 7; @b] hoy\n".as_bytes(),
+            "Escape deja el buffer byte a byte idéntico"
+        );
+
+        // Transacciones: el edit aceptado y el insert de la fuente — ni una más.
+        assert!(cmds.tabs.borrow_mut().undo_active());
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content(),
+            "notas [@vieja] hoy\n"
+        );
+        assert!(cmds.tabs.borrow_mut().undo_active(), "el insert inicial");
+        assert_eq!(cmds.tabs.borrow().active().editor.document().content(), "");
+        assert!(
+            !cmds.tabs.borrow_mut().undo_active(),
+            "Escape no añadió transacción"
+        );
+
+        cmds.window.destroy();
+    }
+
+    /// #31 §25.3: la clave del diálogo de citas autocompleta por clave,
+    /// AUTOR, título y año con `intelligence::citation_completions` (el MISMO
+    /// completion de la fase 5, nunca reimplementado): la lista aparece con
+    /// lo tecleado, Enter acepta la fila seleccionada, una clave sin
+    /// coincidencias cierra el popup y Escape cierra SOLO el popup (un
+    /// segundo Escape cancela el diálogo con cero cambios).
+    #[test]
+    #[ignore = "requiere sesión gráfica GTK/WebKit"]
+    fn gtk_autocompletado_bibliografico_en_dialogo_citas_31() {
+        gtk4::init().expect("GTK display");
+        ensure_sandbox_usable();
+        let base = std::env::temp_dir().join(format!("minmark-ac31-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let bib = base.join("refs.bib");
+        std::fs::write(
+            &bib,
+            include_str!("../../docs/qa/fixtures/references.bib"),
+        )
+        .unwrap();
+
+        let app = Application::builder()
+            .application_id("app.minmark.test.fase731-citation-ac")
+            .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk4::gio::Cancellable>).unwrap();
+        let cmds = build_window(&app, WindowScope::Standalone, &[]);
+        cmds.tabs
+            .borrow_mut()
+            .insert_active(Position::new(0, 0), "Ver\n");
+        cmds.reload_active();
+        cmds.editor_pane
+            .focus_find_match(Range::new(Position::new(0, 3), Position::new(0, 3)));
+        // La MISMA bibliografía que la fase 5 (`academic::load` sobre
+        // `settings.bibliography`): se fija DESPUÉS del refresco, porque
+        // `refresh_now` recalcula la bibliografía efectiva (§58).
+        cmds.settings.borrow_mut().bibliography = vec![bib.to_string_lossy().into_owned()];
+
+        gtk4::prelude::WidgetExt::activate_action(&cmds.window, "win.insert-citation", None)
+            .expect("win.insert-citation registrada (§36)");
+        pump_until(|| dialog_titled("Citation").is_some());
+        let dialog = dialog_titled("Citation").expect("diálogo de citas");
+        let entries = dialog_entries(&dialog);
+        assert_eq!(entries.len(), 2);
+
+        // Tecleo de la clave: el popup muestra la sugerencia (§25.3).
+        entries[0].set_text("Sm");
+        entries[0].set_position(2);
+        pump_until(|| visible_popover_in(&dialog).is_some());
+        let popover = visible_popover_in(&dialog).expect("popup de completado");
+        let labels = popover_labels(&popover);
+        assert!(
+            labels.iter().any(|label| label.contains("smith2025")),
+            "sugerencia visible con «Sm»: {labels:?}"
+        );
+
+        // §25.3 también por AUTOR: «Alice» («… · Alice Smith · …»).
+        entries[0].set_text("Alice");
+        entries[0].set_position(5);
+        pump_until(|| visible_popover_in(&dialog).is_some());
+        let popover = visible_popover_in(&dialog).expect("popup por autor");
+        assert!(
+            popover_labels(&popover)
+                .iter()
+                .any(|label| label.contains("smith2025")),
+            "sugerencia visible con «Alice»"
+        );
+
+        // Enter (teclado, patrón completion #29) acepta la fila activa.
+        assert!(
+            emit_key(
+                entries[0].upcast_ref::<gtk4::Widget>(),
+                gtk4::gdk::Key::Return,
+                gtk4::gdk::ModifierType::empty()
+            ),
+            "el controlador de la entrada consume Enter con el popup abierto"
+        );
+        assert_eq!(entries[0].text(), "smith2025", "clave aceptada");
+        pump_until(|| visible_popover_in(&dialog).is_none());
+
+        // Una clave sin coincidencias cierra el popup (§25.3 filtra).
+        entries[0].set_text("zzz-no-existe");
+        entries[0].set_position(13);
+        pump_until(|| visible_popover_in(&dialog).is_none());
+
+        // Escape cierra SOLO el popup…
+        entries[0].set_text("smi");
+        entries[0].set_position(3);
+        pump_until(|| visible_popover_in(&dialog).is_some());
+        assert!(emit_key(
+            entries[0].upcast_ref::<gtk4::Widget>(),
+            gtk4::gdk::Key::Escape,
+            gtk4::gdk::ModifierType::empty()
+        ));
+        pump_until(|| visible_popover_in(&dialog).is_none());
+        assert!(
+            dialog_titled("Citation").is_some(),
+            "el primer Escape cierra SOLO el popup"
+        );
+
+        // …y un segundo Escape cancela el diálogo con cero cambios.
+        emit_escape_key(&dialog);
+        pump_until(|| dialog_titled("Citation").is_none());
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content(),
+            "Ver\n",
+            "cancelar el diálogo no edita el documento (§UI)"
+        );
+
+        cmds.window.destroy();
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// #31 (aceptación): con el cursor dentro de una ecuación o de una cita
+    /// el popover muestra sus controles — «Edit Equation» (y «Equation
+    /// Attributes» en bloque) o «Edit Citation» —; cambiar de pestaña o de
+    /// modo lo cierra y el click YA no abre ningún diálogo (guardia #29
+    /// intacta, sin tocar ninguna pestaña).
+    #[test]
+    #[ignore = "requiere sesión gráfica GTK/WebKit"]
+    fn gtk_popover_ecuacion_cita_guardia_de_pestana_31() {
+        gtk4::init().expect("GTK display");
+        ensure_sandbox_usable();
+        let app = Application::builder()
+            .application_id("app.minmark.test.fase731-popover-guard")
+            .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk4::gio::Cancellable>).unwrap();
+        let cmds = build_window(&app, WindowScope::Standalone, &[]);
+        let fuente = "Ecuación $x$ y cita [@a] ok\n";
+        cmds.tabs
+            .borrow_mut()
+            .insert_active(Position::new(0, 0), fuente);
+        cmds.reload_active();
+        cmds.tabs.borrow_mut().new_tab();
+        cmds.tabs
+            .borrow_mut()
+            .insert_active(Position::new(0, 0), "otra pestaña\n");
+        cmds.reload_active();
+        cmds.select_tab(0);
+
+        // Cursor dentro de la ecuación (selección vacía): solo la fila #31.
+        cmds.editor_pane
+            .focus_find_match(Range::new(Position::new(0, 10), Position::new(0, 10)));
+        pump_until(|| cmds.editor_pane.test_context_visible());
+        assert!(
+            cmds.editor_pane
+                .test_context_button("Edit Equation")
+                .expect("botón «Edit Equation»")
+                .is_visible()
+        );
+        assert!(
+            !cmds
+                .editor_pane
+                .test_context_button("Bold")
+                .expect("botón Bold")
+                .is_visible(),
+            "cursor sin selección: sin panel de texto (#29 intacto)"
+        );
+
+        // Cambio de PESTAÑA: cierra el popover y el click no abre diálogo.
+        cmds.select_tab(1);
+        assert!(!cmds.editor_pane.test_context_visible());
+        assert!(cmds.editor_pane.test_context_click("Edit Equation"));
+        assert!(
+            dialog_titled("Edit Equation").is_none(),
+            "guardia de pestaña: sin diálogo con el popover cerrado"
+        );
+        assert_eq!(
+            cmds.tabs.borrow().tabs()[1].editor.document().content(),
+            "otra pestaña\n",
+            "sin cambios en la pestaña activa"
+        );
+        assert_eq!(
+            cmds.tabs.borrow().tabs()[0].editor.document().content(),
+            fuente,
+            "sin cambios en la pestaña abandonada"
+        );
+
+        // Cursor dentro de la cita: la fila «Edit Citation» aparece.
+        cmds.select_tab(0);
+        cmds.editor_pane
+            .focus_find_match(Range::new(Position::new(0, 21), Position::new(0, 21)));
+        pump_until(|| cmds.editor_pane.test_context_visible());
+        assert!(
+            cmds.editor_pane
+                .test_context_button("Edit Citation")
+                .expect("botón «Edit Citation»")
+                .is_visible()
+        );
+
+        // Cambio de MODO: cierra el popover y el click no aplica nada.
+        cmds.toggle_mode();
+        assert!(
+            !cmds.editor_pane.test_context_visible(),
+            "cambio de modo cierra"
+        );
+        assert!(cmds.editor_pane.test_context_click("Edit Citation"));
+        assert!(
+            dialog_titled("Edit Citation").is_none(),
+            "guardia de modo: sin diálogo con el popover cerrado"
+        );
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content(),
+            fuente,
+            "sin cambios en el documento"
         );
 
         cmds.window.destroy();

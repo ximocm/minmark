@@ -18,7 +18,8 @@ use gtk4::prelude::*;
 use crate::preview::ViewMode;
 
 /// Comandos de la aplicación (§36: File, Edit, View, Insert, Format,
-/// Project, Help; Insert/Format con la fase 7, #29 e Image/Table con #30).
+/// Project, Help; Insert/Format con la fase 7, #29, Image/Table con #30 y
+/// Equation/Citation con #31).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Command {
     New,
@@ -79,6 +80,27 @@ pub enum Command {
     /// §26.3; popover y Command Palette): diálogo ID/Caption prellenado →
     /// `FormatAction::TableAttrs`.
     EditTableAttrs,
+    /// Ecuación LaTeX (fase 7 #31, §24, menú Insert): diálogo de LaTeX
+    /// multilinea con diagnóstico ADR-002 → `FormatAction::MathInsert`
+    /// (sin atributos: los edita `win.equation-attrs`). Con selección no
+    /// vacía el texto seleccionado es el LaTeX (el diálogo no se abre).
+    InsertEquation,
+    /// Editar el LaTeX de la ecuación bajo el cursor/selección (fase 7 #31,
+    /// §24; popover y Command Palette): diálogo multilinea prellenado con
+    /// diagnóstico en vivo → `FormatAction::MathEdit`.
+    EditEquation,
+    /// Editar los atributos `{#id "caption"}` de la ecuación de BLOQUE
+    /// (fase 7 #31, §26.4; popover y Command Palette): diálogo ID/Caption
+    /// prellenado → `FormatAction::MathAttrs` (en inline no aplicable).
+    EquationAttrs,
+    /// Cita Pandoc (fase 7 #31, §25.2, menú Insert): diálogo de items
+    /// (clave + localizador) con autocompletado bibliográfico §25.3 →
+    /// `FormatAction::CitationInsert`.
+    InsertCitation,
+    /// Editar los items de la cita bajo el cursor/selección (fase 7 #31,
+    /// §25.2; popover y Command Palette): el MISMO diálogo de citas
+    /// prellenado → `FormatAction::CitationEdit`.
+    EditCitation,
     /// Heading ATX 1–6 (fase 7 #29, menú Format, `Ctrl+1..6`).
     FormatHeading1,
     FormatHeading2,
@@ -137,6 +159,11 @@ impl Command {
             Command::InsertTable => "win.insert-table",
             Command::EditImage => "win.edit-image",
             Command::EditTableAttrs => "win.edit-table-attrs",
+            Command::InsertEquation => "win.insert-equation",
+            Command::EditEquation => "win.edit-equation",
+            Command::EquationAttrs => "win.equation-attrs",
+            Command::InsertCitation => "win.insert-citation",
+            Command::EditCitation => "win.edit-citation",
             Command::FormatHeading1 => "win.format-heading1",
             Command::FormatHeading2 => "win.format-heading2",
             Command::FormatHeading3 => "win.format-heading3",
@@ -188,6 +215,11 @@ impl Command {
             Command::InsertTable => "Table",
             Command::EditImage => "Edit Image",
             Command::EditTableAttrs => "Table Attributes",
+            Command::InsertEquation => "Equation",
+            Command::EditEquation => "Edit Equation",
+            Command::EquationAttrs => "Equation Attributes",
+            Command::InsertCitation => "Citation",
+            Command::EditCitation => "Edit Citation",
             Command::FormatHeading1 => "Heading 1",
             Command::FormatHeading2 => "Heading 2",
             Command::FormatHeading3 => "Heading 3",
@@ -304,6 +336,28 @@ pub trait Commands {
     /// `win.edit-table-attrs` (fase 7 #30): diálogo ID/Caption prellenado
     /// con la tabla bajo el cursor/selección → `FormatAction::TableAttrs`.
     fn edit_table_attrs(&self) {}
+    /// `win.insert-equation` (fase 7 #31, §24): con selección no vacía el
+    /// texto seleccionado es el LaTeX y se envuelve sin diálogo (monolínea
+    /// `$…$`, multilínea `$$…$$`); sin selección, diálogo de LaTeX
+    /// multilinea con diagnóstico en vivo (ADR-002 sin bloquear). Cancelar
+    /// ⇒ cero cambios. Los atributos NO se piden aquí (#31 §UI).
+    fn insert_equation(&self) {}
+    /// `win.edit-equation` (fase 7 #31): diálogo multilinea prellenado con
+    /// el LaTeX de `format::context` → `FormatAction::MathEdit` (marcadores
+    /// y línea de atributos intactos). Cancelar ⇒ cero cambios.
+    fn edit_equation(&self) {}
+    /// `win.equation-attrs` (fase 7 #31, §26.4): diálogo ID/Caption
+    /// prellenado con la ecuación de BLOQUE bajo el cursor/selección →
+    /// `FormatAction::MathAttrs` (en inline no hay diálogo: cero cambios).
+    fn equation_attrs(&self) {}
+    /// `win.insert-citation` (fase 7 #31, §25.2): diálogo de items (clave +
+    /// localizador, añadir/quitar) con autocompletado §25.3 →
+    /// `FormatAction::CitationInsert`. Cancelar ⇒ cero cambios.
+    fn insert_citation(&self) {}
+    /// `win.edit-citation` (fase 7 #31): el MISMO diálogo prellenado con
+    /// los items de la cita bajo el cursor/selección →
+    /// `FormatAction::CitationEdit`.
+    fn edit_citation(&self) {}
     /// Command Palette §38 (§39: `Ctrl+Shift+P`).
     fn command_palette(&self) {}
     fn about(&self);
@@ -350,8 +404,8 @@ pub const ACCELERATORS: &[(&str, &str)] = &[
 /// Todos los comandos, en orden de aparición en los menús §36. §38: es la
 /// lista completa que la Command Palette ejecuta — pública para que la
 /// paleta se alimente de ella — y todo comando es alcanzable desde el menú
-/// (los dos comandos de constructo #30 llegan por el popover §44 y la
-/// paleta; ver `menu_y_comandos_coherentes`).
+/// (los cinco comandos de edición de constructo de #30/#31 llegan por el
+/// popover §44 y la paleta; ver `menu_y_comandos_coherentes`).
 pub const ALL_COMMANDS: &[Command] = &[
     Command::New,
     Command::NewWindow,
@@ -385,6 +439,11 @@ pub const ALL_COMMANDS: &[Command] = &[
     Command::InsertTable,
     Command::EditImage,
     Command::EditTableAttrs,
+    Command::InsertEquation,
+    Command::EditEquation,
+    Command::EquationAttrs,
+    Command::InsertCitation,
+    Command::EditCitation,
     Command::FormatHeading1,
     Command::FormatHeading2,
     Command::FormatHeading3,
@@ -416,9 +475,9 @@ type SubmenuSpec = (&'static str, &'static [SectionSpec]);
 /// Modelo de menú §36 en datos puros: File, Edit, View, Insert, Format,
 /// Project y Help. View agrupa «Markdown/Visual» (ToggleMode) y la sección
 /// radio implícita Editor/Split/Preview (§36) más la Command Palette §38;
-/// Insert (Link, Callout, Image, Table) y Format (Heading 1–6, Bold, Italic,
-/// Strikethrough, Code) llegan con la fase 7 (#29/#30); Project nace con las
-/// composiciones (§20, ISSUE-022).
+/// Insert (Link, Callout, Image, Table, Equation, Citation) y Format
+/// (Heading 1–6, Bold, Italic, Strikethrough, Code) llegan con la fase 7
+/// (#29/#30/#31); Project nace con las composiciones (§20, ISSUE-022).
 const MENUBAR_SPEC: &[SubmenuSpec] = &[
     (
         "File",
@@ -476,6 +535,11 @@ const MENUBAR_SPEC: &[SubmenuSpec] = &[
             // ítem de menú.
             ("Image", "win.insert-image"),
             ("Table", "win.insert-table"),
+            // Fase 7 #31 (§UI): Equation y Citation (§24, §25.2); los de
+            // edición (Edit Equation, Equation Attributes, Edit Citation)
+            // viven en el popover §44 y la paleta §38, sin ítem de menú.
+            ("Equation", "win.insert-equation"),
+            ("Citation", "win.insert-citation"),
         ]],
     ),
     (
@@ -556,6 +620,11 @@ fn dispatch(cmd: Command, host: &dyn Commands, callout_tone: &str) {
         Command::InsertTable => host.insert_table(),
         Command::EditImage => host.edit_image(),
         Command::EditTableAttrs => host.edit_table_attrs(),
+        Command::InsertEquation => host.insert_equation(),
+        Command::EditEquation => host.edit_equation(),
+        Command::EquationAttrs => host.equation_attrs(),
+        Command::InsertCitation => host.insert_citation(),
+        Command::EditCitation => host.edit_citation(),
         Command::FormatHeading1 => host.format_heading1(),
         Command::FormatHeading2 => host.format_heading2(),
         Command::FormatHeading3 => host.format_heading3(),
@@ -869,6 +938,126 @@ mod tests {
         );
     }
 
+    /// Fase 7 #31: los cinco comandos nuevos tienen el `action_id` y la
+    /// etiqueta fijados por el contrato §UI (Insert ▸ Equation/Citation,
+    /// popover §44 y Command Palette §38) y NO registran aceleradores
+    /// nuevos (§UI: «sin atajos nuevos», documentado en el changelog).
+    #[test]
+    fn comandos_fase_7_31_ids_y_etiquetas_sin_atajos() {
+        let nuevos = [
+            (Command::InsertEquation, "win.insert-equation", "Equation"),
+            (Command::EditEquation, "win.edit-equation", "Edit Equation"),
+            (
+                Command::EquationAttrs,
+                "win.equation-attrs",
+                "Equation Attributes",
+            ),
+            (Command::InsertCitation, "win.insert-citation", "Citation"),
+            (Command::EditCitation, "win.edit-citation", "Edit Citation"),
+        ];
+        for (cmd, id, label) in nuevos {
+            assert_eq!(cmd.action_id(), id, "action_id de {label}");
+            assert_eq!(cmd.label(), label, "etiqueta de {id}");
+            assert!(
+                ALL_COMMANDS.contains(&cmd),
+                "{id} ausente de ALL_COMMANDS (§38)"
+            );
+            assert!(!cmd.requires_composition(), "{id} sin composiciones (§20)");
+            assert!(
+                !ACCELERATORS.iter().any(|(accel_id, _)| *accel_id == id),
+                "{id} no debe tener acelerador (#31 añade los comandos sin atajos)"
+            );
+        }
+        // Equation y Citation están en el menú Insert (§UI); los tres de
+        // edición no llevan ítem de menú (popover + paleta).
+        for id in ["win.insert-equation", "win.insert-citation"] {
+            assert!(
+                MENUBAR_SPEC.iter().any(|(_, sections)| sections.iter().any(
+                    |entries| entries.iter().any(|(_, entry_id)| *entry_id == id)
+                )),
+                "{id} ausente del menú Insert (§36)"
+            );
+        }
+    }
+
+    /// Fase 7 #31: los cinco comandos se activan como las MISMAS acciones
+    /// `win.*` del grupo (menú, paleta §38 y popover §44) y llegan al
+    /// receptor que main.rs enlaza con `TabManager::apply_format_active`
+    /// (destino único de edición, contrato #31 §UI).
+    #[test]
+    fn comandos_31_llegan_al_receptor() {
+        /// Receptor que solo registra los comandos #31 recibidos.
+        struct Recorder(Rc<std::cell::RefCell<Vec<&'static str>>>);
+        impl Commands for Recorder {
+            fn new(&self) {}
+            fn new_window(&self) {}
+            fn open(&self) {}
+            fn quick_open(&self) {}
+            fn open_folder(&self) {}
+            fn import_markdown(&self) {}
+            fn save(&self) {}
+            fn save_as(&self) {}
+            fn export_pdf(&self) {}
+            fn close_tab(&self) {}
+            fn undo(&self) {}
+            fn redo(&self) {}
+            fn find(&self) {}
+            fn replace(&self) {}
+            fn project_search(&self) {}
+            fn toggle_mode(&self) {}
+            fn toggle_visual_syntax(&self) {}
+            fn toggle_explorer(&self) {}
+            fn set_view(&self, _mode: ViewMode) {}
+            fn about(&self) {}
+            fn shortcuts(&self) {}
+            fn insert_equation(&self) {
+                self.0.borrow_mut().push("insert-equation");
+            }
+            fn edit_equation(&self) {
+                self.0.borrow_mut().push("edit-equation");
+            }
+            fn equation_attrs(&self) {
+                self.0.borrow_mut().push("equation-attrs");
+            }
+            fn insert_citation(&self) {
+                self.0.borrow_mut().push("insert-citation");
+            }
+            fn edit_citation(&self) {
+                self.0.borrow_mut().push("edit-citation");
+            }
+        }
+
+        let received = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let host: Rc<dyn Commands> = Rc::new(Recorder(Rc::clone(&received)));
+        let group = action_group(&host);
+        for id in [
+            "insert-equation",
+            "edit-equation",
+            "equation-attrs",
+            "insert-citation",
+            "edit-citation",
+        ] {
+            let action = group
+                .lookup_action(id)
+                .unwrap_or_else(|| panic!("falta la acción win.{id} (§36)"))
+                .downcast::<gio::SimpleAction>()
+                .expect("SimpleAction");
+            assert!(action.is_enabled(), "win.{id} habilitada");
+            action.activate(None::<&glib::Variant>);
+        }
+        assert_eq!(
+            received.borrow().as_slice(),
+            [
+                "insert-equation",
+                "edit-equation",
+                "equation-attrs",
+                "insert-citation",
+                "edit-citation"
+            ],
+            "las cinco activaciones llegan al receptor (dispatch §3.7)"
+        );
+    }
+
     /// Fase 7 #29: `win.insert-callout` es stateful con tono inicial `note`
     /// (activable con `activate_action(id, None)` §38) y la activación
     /// entrega el tono del estado — el popover lo fija antes de activarla.
@@ -938,7 +1127,8 @@ mod tests {
     /// Composition PDF/Close Tab, ISSUE-021/029/035/023), Edit (Undo/Redo/
     /// Find/Replace/Project Search, §40.1/§40.2), View (Markdown/Visual +
     /// Editor/Split/Preview + Command Palette §38), Insert (Link/Callout/
-    /// Image/Table), Format (Heading 1–6/Bold/Italic/Strikethrough/Code),
+    /// Image/Table/Equation/Citation), Format (Heading 1–6/Bold/Italic/
+    /// Strikethrough/Code),
     /// Project (Preview
     /// Composition, §20/ISSUE-022) y Help (Atajos/About) — en el orden §36
     /// `File Edit View Insert Format Project Help` (fase 7 #29/#30).
@@ -997,6 +1187,8 @@ mod tests {
                     ("Callout", "win.insert-callout"),
                     ("Image", "win.insert-image"),
                     ("Table", "win.insert-table"),
+                    ("Equation", "win.insert-equation"),
+                    ("Citation", "win.insert-citation"),
                 ]],
             ),
             (
@@ -1081,12 +1273,19 @@ mod tests {
 
     /// Coherencia §36/§37: todo ítem del menú corresponde a un comando
     /// registrado con su etiqueta y todo comando es alcanzable desde el
-    /// menú — salvo los dos comandos de constructo #30, que el contrato §UI
-    /// mantiene fuera del menú (se activan desde el popover §44 y desde la
-    /// Command Palette §38 sobre la MISMA acción `win.*`).
+    /// menú — salvo los cinco comandos de edición de constructo #30/#31,
+    /// que el contrato §UI mantiene fuera del menú (se activan desde el
+    /// popover §44 y desde la Command Palette §38 sobre la MISMA acción
+    /// `win.*`).
     #[test]
     fn menu_y_comandos_coherentes() {
-        const SIN_ITEM_DE_MENU: [Command; 2] = [Command::EditImage, Command::EditTableAttrs];
+        const SIN_ITEM_DE_MENU: [Command; 5] = [
+            Command::EditImage,
+            Command::EditTableAttrs,
+            Command::EditEquation,
+            Command::EquationAttrs,
+            Command::EditCitation,
+        ];
         let mut en_menu = HashSet::new();
         for &(_, sections) in MENUBAR_SPEC {
             for entries in sections {

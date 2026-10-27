@@ -469,6 +469,75 @@ mod tests {
         );
     }
 
+    /// Fase 7 #31 (§Verificación): la ecuación EDITADA con
+    /// `FormatAction::MathEdit` (el mismo camino `apply_format_active` que
+    /// usa `win.edit-equation`) y la cita EDITADA con `CitationEdit` (el de
+    /// `win.edit-citation`) se reflejan en el HTML del Preview: el LaTeX
+    /// nuevo compone su math y la cita se resuelve con la bibliografía §25.1
+    /// sin rastro de la cita original.
+    #[test]
+    fn render_refleja_ecuacion_editada_y_cita_31() {
+        use minmark_document::format::FormatAction;
+        use minmark_document::{CitationItem, Position, Selection};
+
+        // Bibliografía + estilo reales en temporal (§25.4): la cita se
+        // compone con ellos al renderizar.
+        let base = std::env::temp_dir().join(format!("minmark-render31-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let bib = base.join("refs.bib");
+        std::fs::write(&bib, include_str!("../../../docs/qa/fixtures/references.bib")).unwrap();
+        let csl = base.join("style.csl");
+        std::fs::write(&csl, include_str!("../../../docs/qa/fixtures/author-year.csl")).unwrap();
+        let settings = Settings {
+            bibliography: vec![bib.to_string_lossy().into_owned()],
+            bibliography_style: csl.to_string_lossy().into_owned(),
+            ..Settings::default()
+        };
+
+        let mut tabs = crate::tabs::TabManager::new();
+        tabs.insert_active(
+            Position::new(0, 0),
+            "La energía es $E = mc^2$ y [@nada] fin.\n",
+        );
+
+        // Editar SOLO el LaTeX de la ecuación inline.
+        let fuente = tabs.active().editor.document().content().to_owned();
+        let dollar = fuente.find('$').expect("marcador de ecuación");
+        let en_ecuacion = tabs.active().editor.position_of(dollar + 2);
+        tabs.set_selection_active(Selection::collapsed(en_ecuacion));
+        assert!(tabs.apply_format_active(&FormatAction::MathEdit {
+            latex: "E = mc^2 + 1".to_owned(),
+        }));
+
+        // Editar la cita con una clave real de la bibliografía + locator.
+        let fuente = tabs.active().editor.document().content().to_owned();
+        let en_cita = fuente.find("[@nada]").expect("cita original") + 2;
+        let en_cita = tabs.active().editor.position_of(en_cita);
+        tabs.set_selection_active(Selection::collapsed(en_cita));
+        assert!(tabs.apply_format_active(&FormatAction::CitationEdit {
+            items: vec![CitationItem {
+                key: "smith2025".to_owned(),
+                locator: Some("p. 42".to_owned()),
+            }],
+        }));
+
+        let html = render_document(tabs.active().editor.document().content(), &settings);
+        assert!(
+            html.contains("aria-label=\"E = mc^2 + 1\""),
+            "el LaTeX editado llega al math del Preview: {html}"
+        );
+        assert!(
+            html.contains("Smith, 2025"),
+            "la cita editada se compone con la bibliografía §25.4: {html}"
+        );
+        assert!(
+            !html.contains("[@nada]"),
+            "la cita original ya no está: {html}"
+        );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     /// §7.2: nunca HTML crudo del documento; el contenido sale escapado.
     #[test]
     fn render_document_escapa_el_html_del_documento() {
