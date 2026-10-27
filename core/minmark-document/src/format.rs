@@ -33,6 +33,30 @@ pub enum FormatAction {
     /// Callout `::: tipo` (§22); dentro de un callout existente solo cambia
     /// el tipo del opener.
     Callout { callout_type: String },
+    /// Insertar imagen `![alt](ruta) {#id width=N%}` (§18, §26.2); con
+    /// selección no vacía, el texto seleccionado pasa a ser el alt.
+    ImageInsert {
+        destination: String,
+        alt: String,
+        id: Option<String>,
+        width_percent: Option<u8>,
+    },
+    /// Editar la imagen que contiene la selección (§18.5, §26.2): solo los
+    /// campos dados; título, caption y `clave=valor` extra intactos.
+    ImageEdit {
+        destination: String,
+        alt: String,
+        id: Option<String>,
+        width_percent: Option<u8>,
+    },
+    /// Insertar tabla GFM (§35) con `rows` filas de datos y `cols` columnas.
+    TableInsert { rows: usize, cols: usize },
+    /// Editar los atributos `{#id "caption"}` de la tabla que contiene la
+    /// selección (§26.3, §28.2): la tabla no se toca.
+    TableAttrs {
+        id: Option<String>,
+        caption: Option<String>,
+    },
 }
 
 /// Plan de una acción: ediciones disjuntas sobre el buffer original (sin
@@ -64,6 +88,29 @@ pub struct CalloutContext {
     pub title: Option<String>,
 }
 
+/// Imagen `![alt](ruta "título") {attrs}` que contiene la selección (§18).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImageContext {
+    /// Rango del constructo completo, atributos incluidos.
+    pub range: Range,
+    pub destination: String,
+    pub alt: String,
+    /// Título `"..."` tras la ruta (§18): se conserva siempre.
+    pub title: Option<String>,
+    pub id: Option<String>,
+    pub width_percent: Option<u8>,
+}
+
+/// Tabla GFM (§35) que contiene la selección.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TableContext {
+    /// Rango del bloque de filas (sin la línea de atributos).
+    pub range: Range,
+    pub columns: usize,
+    pub id: Option<String>,
+    pub caption: Option<String>,
+}
+
 /// Contexto editorial bajo la selección (§44): lo que los controles
 /// contextuales muestran como utilidad. No muta nada.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -72,6 +119,8 @@ pub struct EditContext {
     pub heading_level: Option<u8>,
     pub link: Option<LinkContext>,
     pub callout: Option<CalloutContext>,
+    pub image: Option<ImageContext>,
+    pub table: Option<TableContext>,
     /// La selección ya está envuelta por el marcador correspondiente.
     pub strong: bool,
     pub emphasis: bool,
@@ -102,6 +151,43 @@ pub fn plan(source: &str, selection: Selection, action: &FormatAction) -> Option
         FormatAction::Heading(level) => heading_plan(source, &starts, a, b, *level)?,
         FormatAction::Link { url } => link_plan(source, a, b, url)?,
         FormatAction::Callout { callout_type } => callout_plan(source, &starts, a, b, callout_type)?,
+        FormatAction::ImageInsert {
+            destination,
+            alt,
+            id,
+            width_percent,
+        } => image_insert_plan(
+            source,
+            a,
+            b,
+            ImageFields {
+                destination,
+                alt,
+                id: id.as_deref(),
+                width_percent: *width_percent,
+            },
+        )?,
+        FormatAction::ImageEdit {
+            destination,
+            alt,
+            id,
+            width_percent,
+        } => image_edit_plan(
+            source,
+            &starts,
+            a,
+            b,
+            ImageFields {
+                destination,
+                alt,
+                id: id.as_deref(),
+                width_percent: *width_percent,
+            },
+        )?,
+        FormatAction::TableInsert { rows, cols } => table_insert_plan(source, a, b, *rows, *cols)?,
+        FormatAction::TableAttrs { id, caption } => {
+            table_attrs_plan(source, &starts, a, b, id.as_deref(), caption.as_deref())?
+        }
     };
 
     let result = apply_edits(source, &edits);
@@ -158,6 +244,8 @@ pub fn context(source: &str, selection: Selection) -> EditContext {
             url: found.url,
         }),
         callout: callout_at(source, &starts, a, b),
+        image: image_at(source, &starts, a, b),
+        table: table_at(source, &starts, a, b),
         strong: a < b && wrapped(source, a, b, Inline::Strong),
         emphasis: a < b && wrapped(source, a, b, Inline::Emphasis),
         strikethrough: a < b && wrapped(source, a, b, Inline::Strikethrough),
@@ -511,17 +599,18 @@ fn link_at(source: &str, a: usize, b: usize) -> Option<LinkFound> {
 
 /// Destino de un enlace desde justo después de `](`: `(inicio, fin)` del
 /// destino y fin del enlace (tras el `)`). Soporta paréntesis equilibrados,
-/// escapes, destino entre `<>` y título opcional.
+/// escapes, destino entre `<>` (el span es el interior) y título opcional.
 fn parse_destination(source: &str, at: usize) -> Option<(usize, usize, usize)> {
     let bytes = source.as_bytes();
     let mut i = at;
     while matches!(bytes.get(i), Some(b' ' | b'\t' | b'\n')) {
         i += 1;
     }
-    let dest_start = i;
+    let mut dest_start = i;
     let dest_end;
     if bytes.get(i) == Some(&b'<') {
         i += 1;
+        dest_start = i;
         let mut escaped = false;
         loop {
             let b = *bytes.get(i)?;
@@ -616,32 +705,54 @@ fn label_open(source: &str, close_bracket: usize) -> Option<usize> {
     None
 }
 
+/// Serializa un destino de enlace/imagen: con espacios, paréntesis o
+/// angulares se envuelve en `<>` (CommonMark) para que la construcción siga
+/// siendo sintaxis detectable, no texto literal.
+fn serialize_destination(destination: &str) -> String {
+    let bare_safe = !destination.is_empty()
+        && !destination
+            .chars()
+            .any(|c| c.is_whitespace() || matches!(c, '(' | ')' | '<' | '>'));
+    if bare_safe {
+        destination.to_string()
+    } else {
+        format!("<{}>", destination.replace('\\', "\\\\").replace('>', "\\>"))
+    }
+}
+
 fn link_plan(source: &str, a: usize, b: usize, url: &str) -> Option<RawPlan> {
     if url.trim().is_empty() {
         return None;
     }
-    if bracket_at(source, a, b).is_some_and(|(_, is_image)| is_image) {
+    if image_found(source, a, b).is_some() {
         return None; // imagen: sus controles son los de #30.
     }
+    let serialized = serialize_destination(url);
     if let Some(found) = link_at(source, a, b) {
         // Edición de enlace existente: solo el destino; texto, título y resto
         // intactos.
         if found.url == url {
             return None; // no-op.
         }
-        let edits = vec![(found.dest_start, found.dest_end, url.to_string())];
-        let after = (found.dest_start, found.dest_start + url.len());
+        let angle = source.as_bytes().get(found.dest_start.wrapping_sub(1)) == Some(&b'<');
+        let (start, end) = if angle {
+            (found.dest_start - 1, found.dest_end + 1)
+        } else {
+            (found.dest_start, found.dest_end)
+        };
+        let edits = vec![(start, end, serialized.clone())];
+        let after = (start, start + serialized.len());
         return Some((edits, after));
     }
     if a < b {
         let selected = &source[a..b];
         return Some((
-            vec![(a, b, format!("[{selected}]({url})"))],
+            vec![(a, b, format!("[{selected}]({serialized})"))],
             (a + 1, a + 1 + selected.len()),
         ));
     }
     Some((
-        vec![(a, a, format!("[texto]({url})"))],
+        vec![(a, a, format!("[texto]({serialized})"))],
         (a + 1, a + 1 + "texto".len()),
     ))
 }
@@ -849,6 +960,680 @@ fn callout_plan(
     ];
     let content_len = block_end - block_start;
     let after = (block_start + opener_text.len(), block_start + opener_text.len() + content_len);
+    Some((edits, after))
+}
+
+// ---------------------------------------------------------------------------
+// Imágenes (§18, §26.2) y tablas GFM (§35, §26.3)
+// ---------------------------------------------------------------------------
+
+/// Tokens de un bloque de atributos `{...}` (§7.4.3) con sus rangos: cada
+/// span es el token completo (`#id`, `"caption"`, `width=N%`).
+#[derive(Debug, Default)]
+struct AttrSpans {
+    /// `[inicio, fin)` del bloque completo `{...}`.
+    range: (usize, usize),
+    id: Option<(usize, usize)>,
+    caption: Option<(usize, usize)>,
+    width: Option<(usize, usize)>,
+}
+
+fn is_id_char(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b':' | b'.' | b'_' | b'-')
+}
+
+fn is_key_char(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-')
+}
+
+fn is_value_char(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b':' | b'%')
+}
+
+/// Bloque de atributos `{...}` que empieza en `open`, con los spans de sus
+/// tokens. `None` si no es sintaxis de atributos (§7.4.1: texto literal).
+fn attrs_spans(source: &str, open: usize) -> Option<AttrSpans> {
+    let bytes = source.as_bytes();
+    if bytes.get(open) != Some(&b'{') {
+        return None;
+    }
+    // `}` de cierre, respetando comillas y escapes (el caption puede
+    // contener casi cualquier cosa).
+    let mut i = open + 1;
+    let mut quote: Option<u8> = None;
+    let mut escaped = false;
+    let close = loop {
+        let Some(&b) = bytes.get(i) else {
+            return None; // bloque sin cerrar: texto literal.
+        };
+        if escaped {
+            escaped = false;
+        } else if b == b'\\' {
+            escaped = true;
+        } else if let Some(active) = quote {
+            if b == active {
+                quote = None;
+            }
+        } else if b == b'"' {
+            quote = Some(b);
+        } else if b == b'}' {
+            break i;
+        }
+        i += 1;
+    };
+    // La gramática manda: sin ella, la construcción completa es literal.
+    crate::attrs::parse_attributes(&source[open + 1..close])?;
+
+    let mut spans = AttrSpans {
+        range: (open, close + 1),
+        ..AttrSpans::default()
+    };
+    // Los tokens se delimitan con las mismas clases que `parse_attributes`
+    // (§7.4.3) para que los spans no consuman atributos ajenos.
+    let mut i = open + 1;
+    while i < close {
+        let c = source[i..].chars().next().unwrap_or('\0');
+        if c.is_whitespace() {
+            i += c.len_utf8();
+            continue;
+        }
+        let start = i;
+        match bytes[i] {
+            b'#' => {
+                i += 1;
+                while i < close && is_id_char(bytes[i]) {
+                    i += 1;
+                }
+                spans.id = Some((start, i));
+            }
+            b'"' => {
+                i += 1;
+                let mut escaped = false;
+                while i < close {
+                    match bytes[i] {
+                        b'\\' if !escaped => escaped = true,
+                        b'"' if !escaped => {
+                            i += 1;
+                            break;
+                        }
+                        _ => escaped = false,
+                    }
+                    i += 1;
+                }
+                spans.caption = Some((start, i));
+            }
+            _ => {
+                while i < close && is_key_char(bytes[i]) {
+                    i += 1;
+                }
+                if bytes.get(i) == Some(&b'=') {
+                    i += 1;
+                    while i < close && is_value_char(bytes[i]) {
+                        i += 1;
+                    }
+                }
+                if source[start..i].starts_with("width=") {
+                    spans.width = Some((start, i));
+                }
+            }
+        }
+    }
+    Some(spans)
+}
+
+fn attr_id_value(source: &str, span: (usize, usize)) -> String {
+    source[span.0 + 1..span.1].to_string()
+}
+
+fn attr_caption_value(source: &str, span: (usize, usize)) -> String {
+    let inner = &source[span.0 + 1..span.1 - 1];
+    let mut out = String::with_capacity(inner.len());
+    let mut escaped = false;
+    for c in inner.chars() {
+        if escaped {
+            out.push(c);
+            escaped = false;
+        } else if c == '\\' {
+            escaped = true;
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+fn attr_width_value(source: &str, span: (usize, usize)) -> Option<u8> {
+    source[span.0..span.1]
+        .strip_prefix("width=")?
+        .strip_suffix('%')?
+        .parse()
+        .ok()
+}
+
+fn quote_caption(caption: &str) -> String {
+    format!(
+        "\"{}\"",
+        caption.replace('\\', "\\\\").replace('"', "\\\"")
+    )
+}
+
+/// Token válido para insertar como `#id`.
+fn valid_id(id: &str) -> bool {
+    !id.is_empty() && id.bytes().all(is_id_char)
+}
+
+/// Amplía cada borrado de token de atributos con un único espacio
+/// adyacente, sin solaparse con los otros borrados del mismo bloque: se
+/// prefiere el espacio posterior y, si el token está al final del bloque, el
+/// anterior.
+fn extend_attr_deletes(source: &str, spans: &[(usize, usize)]) -> Vec<(usize, usize)> {
+    let mut spans = spans.to_vec();
+    spans.sort_unstable();
+    let mut out = Vec::with_capacity(spans.len());
+    for &(start, end) in &spans {
+        let mut start = start;
+        let mut end = end;
+        let prev_touch = out.iter().any(|&(_, e)| e == start);
+        let next_touch = spans.iter().any(|&(s, _)| s == end);
+        if !next_touch && source.as_bytes().get(end) == Some(&b' ') {
+            end += 1;
+        } else if !prev_touch && start > 0 && source.as_bytes()[start - 1] == b' ' {
+            start -= 1;
+        }
+        debug_assert!(
+            out.last().is_none_or(|&(_, e)| e <= start),
+            "borrados de atributos solapados"
+        );
+        out.push((start, end));
+    }
+    out
+}
+
+/// Estado detectado de una imagen: el constructo `![alt](ruta "título")`
+/// más el bloque de atributos pegado, si existe.
+struct ImageFound {
+    link: LinkFound,
+    attrs: Option<AttrSpans>,
+    /// Fin del constructo completo (atributos incluidos).
+    end: usize,
+}
+
+/// Imagen que contiene `[a, b]` (la selección puede abarcar desde el `!`
+/// inicial hasta los atributos, o estar dentro de cualquiera de esos
+/// extremos). Imágenes según sintaxis canónica §26.2.
+fn image_found(source: &str, a: usize, b: usize) -> Option<ImageFound> {
+    let mut search = 0;
+    while let Some(found) = source[search..].find("](") {
+        let close_bracket = search + found;
+        search = close_bracket + 2;
+        let Some((dest_start, dest_end, end)) = parse_destination(source, close_bracket + 2) else {
+            continue;
+        };
+        let Some(text_start) = label_open(source, close_bracket) else {
+            continue;
+        };
+        if text_start == 0 || source.as_bytes()[text_start - 1] != b'!' {
+            continue; // no es imagen.
+        }
+        let link = LinkFound {
+            start: text_start,
+            end,
+            text_start: text_start + 1,
+            text_end: close_bracket,
+            dest_start,
+            dest_end,
+            url: source[dest_start..dest_end].to_string(),
+        };
+        // Atributos pegados tras la construcción (§7.4.3).
+        let mut i = link.end;
+        while matches!(source.as_bytes().get(i), Some(b' ' | b'\t')) {
+            i += 1;
+        }
+        let (attrs, full_end) = match attrs_spans(source, i) {
+            Some(spans) => {
+                let end = spans.range.1;
+                (Some(spans), end)
+            }
+            None => (None, link.end),
+        };
+        // Contención sobre el constructo completo: `!`, alt, destino y
+        // atributos.
+        let full_start = text_start - 1;
+        if a >= full_start && b <= full_end {
+            return Some(ImageFound {
+                link,
+                attrs,
+                end: full_end,
+            });
+        }
+    }
+    None
+}
+
+/// Imagen que contiene `[a, b]` para el contexto (§44).
+fn image_at(source: &str, starts: &[usize], a: usize, b: usize) -> Option<ImageContext> {
+    let found = image_found(source, a, b)?;
+    let pos = |offset| position::position_of(source, starts, offset);
+    let attrs = found.attrs.as_ref();
+    Some(ImageContext {
+        range: Range::new(pos(found.link.start), pos(found.end)),
+        destination: found.link.url.clone(),
+        alt: source[found.link.text_start..found.link.text_end].to_string(),
+        title: {
+            let gap = source[found.link.dest_end..found.link.end.saturating_sub(1)].trim();
+            (gap.len() >= 2 && gap.starts_with('"') && gap.ends_with('"'))
+                .then(|| attr_caption_value(gap, (0, gap.len())))
+        },
+        id: attrs.and_then(|s| s.id).map(|span| attr_id_value(source, span)),
+        width_percent: attrs
+            .and_then(|s| s.width)
+            .and_then(|span| attr_width_value(source, span)),
+    })
+}
+
+fn is_table_row(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed.len() >= 2 && trimmed.starts_with('|') && trimmed.ends_with('|')
+}
+
+/// Fila de alineación GFM: celdas de `-` con `:` opcionales.
+fn is_table_separator(line: &str) -> bool {
+    let trimmed = line.trim();
+    if !is_table_row(trimmed) {
+        return false;
+    }
+    trimmed[1..trimmed.len() - 1].split('|').all(|cell| {
+        let cell = cell.trim();
+        !cell.is_empty()
+            && cell.contains('-')
+            && cell.bytes().all(|b| b == b'-' || b == b':')
+    })
+}
+
+fn table_columns(line: &str) -> usize {
+    let trimmed = line.trim();
+    trimmed[1..trimmed.len() - 1].split('|').count()
+}
+
+/// Estado detectado de una tabla: bloque de filas más la línea de
+/// atributos posterior (§26.3), si existe.
+struct TableFound {
+    block: (usize, usize),
+    attrs_line: Option<usize>,
+    attrs: Option<AttrSpans>,
+    columns: usize,
+}
+
+fn table_found(source: &str, starts: &[usize], a: usize, b: usize) -> Option<TableFound> {
+    let lines: Vec<&str> = source.split('\n').collect();
+    let line_at = |offset: usize| position::position_of(source, starts, offset).line as usize;
+    let mut anchor = line_at(a);
+    // Cursor en la línea de atributos: la tabla es la del bloque anterior.
+    if !is_table_row(lines.get(anchor).copied().unwrap_or("")) {
+        if anchor == 0 {
+            return None;
+        }
+        anchor -= 1;
+    }
+    if !is_table_row(lines.get(anchor).copied().unwrap_or("")) {
+        return None;
+    }
+    let mut first = anchor;
+    while first > 0 && is_table_row(lines[first - 1]) {
+        first -= 1;
+    }
+    let mut last = anchor;
+    while last + 1 < lines.len() && is_table_row(lines[last + 1]) {
+        last += 1;
+    }
+    if first + 1 > last || !is_table_separator(lines[first + 1]) {
+        return None; // sin fila de alineación no hay tabla (§35).
+    }
+    let (block_start, _) = line_span(source, starts, first);
+    let block_end = line_content_end(source, starts, last as u32);
+    // Línea de atributos propia posterior (§26.3). El offset se calcula solo
+    // con la sangre inicial: los `\r`/espacios finales no desplazan el `{`.
+    let (attrs_line, attrs) = lines
+        .get(last + 1)
+        .and_then(|text| {
+            let trimmed = text.trim();
+            let indent = text.len() - text.trim_start().len();
+            let offset = starts.get(last + 1)? + indent;
+            let spans = attrs_spans(source, offset)?;
+            (spans.range.1 == offset + trimmed.len()).then_some((last + 1, spans))
+        })
+        .unzip();
+    // La selección debe estar en el bloque de filas o en su línea de atributos.
+    let in_block = a >= block_start && b <= block_end;
+    let in_attrs = attrs
+        .as_ref()
+        .is_some_and(|spans| a >= spans.range.0 && b <= spans.range.1);
+    if !in_block && !in_attrs {
+        return None;
+    }
+    Some(TableFound {
+        block: (block_start, block_end),
+        attrs_line,
+        attrs,
+        columns: table_columns(lines[first]),
+    })
+}
+
+/// Tabla que contiene `[a, b]` para el contexto (§44).
+fn table_at(source: &str, starts: &[usize], a: usize, b: usize) -> Option<TableContext> {
+    let found = table_found(source, starts, a, b)?;
+    let pos = |offset| position::position_of(source, starts, offset);
+    let attrs = found.attrs.as_ref();
+    Some(TableContext {
+        range: Range::new(pos(found.block.0), pos(found.block.1)),
+        columns: found.columns,
+        id: attrs.and_then(|s| s.id).map(|span| attr_id_value(source, span)),
+        caption: attrs
+            .and_then(|s| s.caption)
+            .map(|span| attr_caption_value(source, span)),
+    })
+}
+
+/// Campos de una imagen para insertar/editar (§18): `None` en `id` o
+/// `width_percent` significa «sin ese atributo».
+#[derive(Debug, Clone, Copy)]
+struct ImageFields<'a> {
+    destination: &'a str,
+    alt: &'a str,
+    id: Option<&'a str>,
+    width_percent: Option<u8>,
+}
+
+fn image_insert_plan(source: &str, a: usize, b: usize, fields: ImageFields<'_>) -> Option<RawPlan> {
+    let ImageFields {
+        destination,
+        alt,
+        id,
+        width_percent,
+    } = fields;
+    if destination.is_empty() {
+        return None;
+    }
+    if let Some(width) = width_percent {
+        if !(1..=100).contains(&width) {
+            return None;
+        }
+    }
+    let mut tokens = Vec::new();
+    if let Some(id) = id {
+        if !valid_id(id) {
+            return None;
+        }
+        tokens.push(format!("#{id}"));
+    }
+    if let Some(width) = width_percent {
+        tokens.push(format!("width={width}%"));
+    }
+    let attrs = if tokens.is_empty() {
+        String::new()
+    } else {
+        format!(" {{{}}}", tokens.join(" "))
+    };
+    let (alt, selected) = if a < b {
+        (&source[a..b], true)
+    } else {
+        (alt, false)
+    };
+    let _ = selected;
+    let text = format!("![{alt}]({}){attrs}", serialize_destination(destination));
+    Some((
+        vec![(a, b, text)],
+        (a + 2, a + 2 + alt.len()), // selección sobre el alt (§8.6).
+    ))
+}
+
+fn image_edit_plan(
+    source: &str,
+    starts: &[usize],
+    a: usize,
+    b: usize,
+    fields: ImageFields<'_>,
+) -> Option<RawPlan> {
+    let ImageFields {
+        destination,
+        alt,
+        id,
+        width_percent,
+    } = fields;
+    if destination.is_empty() {
+        return None;
+    }
+    if let Some(width) = width_percent {
+        if !(1..=100).contains(&width) {
+            return None;
+        }
+    }
+    if let Some(id) = id {
+        if !valid_id(id) {
+            return None;
+        }
+    }
+    let found = image_found(source, a, b)?;
+    let mut edits: Vec<RawEdit> = Vec::new();
+    let mut deleted: Vec<(usize, usize)> = Vec::new();
+
+    if destination != found.link.url {
+        let serialized = serialize_destination(destination);
+        let angle = source.as_bytes().get(found.link.dest_start.wrapping_sub(1)) == Some(&b'<');
+        let (start, end) = if angle {
+            (found.link.dest_start - 1, found.link.dest_end + 1)
+        } else {
+            (found.link.dest_start, found.link.dest_end)
+        };
+        edits.push((start, end, serialized));
+    }
+    let alt_span = (found.link.text_start, found.link.text_end);
+    if alt != &source[alt_span.0..alt_span.1] {
+        edits.push((alt_span.0, alt_span.1, alt.to_string()));
+    }
+
+    let mut new_block_tokens: Vec<String> = Vec::new();
+    match (&found.attrs, id) {
+        (Some(spans), Some(id)) => match spans.id {
+            Some(span) if attr_id_value(source, span) != id => {
+                edits.push((span.0, span.1, format!("#{id}")));
+            }
+            None => new_block_tokens.push(format!("#{id} ")),
+            _ => {}
+        },
+        (Some(spans), None) => {
+            if let Some(span) = spans.id {
+                deleted.push(span);
+            }
+        }
+        (None, Some(id)) => new_block_tokens.push(format!("#{id}")),
+        (None, None) => {}
+    }
+    match (&found.attrs, width_percent) {
+        (Some(spans), Some(width)) => match spans.width {
+            Some(span) if attr_width_value(source, span) != Some(width) => {
+                edits.push((span.0, span.1, format!("width={width}%")));
+            }
+            None => new_block_tokens.push(format!("width={width}% ")),
+            _ => {}
+        },
+        (Some(spans), None) => {
+            if let Some(span) = spans.width {
+                deleted.push(span);
+            }
+        }
+        (None, Some(width)) => new_block_tokens.push(format!("width={width}%")),
+        (None, None) => {}
+    }
+
+    for (start, end) in extend_attr_deletes(source, &deleted) {
+        edits.push((start, end, String::new()));
+    }
+    if let Some(spans) = &found.attrs {
+        // Tokens nuevos dentro del bloque existente, justo tras `{`.
+        if !new_block_tokens.is_empty() {
+            let text = new_block_tokens.join("");
+            edits.push((spans.range.0 + 1, spans.range.0 + 1, text));
+        }
+        // Si tras los borrados (y sin tokens nuevos) solo quedan espacios,
+        // el bloque desaperece.
+        if new_block_tokens.is_empty() {
+            let deletes: Vec<(usize, usize)> = edits
+                .iter()
+                .filter(|(s, e, t)| {
+                    t.is_empty() && *s >= spans.range.0 && *e <= spans.range.1
+                })
+                .map(|(s, e, _)| (*s, *e))
+                .collect();
+            let mut inner = source[spans.range.0 + 1..spans.range.1 - 1].to_string();
+            for (start, end) in deletes.iter().rev() {
+                inner.replace_range(start - spans.range.0 - 1..end - spans.range.0 - 1, "");
+            }
+            if inner.trim().is_empty() {
+                edits.retain(|(s, e, t)| !(t.is_empty() && *s >= spans.range.0 && *e <= spans.range.1));
+                let mut start = spans.range.0;
+                if start > 0 && source.as_bytes()[start - 1] == b' ' {
+                    start -= 1;
+                }
+                edits.push((start, spans.range.1, String::new()));
+            }
+        }
+    } else if !new_block_tokens.is_empty() {
+        let tokens: Vec<&str> = new_block_tokens.iter().map(|t| t.trim_end()).collect();
+        edits.push((found.end, found.end, format!(" {{{}}}", tokens.join(" "))));
+    }
+
+    if edits.is_empty() {
+        return None; // no-op.
+    }
+    edits.sort_by_key(|(start, end, _)| (*start, *end));
+    let _ = starts;
+    let after = (map_offset(&edits, a), map_offset(&edits, b));
+    Some((edits, after))
+}
+
+fn table_insert_plan(
+    source: &str,
+    a: usize,
+    b: usize,
+    rows: usize,
+    cols: usize,
+) -> Option<RawPlan> {
+    if !(1..=50).contains(&rows) || !(1..=8).contains(&cols) {
+        return None;
+    }
+    let nl = LineEnding::detect(source).as_str();
+    let header = format!("|{}", "     |".repeat(cols));
+    let separator = format!("|{}", " --- |".repeat(cols));
+    let empty_row = header.clone();
+    let mut text = format!("{header}{nl}{separator}{nl}");
+    for _ in 0..rows {
+        text.push_str(&empty_row);
+        text.push_str(nl);
+    }
+    text.truncate(text.len() - nl.len()); // sin salto final colgante.
+    let after = (a + 2, a + 2); // primera celda de cabecera.
+    Some((vec![(a, b, text)], after))
+}
+
+fn table_attrs_plan(
+    source: &str,
+    starts: &[usize],
+    a: usize,
+    b: usize,
+    id: Option<&str>,
+    caption: Option<&str>,
+) -> Option<RawPlan> {
+    if let Some(id) = id {
+        if !valid_id(id) {
+            return None;
+        }
+    }
+    let caption = caption.filter(|text| !text.trim().is_empty());
+    let found = table_found(source, starts, a, b)?;
+    let mut edits: Vec<RawEdit> = Vec::new();
+    let mut deleted: Vec<(usize, usize)> = Vec::new();
+
+    let mut new_tokens: Vec<String> = Vec::new();
+    match (&found.attrs, id) {
+        (Some(spans), Some(id)) => match spans.id {
+            Some(span) if attr_id_value(source, span) != id => {
+                edits.push((span.0, span.1, format!("#{id}")));
+            }
+            None => new_tokens.push(format!("#{id} ")),
+            _ => {}
+        },
+        (Some(spans), None) => {
+            if let Some(span) = spans.id {
+                deleted.push(span);
+            }
+        }
+        (None, Some(id)) => new_tokens.push(format!("#{id}")),
+        (None, None) => {}
+    }
+    match (&found.attrs, caption) {
+        (Some(spans), Some(caption)) => match spans.caption {
+            Some(span) if attr_caption_value(source, span) != caption => {
+                edits.push((span.0, span.1, quote_caption(caption)));
+            }
+            None => new_tokens.push(format!("{} ", quote_caption(caption))),
+            _ => {}
+        },
+        (Some(spans), None) => {
+            if let Some(span) = spans.caption {
+                deleted.push(span);
+            }
+        }
+        (None, Some(caption)) => new_tokens.push(quote_caption(caption)),
+        (None, None) => {}
+    }
+
+    for (start, end) in extend_attr_deletes(source, &deleted) {
+        edits.push((start, end, String::new()));
+    }
+    if let Some(spans) = &found.attrs {
+        if !new_tokens.is_empty() {
+            let text = new_tokens.join("");
+            edits.push((spans.range.0 + 1, spans.range.0 + 1, text));
+        }
+        // La línea de atributos que queda vacía (sin tokens nuevos) se
+        // elimina entera.
+        if new_tokens.is_empty() {
+            let deletes: Vec<(usize, usize)> = edits
+                .iter()
+                .filter(|(s, e, t)| t.is_empty() && *s >= spans.range.0 && *e <= spans.range.1)
+                .map(|(s, e, _)| (*s, *e))
+                .collect();
+            let mut inner = source[spans.range.0 + 1..spans.range.1 - 1].to_string();
+            for (start, end) in deletes.iter().rev() {
+                inner.replace_range(start - spans.range.0 - 1..end - spans.range.0 - 1, "");
+            }
+            if inner.trim().is_empty() {
+                edits.retain(|(s, e, t)| !(t.is_empty() && *s >= spans.range.0 && *e <= spans.range.1));
+                let line = found.attrs_line?;
+                let line_start = starts[line];
+                let mut end = line_content_end(source, starts, line as u32);
+                if source.as_bytes().get(end) == Some(&b'\r') {
+                    end += 1;
+                }
+                if source.as_bytes().get(end) == Some(&b'\n') {
+                    end += 1;
+                }
+                edits.push((line_start, end, String::new()));
+            }
+        }
+    } else if !new_tokens.is_empty() {
+        let tokens: Vec<&str> = new_tokens.iter().map(|t| t.trim_end()).collect();
+        let line = format!("{{{}}}", tokens.join(" "));
+        let nl = LineEnding::detect(source).as_str();
+        edits.push((found.block.1, found.block.1, format!("{nl}{line}")));
+    }
+
+    if edits.is_empty() {
+        return None; // no-op.
+    }
+    edits.sort_by_key(|(start, end, _)| (*start, *end));
+    let after = (map_offset(&edits, a), map_offset(&edits, b));
     Some((edits, after))
 }
 
@@ -1395,6 +2180,483 @@ mod tests {
             editor.selection(),
             plan.selection,
             "redo restaura la selección posterior"
+        );
+    }
+
+    // ---- Imágenes (§18, §26.2) ----
+
+    #[test]
+    fn imagen_insertar_basica_y_con_atributos() {
+        let action = FormatAction::ImageInsert {
+            destination: "assets/a.png".into(),
+            alt: "Foto".into(),
+            id: Some("fig:a".into()),
+            width_percent: Some(50),
+        };
+        assert_eq!(
+            applied("", Selection::collapsed(pos(0, 0)), &action),
+            Some("![Foto](assets/a.png) {#fig:a width=50%}".to_string())
+        );
+        let action = FormatAction::ImageInsert {
+            destination: "a.png".into(),
+            alt: "x".into(),
+            id: None,
+            width_percent: None,
+        };
+        assert_eq!(
+            applied("", Selection::collapsed(pos(0, 0)), &action),
+            Some("![x](a.png)".to_string())
+        );
+    }
+
+    #[test]
+    fn imagen_insertar_con_seleccion_usa_el_texto_como_alt() {
+        let text = "hola mundo";
+        let action = FormatAction::ImageInsert {
+            destination: "a.png".into(),
+            alt: "otro".into(),
+            id: None,
+            width_percent: None,
+        };
+        assert_eq!(
+            applied(text, sel_of(text, 0, 4), &action),
+            Some("![hola](a.png) mundo".to_string())
+        );
+    }
+
+    #[test]
+    fn imagen_insertar_parametros_invalidos_no_aplican() {
+        let at = Selection::collapsed(pos(0, 0));
+        let invalid = [
+            FormatAction::ImageInsert {
+                destination: String::new(),
+                alt: "x".into(),
+                id: None,
+                width_percent: None,
+            },
+            FormatAction::ImageInsert {
+                destination: "a.png".into(),
+                alt: "x".into(),
+                id: None,
+                width_percent: Some(0),
+            },
+            FormatAction::ImageInsert {
+                destination: "a.png".into(),
+                alt: "x".into(),
+                id: None,
+                width_percent: Some(101),
+            },
+            FormatAction::ImageInsert {
+                destination: "a.png".into(),
+                alt: "x".into(),
+                id: Some("no válido".into()),
+                width_percent: None,
+            },
+        ];
+        for action in invalid {
+            assert_eq!(plan("", at, &action), None, "{action:?}");
+        }
+    }
+
+    #[test]
+    fn imagen_editar_conserva_titulo_y_atributos_ajenos() {
+        let text = "ver ![Foto](assets/a.png \"Título\") {#fig:a \"cap\" width=50% k=v} ya";
+        let cursor = text.find("Foto").unwrap() + 1;
+        let action = FormatAction::ImageEdit {
+            destination: "assets/a.png".into(),
+            alt: "Otra".into(),
+            id: Some("fig:a".into()),
+            width_percent: Some(50),
+        };
+        assert_eq!(
+            applied(text, Selection::collapsed(sel_of(text, cursor, cursor).anchor), &action),
+            Some("ver ![Otra](assets/a.png \"Título\") {#fig:a \"cap\" width=50% k=v} ya".to_string())
+        );
+    }
+
+    #[test]
+    fn imagen_editar_ruta_y_ancho() {
+        let text = "![x](old.png) {width=50%}";
+        let cursor = text.find('x').unwrap();
+        let action = FormatAction::ImageEdit {
+            destination: "new.png".into(),
+            alt: "x".into(),
+            id: None,
+            width_percent: Some(30),
+        };
+        assert_eq!(
+            applied(text, Selection::collapsed(sel_of(text, cursor, cursor).anchor), &action),
+            Some("![x](new.png) {width=30%}".to_string())
+        );
+    }
+
+    #[test]
+    fn imagen_editar_id_inserta_y_borra_bloque() {
+        // Sin atributos: pedir id añade el bloque.
+        let text = "![x](a.png)";
+        let cursor = text.find('x').unwrap();
+        let action = FormatAction::ImageEdit {
+            destination: "a.png".into(),
+            alt: "x".into(),
+            id: Some("fig:x".into()),
+            width_percent: None,
+        };
+        assert_eq!(
+            applied(text, Selection::collapsed(sel_of(text, cursor, cursor).anchor), &action),
+            Some("![x](a.png) {#fig:x}".to_string())
+        );
+        // Quitar id y ancho deja el bloque vacío: se elimina entero.
+        let text = "![x](a.png) {#fig:x}";
+        let cursor = text.find('x').unwrap();
+        let action = FormatAction::ImageEdit {
+            destination: "a.png".into(),
+            alt: "x".into(),
+            id: None,
+            width_percent: None,
+        };
+        assert_eq!(
+            applied(text, Selection::collapsed(sel_of(text, cursor, cursor).anchor), &action),
+            Some("![x](a.png)".to_string())
+        );
+    }
+
+    #[test]
+    fn imagen_editar_desde_los_atributos() {
+        // El cursor en el bloque `{...}` también está «en la imagen».
+        let text = "![x](a.png) {#fig:x}";
+        let cursor = text.find("fig").unwrap();
+        let action = FormatAction::ImageEdit {
+            destination: "a.png".into(),
+            alt: "y".into(),
+            id: Some("fig:x".into()),
+            width_percent: None,
+        };
+        assert_eq!(
+            applied(text, Selection::collapsed(sel_of(text, cursor, cursor).anchor), &action),
+            Some("![y](a.png) {#fig:x}".to_string())
+        );
+    }
+
+    #[test]
+    fn imagen_editar_fuera_de_constructo_o_igual_no_aplica() {
+        let text = "hola ![x](a.png)";
+        let cursor = text.find("hola").unwrap();
+        let action = FormatAction::ImageEdit {
+            destination: "b.png".into(),
+            alt: "y".into(),
+            id: None,
+            width_percent: None,
+        };
+        let at = Selection::collapsed(sel_of(text, cursor, cursor).anchor);
+        assert_eq!(plan(text, at, &action), None);
+
+        // Sin cambios respecto al estado actual: no-op.
+        let text = "![x](a.png) {#fig:x width=50%}";
+        let cursor = text.find('x').unwrap();
+        let action = FormatAction::ImageEdit {
+            destination: "a.png".into(),
+            alt: "x".into(),
+            id: Some("fig:x".into()),
+            width_percent: Some(50),
+        };
+        assert_eq!(
+            plan(text, Selection::collapsed(sel_of(text, cursor, cursor).anchor), &action),
+            None
+        );
+    }
+
+    #[test]
+    fn imagen_alt_unicode() {
+        let text = "ñandú";
+        let action = FormatAction::ImageInsert {
+            destination: "a.png".into(),
+            alt: "ñandú".into(),
+            id: None,
+            width_percent: None,
+        };
+        assert_eq!(
+            applied(text, sel_of(text, 0, text.len()), &action),
+            Some("![ñandú](a.png)".to_string())
+        );
+    }
+
+    // ---- Tablas (§35, §26.3, §28.2) ----
+
+    #[test]
+    fn tabla_insertar_esqueleto() {
+        let action = FormatAction::TableInsert { rows: 1, cols: 2 };
+        assert_eq!(
+            applied("", Selection::collapsed(pos(0, 0)), &action),
+            Some("|     |     |\n| --- | --- |\n|     |     |".to_string())
+        );
+        // Filas o columnas fuera de rango.
+        for action in [
+            FormatAction::TableInsert { rows: 0, cols: 2 },
+            FormatAction::TableInsert { rows: 51, cols: 2 },
+            FormatAction::TableInsert { rows: 1, cols: 0 },
+            FormatAction::TableInsert { rows: 1, cols: 9 },
+        ] {
+            assert_eq!(plan("", Selection::collapsed(pos(0, 0)), &action), None);
+        }
+    }
+
+    #[test]
+    fn tabla_atributos_crea_linea_y_conserva_la_tabla() {
+        let text = "| A | B |\n| --- | --- |\n| 1 | 2 |\n";
+        let cursor = text.find('1').unwrap();
+        let action = FormatAction::TableAttrs {
+            id: Some("tbl:x".into()),
+            caption: Some("Resultados".into()),
+        };
+        assert_eq!(
+            applied(text, Selection::collapsed(sel_of(text, cursor, cursor).anchor), &action),
+            Some("| A | B |\n| --- | --- |\n| 1 | 2 |\n{#tbl:x \"Resultados\"}\n".to_string())
+        );
+    }
+
+    #[test]
+    fn tabla_atributos_edita_conservando_lo_no_tocado() {
+        let text = "| A |\n| --- |\n{#tbl:x \"Res\"}\n";
+        let cursor = text.find('A').unwrap();
+        let at = Selection::collapsed(sel_of(text, cursor, cursor).anchor);
+        // Solo cambia el id.
+        let action = FormatAction::TableAttrs {
+            id: Some("tbl:y".into()),
+            caption: Some("Res".into()),
+        };
+        assert_eq!(
+            applied(text, at, &action),
+            Some("| A |\n| --- |\n{#tbl:y \"Res\"}\n".to_string())
+        );
+        // Solo se borra la caption.
+        let action = FormatAction::TableAttrs {
+            id: Some("tbl:x".into()),
+            caption: None,
+        };
+        assert_eq!(
+            applied(text, at, &action),
+            Some("| A |\n| --- |\n{#tbl:x}\n".to_string())
+        );
+    }
+
+    #[test]
+    fn tabla_atributos_vacios_eliminan_la_linea() {
+        let text = "| A |\n| --- |\n{#tbl:x \"Res\"}\n";
+        let cursor = text.find('A').unwrap();
+        let action = FormatAction::TableAttrs {
+            id: None,
+            caption: None,
+        };
+        assert_eq!(
+            applied(text, Selection::collapsed(sel_of(text, cursor, cursor).anchor), &action),
+            Some("| A |\n| --- |\n".to_string())
+        );
+    }
+
+    #[test]
+    fn tabla_atributos_desde_la_linea_de_atributos() {
+        let text = "| A |\n| --- |\n{#tbl:x \"Res\"}\n";
+        let cursor = text.find("tbl").unwrap();
+        let action = FormatAction::TableAttrs {
+            id: Some("tbl:z".into()),
+            caption: Some("Res".into()),
+        };
+        assert_eq!(
+            applied(text, Selection::collapsed(sel_of(text, cursor, cursor).anchor), &action),
+            Some("| A |\n| --- |\n{#tbl:z \"Res\"}\n".to_string())
+        );
+    }
+
+    #[test]
+    fn tabla_atributos_fuera_de_tabla_o_sin_cambios_no_aplican() {
+        let action = FormatAction::TableAttrs {
+            id: Some("tbl:x".into()),
+            caption: None,
+        };
+        assert_eq!(plan("hola", sel_of("hola", 0, 4), &action), None);
+        let text = "| A |\n| --- |\n{#tbl:x \"Res\"}\n";
+        let cursor = text.find('A').unwrap();
+        let action = FormatAction::TableAttrs {
+            id: Some("tbl:x".into()),
+            caption: Some("Res".into()),
+        };
+        assert_eq!(
+            plan(text, Selection::collapsed(sel_of(text, cursor, cursor).anchor), &action),
+            None
+        );
+    }
+
+    #[test]
+    fn contexto_imagen_y_tabla() {
+        let text = "![Foto](a.png \"T\") {#fig:a width=40%}\n\n| A | B |\n| --- | ---: |\n| 1 | 2 |\n{#tbl:x \"Res\"}\n";
+        let cursor = text.find("Foto").unwrap();
+        let image = context(text, Selection::collapsed(sel_of(text, cursor, cursor).anchor))
+            .image
+            .expect("imagen");
+        assert_eq!(image.destination, "a.png");
+        assert_eq!(image.alt, "Foto");
+        assert_eq!(image.title.as_deref(), Some("T"));
+        assert_eq!(image.id.as_deref(), Some("fig:a"));
+        assert_eq!(image.width_percent, Some(40));
+
+        let cursor = text.find('1').unwrap();
+        let table = context(text, Selection::collapsed(sel_of(text, cursor, cursor).anchor))
+            .table
+            .expect("tabla");
+        assert_eq!(table.columns, 2);
+        assert_eq!(table.id.as_deref(), Some("tbl:x"));
+        assert_eq!(table.caption.as_deref(), Some("Res"));
+    }
+
+    #[test]
+    fn imagen_edicion_es_una_transaccion_con_undo_redo() {
+        use crate::document::Document;
+        use crate::Editor;
+
+        let text = "![x](a.png) {#fig:x}";
+        let cursor = text.find('x').unwrap();
+        let selection = Selection::collapsed(sel_of(text, cursor, cursor).anchor);
+        let action = FormatAction::ImageEdit {
+            destination: "b.png".into(),
+            alt: "y".into(),
+            id: Some("fig:x".into()),
+            width_percent: None,
+        };
+        let plan = plan(text, selection, &action).unwrap();
+        let mut editor = Editor::new(Document::from_text(None, text.to_string()));
+        editor.set_selection(selection).unwrap();
+        editor
+            .replace_all_selecting(&plan.edits, plan.selection)
+            .unwrap();
+        assert_eq!(editor.document().content(), "![y](b.png) {#fig:x}");
+        assert!(editor.undo());
+        assert_eq!(editor.document().content(), text);
+        assert!(editor.redo());
+        assert_eq!(editor.document().content(), "![y](b.png) {#fig:x}");
+    }
+
+    // ---- Regresiones del review de #30 ----
+
+    #[test]
+    fn atributos_en_orden_inverso_no_solapan_los_borrados() {
+        // Limpiar id y ancho cuyos tokens están en orden inverso al de los
+        // campos no debe solapar los espacios ni provocar cortes inválidos.
+        let text = "![x](a.png) {width=50% #fig:x}";
+        let cursor = text.find('x').unwrap();
+        let action = FormatAction::ImageEdit {
+            destination: "a.png".into(),
+            alt: "x".into(),
+            id: None,
+            width_percent: None,
+        };
+        assert_eq!(
+            applied(text, Selection::collapsed(sel_of(text, cursor, cursor).anchor), &action),
+            Some("![x](a.png)".to_string())
+        );
+    }
+
+    #[test]
+    fn bloque_de_atributos_con_tokens_nuevos_no_se_elimina() {
+        // Sustituir el id por un ancho deja un bloque con contenido nuevo:
+        // no se puede borrar el bloque entero.
+        let text = "![x](a.png) {#fig:x}";
+        let cursor = text.find('x').unwrap();
+        let action = FormatAction::ImageEdit {
+            destination: "a.png".into(),
+            alt: "x".into(),
+            id: None,
+            width_percent: Some(50),
+        };
+        assert_eq!(
+            applied(text, Selection::collapsed(sel_of(text, cursor, cursor).anchor), &action),
+            Some("![x](a.png) {width=50% }".to_string())
+        );
+    }
+
+    #[test]
+    fn tabla_atributos_con_crlf_se_detectan() {
+        let text = "| A |\r\n| --- |\r\n{#tbl:x \"Res\"}\r\n";
+        let cursor = text.find('A').unwrap();
+        let action = FormatAction::TableAttrs {
+            id: Some("tbl:y".into()),
+            caption: Some("Res".into()),
+        };
+        assert_eq!(
+            applied(text, Selection::collapsed(sel_of(text, cursor, cursor).anchor), &action),
+            Some("| A |\r\n| --- |\r\n{#tbl:y \"Res\"}\r\n".to_string())
+        );
+    }
+
+    #[test]
+    fn atributos_sin_separacion_no_consumen_atributos_ajenos() {
+        // `{width=50%"cap"}` son dos tokens: editar el ancho no toca el caption.
+        let text = "![x](a.png) {width=50%\"cap\"}";
+        let cursor = text.find('x').unwrap();
+        let action = FormatAction::ImageEdit {
+            destination: "a.png".into(),
+            alt: "x".into(),
+            id: None,
+            width_percent: Some(30),
+        };
+        assert_eq!(
+            applied(text, Selection::collapsed(sel_of(text, cursor, cursor).anchor), &action),
+            Some("![x](a.png) {width=30%\"cap\"}".to_string())
+        );
+    }
+
+    #[test]
+    fn ruta_con_espacios_se_serializa_entre_angulares() {
+        // El destino con espacios debe seguir siendo sintaxis detectable.
+        let action = FormatAction::ImageInsert {
+            destination: "assets/my photo.png".into(),
+            alt: "x".into(),
+            id: None,
+            width_percent: None,
+        };
+        let result = applied("", Selection::collapsed(pos(0, 0)), &action)
+            .unwrap();
+        assert_eq!(result, "![x](<assets/my photo.png>)");
+        // Ida y vuelta: la imagen sigue detectándose y se edita el alt.
+        let cursor = result.find('x').unwrap();
+        let action = FormatAction::ImageEdit {
+            destination: "assets/my photo.png".into(),
+            alt: "y".into(),
+            id: None,
+            width_percent: None,
+        };
+        assert_eq!(
+            applied(&result, Selection::collapsed(sel_of(&result, cursor, cursor).anchor), &action),
+            Some("![y](<assets/my photo.png>)".to_string())
+        );
+    }
+
+    #[test]
+    fn enlace_con_espacios_se_serializa_entre_angulares() {
+        let text = "ab";
+        let action = FormatAction::Link {
+            url: "my page.md".into(),
+        };
+        assert_eq!(
+            applied(text, Selection::collapsed(pos(0, 2)), &action),
+            Some("ab[texto](<my page.md>)".to_string())
+        );
+    }
+
+    #[test]
+    fn seleccion_que_abarca_alt_y_atributos_detecta_la_imagen() {
+        // La selección empieza en el alt y termina dentro de `{...}`: es la
+        // misma imagen, no dos constructos sueltos.
+        let text = "![x](a.png) {#fig:x}";
+        let selection = sel_of(text, text.find('x').unwrap(), text.find("fig").unwrap() + 2);
+        let action = FormatAction::ImageEdit {
+            destination: "a.png".into(),
+            alt: "y".into(),
+            id: Some("fig:x".into()),
+            width_percent: None,
+        };
+        assert_eq!(
+            applied(text, selection, &action),
+            Some("![y](a.png) {#fig:x}".to_string())
         );
     }
 }
