@@ -9,6 +9,33 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 
 ## [Unreleased]
 
+### Añadido
+
+- Diagramas DOT (issue #68, §7.3.1, ADR-007): los bloques cercados
+  ` ```dot ` con sintaxis Graphviz se renderizan como diagrama en Preview y
+  PDF con el **mismo SVG** (paridad obligatoria). Motor Rust puro
+  (`layout-rs`, MIT) encapsulado en `minmark-diagram`: sin red, sin binarios
+  externos y sin motor de JavaScript. DOT inválido muestra el marcador
+  visible `⚠ [diagrama no válido: …]` en ambas superficies (patrón ADR-002)
+  y el fuente Markdown sigue siendo el bloque de código, visible y editable.
+  El área del diagrama usa fondo claro para que los colores por defecto de
+  DOT sean legibles también en tema oscuro (el DOT puede fijar los suyos).
+
+### Limitaciones aceptadas (diagramas)
+
+- La sintaxis es DOT (Graphviz), no mermaid: decisión del propietario que
+  prioriza la paridad Preview/PDF y la promesa de dependencias lean (§4).
+- Subconjunto de DOT validado (ADR-007): `shape` (elipse/círculo, caja,
+  record, doble círculo), `rankdir` LR/TB, `style` solid/dashed/filled y
+  `label`/`color`/`fillcolor`/`fontsize`/`penwidth`/`width`. Lo que el motor
+  aplicaría mal o ignoraría (clusters, `diamond`, `rankdir=BT`, `fontcolor`,
+  estilos combinados…) muestra el marcador visible en vez de deformarse.
+- Tipografía de las etiquetas resuelta a contornos con fuentes empaquetadas
+  (Liberation Sans + typst-assets): los glifos sin fuente empaquetada (p. ej.
+  CJK) se dibujan con sustituto en ambas superficies por igual.
+- El editor muestra el fuente como bloque de código; el diagrama renderizado
+  vive en Preview/PDF.
+
 ## [0.5.0] — 2026-10-28
 
 ### Añadido

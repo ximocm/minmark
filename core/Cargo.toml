@@ -4,6 +4,7 @@ members = [
     "minmark-document",
     "minmark-config",
     "minmark-math",
+    "minmark-diagram",
     "minmark-parser",
     "minmark-renderer",
     "minmark-pdf",
@@ -19,6 +20,7 @@ license = "Apache-2.0"
 minmark-document = { path = "minmark-document", version = "0.5.0" }
 minmark-config = { path = "minmark-config", version = "0.5.0" }
 minmark-math = { path = "minmark-math", version = "0.5.0" }
+minmark-diagram = { path = "minmark-diagram", version = "0.5.0" }
 
 # Parser Markdown único (§4.2), versión benchmarkada en ISSUE-010.
 # `default-features = false` (§4.5): sin renderer HTML propio ni SIMD; el
