@@ -7,6 +7,7 @@
 //! semántica §8.5/§8.6.
 
 mod completion;
+mod context_controls;
 pub mod mode;
 pub mod pane;
 pub mod tags;

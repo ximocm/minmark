@@ -347,6 +347,37 @@ impl TabManager {
         replaced
     }
 
+    /// Acción editorial contextual §44 (fase 7 #29): planifica `action` con
+    /// `minmark_document::format::plan` sobre el tab activo y la aplica como
+    /// **UNA transacción** con la selección §8.6 registrada
+    /// (`Editor::replace_all_selecting`): undo restaura la selección previa
+    /// y redo la posterior.
+    ///
+    /// `false` = acción no aplicable (`plan` devuelve `None`: sintaxis no
+    /// soportada, rango inválido o no-op, §8.4) o error de edición: el
+    /// documento no se toca. El llamador refresca la vista con
+    /// `reload_active` solo si devuelve `true` (§8.6: `load` restaura
+    /// cursor/selección desde el modelo).
+    pub fn apply_format_active(&mut self, action: &minmark_document::format::FormatAction) -> bool {
+        let applied = {
+            let tab = &mut self.tabs[self.active];
+            let Some(plan) = minmark_document::format::plan(
+                tab.editor.document().content(),
+                tab.editor.selection(),
+                action,
+            ) else {
+                return false;
+            };
+            tab.editor
+                .replace_all_selecting(&plan.edits, plan.selection)
+                .is_ok()
+        };
+        if applied {
+            self.resync_saved_flag();
+        }
+        applied
+    }
+
     /// Puente EditSink (§8.6): borra el rango `[from, to]`. Un
     /// [`minmark_document::EditError`] improbable se ignora documentadamente:
     /// sin panics en la UI.
@@ -953,6 +984,77 @@ mod tests {
         assert_eq!(
             tabs.active().editor.document().content(),
             "cZuatro\ncinco\n"
+        );
+    }
+
+    #[test]
+    fn apply_format_active_es_una_transaccion_con_seleccion_8_5_8_6() {
+        use minmark_document::format::FormatAction;
+
+        // Fase 7 #29: Bold sobre la selección = UNA transacción (§8.5) con
+        // selección posterior al texto interior (§8.6); undo restaura la
+        // selección previa y redo la posterior.
+        let mut tabs = TabManager::new();
+        tabs.insert_active(Position::new(0, 0), "hola mundo");
+        let original = Selection {
+            anchor: Position::new(0, 5),
+            head: Position::new(0, 10),
+        };
+        tabs.set_selection_active(original);
+
+        assert!(tabs.apply_format_active(&FormatAction::Strong));
+        assert_eq!(
+            tabs.active().editor.document().content(),
+            "hola **mundo**"
+        );
+        let interior = Selection {
+            anchor: Position::new(0, 7),
+            head: Position::new(0, 12),
+        };
+        assert_eq!(tabs.active().editor.selection(), interior);
+
+        assert!(tabs.undo_active());
+        assert_eq!(tabs.active().editor.document().content(), "hola mundo");
+        assert_eq!(
+            tabs.active().editor.selection(),
+            original,
+            "undo restaura la selección previa (§8.6)"
+        );
+
+        assert!(tabs.redo_active());
+        assert_eq!(
+            tabs.active().editor.document().content(),
+            "hola **mundo**"
+        );
+        assert_eq!(tabs.active().editor.selection(), interior);
+
+        // La acción fue UN solo paso: el siguiente undo es el insert inicial.
+        assert!(tabs.undo_active());
+        assert!(tabs.undo_active());
+        assert_eq!(tabs.active().editor.document().content(), "");
+        assert!(!tabs.undo_active());
+    }
+
+    #[test]
+    fn apply_format_active_no_aplicable_no_toca_el_documento() {
+        use minmark_document::format::FormatAction;
+
+        // §8.4: `plan` devuelve `None` para un no-op (mismo nivel de
+        // heading) y la acción no gana transacción ni cambia un byte.
+        let mut tabs = TabManager::new();
+        tabs.insert_active(Position::new(0, 0), "# Título\n\ncuerpo\n");
+        tabs.set_selection_active(Selection::collapsed(Position::new(0, 3)));
+
+        assert!(!tabs.apply_format_active(&FormatAction::Heading(1)));
+        assert_eq!(
+            tabs.active().editor.document().content(),
+            "# Título\n\ncuerpo\n"
+        );
+        assert!(tabs.undo_active());
+        assert_eq!(tabs.active().editor.document().content(), "");
+        assert!(
+            !tabs.undo_active(),
+            "la acción no aplicable no añade transacción"
         );
     }
 }

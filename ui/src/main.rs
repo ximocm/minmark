@@ -1,9 +1,13 @@
 //! minmark — aplicación de escritorio GTK4 + WebKitGTK 6.0 (ISSUE-020, ADR-001).
 //!
 //! Integra el core (`core/`) con la UI decidida en ADR-001:
-//! - menús §36 (File, Edit, View, Project, Help; Insert/Format llegan con
-//!   sus fases);
-//! - atajos §39 (Ctrl+N/O/S, Ctrl+Shift+S, Ctrl+W, Ctrl+Alt+M);
+//! - menús §36 (File, Edit, View, Insert, Format, Project, Help) y menú
+//!   Insert/Format de los controles contextuales (fase 7, #29);
+//! - atajos §39 (Ctrl+N/O/S, Ctrl+Shift+S, Ctrl+W, Ctrl+Alt+M, más los de
+//!   la fase 7: Ctrl+Shift+B/C/X, Ctrl+I/K, Ctrl+1..6, Ctrl+Shift+P);
+//! - Command Palette §38 (`Ctrl+Shift+P`) y popover de controles
+//!   contextuales §44 (#29): mismas acciones `win.*` que menú y atajos,
+//!   con destino único `TabManager::apply_format_active`;
 //! - composiciones (§20, ISSUE-022/023): Preview combinado y PDF único desde
 //!   el menú Project/File, con la cadena de ajustes §58 y la bibliografía
 //!   unida de los archivos incluidos (ISSUE-024);
@@ -30,6 +34,7 @@
 // reexportarlos al incluir este archivo como módulo y las rutas `crate::…`
 // resuelvan igual que en el binario.
 pub mod academic;
+pub mod command_palette;
 pub mod composition;
 pub mod editor;
 pub mod explorer;
@@ -253,6 +258,10 @@ type CmdSlot = RefCell<Option<Weak<AppCmds>>>;
 /// Puente `EditSink` (TextView) → modelo (`TabManager` → core `Editor`).
 struct Sink {
     tabs: Rc<RefCell<TabManager>>,
+    /// Disparador de los controles contextuales §44 (fase 7 #29): cada
+    /// cambio de cursor/selección (mark_set → aquí) reevalúa el popover
+    /// con el estado vigente del modelo.
+    on_selection: Rc<dyn Fn(Selection)>,
 }
 
 impl EditSink for Sink {
@@ -266,6 +275,7 @@ impl EditSink for Sink {
 
     fn set_selection(&self, selection: Selection) {
         self.tabs.borrow_mut().set_selection_active(selection);
+        (self.on_selection)(selection);
     }
 }
 
@@ -284,6 +294,8 @@ struct AppCmds {
     find_bar: Rc<FindBar>,
     /// Paleta Quick Open (§41, ISSUE-029, §39: `Ctrl+P`).
     quickopen: Rc<QuickOpen>,
+    /// Paleta de comandos §38 (fase 7 #29, §39: `Ctrl+Shift+P`).
+    command_palette: Rc<command_palette::CommandPalette>,
     index: RefCell<Option<minmark_fs::ProjectIndex>>,
     index_generation: Cell<u64>,
     intelligence_generation: Cell<u64>,
@@ -683,6 +695,35 @@ impl AppCmds {
         self.refresh_now();
         self.sync_quickopen_context();
         self.refresh_navigation();
+    }
+
+    /// Acción editorial contextual §44 (fase 7 #29): ÚNICO dispatch de
+    /// formato — menú Insert/Format, atajos, Command Palette y popover
+    /// llegan aquí vía la acción `win.*` →
+    /// [`TabManager::apply_format_active`] (UNA transacción §8.5 con la
+    /// selección §8.6 registrada). Sin plan aplicable el documento no se
+    /// toca. Tras aplicar se refresca la vista (`reload_active`, §8.6:
+    /// `load` restaura cursor/selección desde el modelo) y se reevalúan los
+    /// controles contextuales (actualizan o cierran el popover).
+    fn apply_format(&self, action: &minmark_document::format::FormatAction) {
+        let applied = self.tabs.borrow_mut().apply_format_active(action);
+        if applied {
+            self.reload_active();
+        }
+        self.refresh_context_controls();
+    }
+
+    /// Reevalúa el popover de controles contextuales con el estado vigente
+    /// del tab activo (§8.6).
+    fn refresh_context_controls(&self) {
+        let tabs = self.tabs.borrow();
+        let tab = tabs.active();
+        self.editor_pane.update_context(
+            tab.editor.document().content(),
+            tab.editor.selection(),
+            tabs.active_index(),
+            tab.mode,
+        );
     }
 
     /// Contexto de Quick Open (§41, ISSUE-029) con el tab activo: `rel_path`
@@ -1943,6 +1984,88 @@ impl Commands for AppCmds {
         self.apply_view();
     }
 
+    // Controles contextuales §44 (fase 7 #29): menú, atajos, paleta y
+    // popover comparten este camino win.* → apply_format.
+
+    fn format_strong(&self) {
+        self.apply_format(&minmark_document::format::FormatAction::Strong);
+    }
+
+    fn format_emphasis(&self) {
+        self.apply_format(&minmark_document::format::FormatAction::Emphasis);
+    }
+
+    fn format_strikethrough(&self) {
+        self.apply_format(&minmark_document::format::FormatAction::Strikethrough);
+    }
+
+    fn format_code(&self) {
+        self.apply_format(&minmark_document::format::FormatAction::Code);
+    }
+
+    fn format_heading1(&self) {
+        self.apply_format(&minmark_document::format::FormatAction::Heading(1));
+    }
+
+    fn format_heading2(&self) {
+        self.apply_format(&minmark_document::format::FormatAction::Heading(2));
+    }
+
+    fn format_heading3(&self) {
+        self.apply_format(&minmark_document::format::FormatAction::Heading(3));
+    }
+
+    fn format_heading4(&self) {
+        self.apply_format(&minmark_document::format::FormatAction::Heading(4));
+    }
+
+    fn format_heading5(&self) {
+        self.apply_format(&minmark_document::format::FormatAction::Heading(5));
+    }
+
+    fn format_heading6(&self) {
+        self.apply_format(&minmark_document::format::FormatAction::Heading(6));
+    }
+
+    fn insert_link(&self) {
+        // Diálogo de URL prellenado con la del enlace bajo el cursor si lo
+        // hay («Edit link» del popover reutiliza esta misma acción); Cancelar
+        // (botón, Escape o cierre) ⇒ cero cambios (§UI #29).
+        let prefill = {
+            let tabs = self.tabs.borrow();
+            let tab = tabs.active();
+            minmark_document::format::context(
+                tab.editor.document().content(),
+                tab.editor.selection(),
+            )
+            .link
+            .map(|link| link.url)
+            .unwrap_or_default()
+        };
+        let slot = Rc::clone(&self.slot);
+        dialogs::prompt_text(&self.window, "Link", &prefill, {
+            Rc::new(move |url| {
+                let Some(url) = url else { return };
+                let Some(me) = slot.borrow().as_ref().and_then(Weak::upgrade) else {
+                    return;
+                };
+                me.apply_format(&minmark_document::format::FormatAction::Link { url });
+            })
+        });
+    }
+
+    fn insert_callout(&self, tone: &str) {
+        self.apply_format(&minmark_document::format::FormatAction::Callout {
+            callout_type: tone.to_owned(),
+        });
+    }
+
+    fn command_palette(&self) {
+        // §38/§39: `Ctrl+Shift+P` presenta la paleta modal; aceptar activa
+        // la MISMA acción `win.*` del comando elegido.
+        self.command_palette.present();
+    }
+
     fn about(&self) {
         let about = gtk4::AboutDialog::builder()
             .program_name("minmark")
@@ -2074,7 +2197,28 @@ fn build_window(app: &Application, scope: WindowScope, open_paths: &[PathBuf]) -
         }
     }
 
-    let sink = Rc::new(Sink { tabs: tabs.clone() });
+    let sink = {
+        let slot = slot.clone();
+        Rc::new(Sink {
+            tabs: tabs.clone(),
+            // Controles contextuales §44 (fase 7 #29): cada marca de
+            // cursor/selección reevalúa el popover con el estado vigente
+            // (la guardia de pestaña vive en el popover, §UI).
+            on_selection: Rc::new(move |selection| {
+                let Some(me) = slot.borrow().as_ref().and_then(Weak::upgrade) else {
+                    return;
+                };
+                let tabs = me.tabs.borrow();
+                let tab = tabs.active();
+                me.editor_pane.update_context(
+                    tab.editor.document().content(),
+                    selection,
+                    tabs.active_index(),
+                    tab.mode,
+                );
+            }),
+        })
+    };
     let on_edited = {
         let slot = slot.clone();
         Rc::new(move || {
@@ -2108,6 +2252,31 @@ fn build_window(app: &Application, scope: WindowScope, open_paths: &[PathBuf]) -
         Rc::new(move |item| {
             if let Some(me) = slot.borrow().as_ref().and_then(Weak::upgrade) {
                 me.accept_completion(item);
+            }
+        })
+    });
+    // Controles contextuales #29: el popover fija el tono de
+    // `win.insert-callout` sobre el grupo «win» que `install_actions`
+    // instaló (referencia débil B1) y luego activa la misma acción.
+    editor_pane.connect_context_tone({
+        let slot = slot.clone();
+        Rc::new(move |tone: String| {
+            let Some(me) = slot.borrow().as_ref().and_then(Weak::upgrade) else {
+                return;
+            };
+            let Some(group) = me
+                .action_group
+                .borrow()
+                .as_ref()
+                .and_then(|group| group.upgrade())
+            else {
+                return;
+            };
+            if let Some(action) = group
+                .lookup_action("insert-callout")
+                .and_then(|action| action.downcast::<gtk4::gio::SimpleAction>().ok())
+            {
+                action.set_state(&gtk4::glib::Variant::from(tone.as_str()));
             }
         })
     });
@@ -2186,6 +2355,11 @@ fn build_window(app: &Application, scope: WindowScope, open_paths: &[PathBuf]) -
             }
         })
     });
+
+    // Paleta de comandos §38 (fase 7 #29, `Ctrl+Shift+P`): modal sobre esta
+    // ventana; al aceptar activa la acción `win.*` elegida sobre ella.
+    let command_palette = Rc::new(command_palette::CommandPalette::new());
+    command_palette.set_transient_for(window.upcast_ref::<gtk4::Window>());
 
     // Barra lateral §14.3/§40.2 (ISSUE-022/028): el explorador y la búsqueda
     // de proyecto solo existen en ventanas de proyecto y comparten sidebar
@@ -2463,6 +2637,7 @@ fn build_window(app: &Application, scope: WindowScope, open_paths: &[PathBuf]) -
         external_notice,
         find_bar,
         quickopen,
+        command_palette,
         index: RefCell::new(None),
         index_generation: Cell::new(0),
         intelligence_generation: Cell::new(0),
@@ -4177,5 +4352,554 @@ mod gtk_integration_tests {
     #[ignore = "requiere sesión gráfica GTK/WebKit"]
     fn gtk_preview_pinta_y_actualiza_al_escribir() {
         qa_preview_smoke();
+    }
+
+    // ── Fase 7 #29: controles editoriales contextuales (§44) ─────────────
+
+    /// #29: `win.format-strong` — el MISMO camino de menú, atajos, paleta y
+    /// popover — aplica Bold como UNA transacción (§8.5) y registra la
+    /// selección §8.6: undo restaura el texto y la selección previos, redo
+    /// los posteriores, y la acción entera es UN solo paso de undo.
+    #[test]
+    #[ignore = "requiere sesión gráfica GTK/WebKit"]
+    fn gtk_format_bold_via_gaction_conserva_seleccion_y_un_solo_undo() {
+        gtk4::init().expect("GTK display");
+        ensure_sandbox_usable();
+        let app = Application::builder()
+            .application_id("app.minmark.test.fase7-bold")
+            .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk4::gio::Cancellable>).unwrap();
+        let cmds = build_window(&app, WindowScope::Standalone, &[]);
+        cmds.tabs
+            .borrow_mut()
+            .insert_active(Position::new(0, 0), "hola mundo");
+        cmds.reload_active();
+        // Selección «mundo»: mark_set → EditSink::set_selection → modelo.
+        cmds.editor_pane
+            .focus_find_match(Range::new(Position::new(0, 5), Position::new(0, 10)));
+        let original = Selection {
+            anchor: Position::new(0, 5),
+            head: Position::new(0, 10),
+        };
+        assert_eq!(cmds.tabs.borrow().active().editor.selection(), original);
+
+        gtk4::prelude::WidgetExt::activate_action(&cmds.window, "win.format-strong", None)
+            .expect("win.format-strong registrada (§36)");
+
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content(),
+            "hola **mundo**"
+        );
+        let interior = Selection {
+            anchor: Position::new(0, 7),
+            head: Position::new(0, 12),
+        };
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.selection(),
+            interior,
+            "§8.6: la selección posterior es el texto interior"
+        );
+
+        // UN solo undo revierte la acción entera y restaura la selección.
+        assert!(cmds.tabs.borrow_mut().undo_active());
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content(),
+            "hola mundo"
+        );
+        assert_eq!(cmds.tabs.borrow().active().editor.selection(), original);
+        // El siguiente undo es el insert inicial: Bold fue UN paso (§8.5).
+        assert!(cmds.tabs.borrow_mut().undo_active());
+        assert_eq!(cmds.tabs.borrow().active().editor.document().content(), "");
+        assert!(!cmds.tabs.borrow().active().editor.can_undo());
+        // Redo ×2: primero el insert y después Bold con su selección.
+        assert!(cmds.tabs.borrow_mut().redo_active());
+        assert!(cmds.tabs.borrow_mut().redo_active());
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content(),
+            "hola **mundo**"
+        );
+        assert_eq!(cmds.tabs.borrow().active().editor.selection(), interior);
+
+        cmds.window.destroy();
+    }
+
+    /// #29: `win.insert-link` abre el diálogo de URL (prellenado con la del
+    /// enlace si el cursor está dentro); Cancelar deja el buffer byte a byte
+    /// idéntico y no añade transacción — «cero cambios» (§UI).
+    #[test]
+    #[ignore = "requiere sesión gráfica GTK/WebKit"]
+    fn gtk_dialogo_link_cancelar_no_toca_el_buffer() {
+        fn find_entry(widget: &Widget) -> Option<gtk4::Entry> {
+            if let Some(entry) = widget.downcast_ref::<gtk4::Entry>() {
+                return Some(entry.clone());
+            }
+            let mut child = widget.first_child();
+            while let Some(widget) = child {
+                if let Some(entry) = find_entry(&widget) {
+                    return Some(entry);
+                }
+                child = widget.next_sibling();
+            }
+            None
+        }
+        fn find_button(widget: &Widget, label: &str) -> Option<gtk4::Button> {
+            if let Some(button) = widget.downcast_ref::<gtk4::Button>() {
+                if button.label().as_deref() == Some(label) {
+                    return Some(button.clone());
+                }
+            }
+            let mut child = widget.first_child();
+            while let Some(widget) = child {
+                if let Some(button) = find_button(&widget, label) {
+                    return Some(button);
+                }
+                child = widget.next_sibling();
+            }
+            None
+        }
+        /// Solo el diálogo «Link» (la ventana principal también tiene Entries).
+        fn link_dialog() -> Option<Widget> {
+            gtk4::Window::list_toplevels()
+                .into_iter()
+                .find(|widget| {
+                    widget
+                        .downcast_ref::<gtk4::Window>()
+                        .is_some_and(|window| window.title().as_deref() == Some("Link"))
+                })
+        }
+        /// Pulsación sintética de Escape sobre los controllers del diálogo
+        /// (el controlador de Escape vive en la ventana del prompt).
+        fn emit_escape(widget: &Widget) {
+            let key = gtk4::gdk::Key::Escape;
+            let modifiers = gtk4::gdk::ModifierType::empty();
+            let controllers = widget.observe_controllers();
+            for i in 0..controllers.n_items() {
+                if let Some(controller) = controllers
+                    .item(i)
+                    .and_then(|c| c.downcast::<gtk4::EventControllerKey>().ok())
+                {
+                    if controller.emit_by_name::<bool>("key-pressed", &[&key, &0u32, &modifiers])
+                    {
+                        break;
+                    }
+                }
+            }
+        }
+
+        gtk4::init().expect("GTK display");
+        ensure_sandbox_usable();
+        let app = Application::builder()
+            .application_id("app.minmark.test.fase7-link")
+            .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk4::gio::Cancellable>).unwrap();
+        let cmds = build_window(&app, WindowScope::Standalone, &[]);
+        cmds.tabs
+            .borrow_mut()
+            .insert_active(Position::new(0, 0), "hola mundo");
+        cmds.reload_active();
+        cmds.editor_pane
+            .focus_find_match(Range::new(Position::new(0, 5), Position::new(0, 10)));
+        let contenido = cmds
+            .tabs
+            .borrow()
+            .active()
+            .editor
+            .document()
+            .content()
+            .to_owned();
+        let seleccion = cmds.tabs.borrow().active().editor.selection();
+
+        gtk4::prelude::WidgetExt::activate_action(&cmds.window, "win.insert-link", None)
+            .expect("win.insert-link registrada (§36)");
+        pump_until(|| link_dialog().is_some());
+        // Sin enlace bajo el cursor la precarga queda vacía (§UI).
+        assert_eq!(
+            find_entry(&link_dialog().unwrap()).expect("entry del diálogo").text(),
+            ""
+        );
+
+        find_button(&link_dialog().unwrap(), "Cancelar")
+            .expect("botón Cancelar")
+            .emit_clicked();
+        pump_until(|| link_dialog().is_none());
+
+        let despues = cmds
+            .tabs
+            .borrow()
+            .active()
+            .editor
+            .document()
+            .content()
+            .to_owned();
+        assert_eq!(despues.as_bytes(), contenido.as_bytes(), "byte a byte");
+        assert_eq!(cmds.tabs.borrow().active().editor.selection(), seleccion);
+
+        // Escape cierra el prompt con el MISMO resultado que Cancelar
+        // (#29 revisión): cero cambios, byte a byte.
+        gtk4::prelude::WidgetExt::activate_action(&cmds.window, "win.insert-link", None)
+            .expect("win.insert-link reabre el diálogo");
+        pump_until(|| link_dialog().is_some());
+        emit_escape(&link_dialog().expect("diálogo Link"));
+        pump_until(|| link_dialog().is_none());
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content().as_bytes(),
+            contenido.as_bytes(),
+            "Escape deja el buffer byte a byte idéntico"
+        );
+        assert_eq!(cmds.tabs.borrow().active().editor.selection(), seleccion);
+
+        // Cero cambios: el ÚNICO undo sigue siendo el insert inicial.
+        assert!(cmds.tabs.borrow_mut().undo_active());
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content(),
+            ""
+        );
+        assert!(
+            !cmds.tabs.borrow().active().editor.can_undo(),
+            "ni Cancelar ni Escape añadieron transacción"
+        );
+
+        cmds.window.destroy();
+    }
+
+    /// #29: el popover solo aparece si aporta utilidad — oculto con cursor
+    /// plano sin selección, panel de texto visible con selección no vacía,
+    /// H1–H6 bajo el cursor en un heading — y Escape lo cierra con cero
+    /// cambios en el documento (§UI).
+    #[test]
+    #[ignore = "requiere sesión gráfica GTK/WebKit"]
+    fn gtk_controles_contextuales_oculto_cursor_plano_y_visible_con_seleccion() {
+        gtk4::init().expect("GTK display");
+        ensure_sandbox_usable();
+        let app = Application::builder()
+            .application_id("app.minmark.test.fase7-popover")
+            .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk4::gio::Cancellable>).unwrap();
+        let cmds = build_window(&app, WindowScope::Standalone, &[]);
+        cmds.tabs
+            .borrow_mut()
+            .insert_active(Position::new(0, 0), "hola mundo\n\n# Título\n");
+        cmds.reload_active();
+
+        // Cursor plano en texto llano, sin selección: oculto (§UI).
+        cmds.editor_pane
+            .focus_find_match(Range::new(Position::new(0, 2), Position::new(0, 2)));
+        assert!(!cmds.editor_pane.test_context_visible());
+
+        // Selección no vacía: panel de texto con los labels de Command §36.
+        cmds.editor_pane
+            .focus_find_match(Range::new(Position::new(0, 0), Position::new(0, 4)));
+        pump_until(|| cmds.editor_pane.test_context_visible());
+        for label in [
+            "Heading 1",
+            "Heading 6",
+            "Bold",
+            "Italic",
+            "Strikethrough",
+            "Code",
+            "Link",
+            "Callout",
+        ] {
+            assert!(
+                cmds.editor_pane.test_context_has_button(label),
+                "falta el botón «{label}» en el panel de texto"
+            );
+        }
+
+        // Teclado #29 (revisión): el popover y sus botones admiten foco
+        // (Tab los recorre, Enter/Space los activan — GTK nativo) y `Ctrl+.`
+        // lleva el foco del editor a los controles.
+        assert!(
+            cmds.editor_pane.test_context_can_focus(),
+            "el popover debe admitir foco"
+        );
+        let bold = cmds
+            .editor_pane
+            .test_context_button("Bold")
+            .expect("botón Bold");
+        assert!(bold.can_focus(), "Bold debe ser operable con teclado");
+        assert!(
+            !cmds.editor_pane.test_context_focus_inside(),
+            "al abrir, el foco inicial se queda en el editor"
+        );
+        assert!(
+            cmds.editor_pane.emit_test_key(
+                gtk4::gdk::Key::period,
+                gtk4::gdk::ModifierType::CONTROL_MASK
+            ),
+            "Ctrl+. lo maneja el controller de la vista"
+        );
+        assert!(
+            cmds.editor_pane.test_context_focus_inside(),
+            "Ctrl+. mueve el foco a los controles"
+        );
+
+        // Escape cierra sin tocar el documento (§UI «cero cambios»).
+        let contenido = cmds
+            .tabs
+            .borrow()
+            .active()
+            .editor
+            .document()
+            .content()
+            .to_owned();
+        assert!(cmds
+            .editor_pane
+            .emit_test_key(gtk4::gdk::Key::Escape, gtk4::gdk::ModifierType::empty()));
+        assert!(!cmds.editor_pane.test_context_visible());
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content(),
+            contenido
+        );
+
+        // Cursor en un heading (selección vacía): solo H1–H6.
+        cmds.editor_pane
+            .focus_find_match(Range::new(Position::new(2, 1), Position::new(2, 1)));
+        pump_until(|| cmds.editor_pane.test_context_visible());
+        assert!(cmds.editor_pane.test_context_has_button("Heading 3"));
+
+        // Volver al cursor plano cierra el popover.
+        cmds.editor_pane
+            .focus_find_match(Range::new(Position::new(0, 2), Position::new(0, 2)));
+        pump_until(|| !cmds.editor_pane.test_context_visible());
+
+        cmds.window.destroy();
+    }
+
+    /// #29 (aceptación): cambiar de pestaña o de modo con el popover abierto
+    /// lo cierra, y el handler del popover no aplica nada — ni a la pestaña
+    /// activa ni a la que se abandonó.
+    #[test]
+    #[ignore = "requiere sesión gráfica GTK/WebKit"]
+    fn gtk_cambio_de_pestana_con_popover_abierto_no_aplica_nada() {
+        gtk4::init().expect("GTK display");
+        ensure_sandbox_usable();
+        let app = Application::builder()
+            .application_id("app.minmark.test.fase7-tabguard")
+            .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk4::gio::Cancellable>).unwrap();
+        let cmds = build_window(&app, WindowScope::Standalone, &[]);
+        cmds.tabs
+            .borrow_mut()
+            .insert_active(Position::new(0, 0), "uno seleccionado\n");
+        cmds.reload_active();
+        // Segunda pestaña con contenido propio (new_tab la activa).
+        cmds.tabs.borrow_mut().new_tab();
+        cmds.tabs
+            .borrow_mut()
+            .insert_active(Position::new(0, 0), "dos\n");
+        cmds.reload_active();
+
+        // Pestaña 0 con selección: el popover se abre.
+        cmds.select_tab(0);
+        cmds.editor_pane
+            .focus_find_match(Range::new(Position::new(0, 0), Position::new(0, 3)));
+        pump_until(|| cmds.editor_pane.test_context_visible());
+        assert!(cmds.editor_pane.test_context_has_button("Bold"));
+
+        // Cambiar de pestaña cierra el popover (load → hide, §UI).
+        cmds.select_tab(1);
+        assert!(!cmds.editor_pane.test_context_visible());
+
+        // El click YA no aplica nada: con el cursor colapsado en texto
+        // plano Bold insertaría `****` en la pestaña activa, y la 0
+        // conservaría su selección.
+        assert!(cmds.editor_pane.test_context_click("Bold"));
+        assert_eq!(
+            cmds.tabs.borrow().tabs()[1].editor.document().content(),
+            "dos\n",
+            "sin cambios en la pestaña activa"
+        );
+        assert_eq!(
+            cmds.tabs.borrow().tabs()[0].editor.document().content(),
+            "uno seleccionado\n",
+            "sin cambios en la pestaña abandonada"
+        );
+
+        // Abierto de nuevo y cambio de MODO: también se cierra y no aplica.
+        cmds.editor_pane
+            .focus_find_match(Range::new(Position::new(0, 0), Position::new(0, 3)));
+        pump_until(|| cmds.editor_pane.test_context_visible());
+        cmds.toggle_mode();
+        assert!(!cmds.editor_pane.test_context_visible(), "cambio de modo cierra");
+        assert!(cmds.editor_pane.test_context_click("Heading 1"));
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content(),
+            "dos\n"
+        );
+
+        cmds.window.destroy();
+    }
+
+    /// #29: el cursor dentro de un callout muestra los controles de tono
+    /// (§22) con el tono actual activo, y retonar pasa por la MISMA acción
+    /// `win.insert-callout` — el botón fija el estado y activa la acción —
+    /// como UNA transacción por acción (§8.5).
+    #[test]
+    #[ignore = "requiere sesión gráfica GTK/WebKit"]
+    fn gtk_retonado_de_callout_desde_el_popover() {
+        gtk4::init().expect("GTK display");
+        ensure_sandbox_usable();
+        let app = Application::builder()
+            .application_id("app.minmark.test.fase7-callout")
+            .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk4::gio::Cancellable>).unwrap();
+        let cmds = build_window(&app, WindowScope::Standalone, &[]);
+        cmds.tabs
+            .borrow_mut()
+            .insert_active(Position::new(0, 0), "aviso importante\n");
+        cmds.reload_active();
+
+        // Insert ▸ Callout (acción sin parámetro): tono inicial «note».
+        cmds.editor_pane
+            .focus_find_match(Range::new(Position::new(0, 0), Position::new(0, 5)));
+        gtk4::prelude::WidgetExt::activate_action(&cmds.window, "win.insert-callout", None)
+            .expect("win.insert-callout registrada (§36)");
+        let envuelto = cmds
+            .tabs
+            .borrow()
+            .active()
+            .editor
+            .document()
+            .content()
+            .to_owned();
+        assert!(
+            envuelto.starts_with("::: note\n"),
+            "envuelto con el tono inicial: {envuelto:?}"
+        );
+
+        // Cursor dentro del callout: fila de tonos con «note» activo.
+        cmds.editor_pane
+            .focus_find_match(Range::new(Position::new(1, 3), Position::new(1, 3)));
+        pump_until(|| cmds.editor_pane.test_context_visible());
+        assert_eq!(
+            cmds.editor_pane.test_context_tone().as_deref(),
+            Some("note"),
+            "el estado activo refleja el tono real (§22)"
+        );
+
+        // Retonar a «warning»: el botón fija el estado de la MISMA acción
+        // `win.insert-callout` y la activa.
+        assert!(cmds.editor_pane.test_context_click("warning"));
+        let retonado = cmds
+            .tabs
+            .borrow()
+            .active()
+            .editor
+            .document()
+            .content()
+            .to_owned();
+        assert!(
+            retonado.starts_with("::: warning\n"),
+            "retone conservando título y contenido: {retonado:?}"
+        );
+        assert!(retonado.contains("aviso importante"));
+        // Cada acción es UNA transacción: undo vuelve al «note».
+        assert!(cmds.tabs.borrow_mut().undo_active());
+        assert!(cmds
+            .tabs
+            .borrow()
+            .active()
+            .editor
+            .document()
+            .content()
+            .starts_with("::: note\n"));
+
+        cmds.window.destroy();
+    }
+
+    /// §38 + revisión #29: la ✕ de la barra de título OCULTA la paleta
+    /// (no la destruye, patrón Quick Open §41) y la siguiente reapertura
+    /// sigue ejecutando comandos.
+    #[test]
+    #[ignore = "requiere sesión gráfica GTK/WebKit"]
+    fn gtk_command_palette_sobrevive_close_request_y_sigue_activando() {
+        gtk4::init().expect("GTK display");
+        ensure_sandbox_usable();
+        let app = Application::builder()
+            .application_id("app.minmark.test.fase7-palette-close")
+            .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk4::gio::Cancellable>).unwrap();
+        let cmds = build_window(&app, WindowScope::Standalone, &[]);
+        cmds.tabs
+            .borrow_mut()
+            .insert_active(Position::new(0, 0), "hola mundo");
+        cmds.reload_active();
+        cmds.editor_pane
+            .focus_find_match(Range::new(Position::new(0, 5), Position::new(0, 10)));
+
+        cmds.command_palette.present();
+        assert!(cmds.command_palette.is_visible());
+        // Close-request (✕ del título): la ventana se OCULTA, no se
+        // destruye — el próximo present() no verá un objeto muerto.
+        cmds.command_palette.test_close();
+        assert!(
+            !cmds.command_palette.is_visible(),
+            "close-request ⇒ oculta (no destruida)"
+        );
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content(),
+            "hola mundo",
+            "cerrar la paleta no toca el documento"
+        );
+
+        // Reutilizable: reabrir y ejecutar un comando vía win.*.
+        cmds.command_palette.present();
+        assert!(cmds.command_palette.is_visible());
+        cmds.command_palette.test_filter("bold");
+        assert_eq!(cmds.command_palette.test_result_count(), 1);
+        cmds.command_palette.test_activate();
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content(),
+            "hola **mundo**"
+        );
+
+        cmds.window.destroy();
+    }
+
+    /// §38: la Command Palette fuzzy lista los comandos y aceptar activa la
+    /// MISMA acción `win.*` del camino de menú y atajos.
+    #[test]
+    #[ignore = "requiere sesión gráfica GTK/WebKit"]
+    fn gtk_command_palette_ejecuta_comando_via_gaction() {
+        gtk4::init().expect("GTK display");
+        ensure_sandbox_usable();
+        let app = Application::builder()
+            .application_id("app.minmark.test.fase7-palette")
+            .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk4::gio::Cancellable>).unwrap();
+        let cmds = build_window(&app, WindowScope::Standalone, &[]);
+        cmds.tabs
+            .borrow_mut()
+            .insert_active(Position::new(0, 0), "hola mundo");
+        cmds.reload_active();
+        cmds.editor_pane
+            .focus_find_match(Range::new(Position::new(0, 5), Position::new(0, 10)));
+
+        cmds.command_palette.present();
+        assert!(cmds.command_palette.is_visible());
+        cmds.command_palette.test_filter("bold");
+        assert_eq!(cmds.command_palette.test_result_count(), 1);
+        assert_eq!(
+            cmds.command_palette.test_selected_label().as_deref(),
+            Some("Bold"),
+            "el match exacto va primero"
+        );
+
+        cmds.command_palette.test_activate();
+        assert!(!cmds.command_palette.is_visible(), "aceptar cierra §38");
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content(),
+            "hola **mundo**"
+        );
+
+        cmds.window.destroy();
     }
 }
