@@ -60,6 +60,14 @@ pub enum Command {
     CommandPalette,
     /// Cambio de modo de vista (§36, menú View).
     View(ViewMode), // ViewMode de crate::preview
+    /// `Show All Files` (§14.4, #70): sin filtro de tipos documentales en el
+    /// explorador de la ventana; ítem marcable del menú View (acción
+    /// stateful booleana).
+    ShowAllFiles,
+    /// `Show Hidden Files` (§14.5, #70): muestra las entradas que empiezan
+    /// por `.` en el explorador de la ventana; ítem marcable del menú View
+    /// (acción stateful booleana).
+    ShowHiddenFiles,
     /// Enlace `[texto](url)` (fase 7 #29, menú Insert, `Ctrl+K`): diálogo de
     /// URL prellenado con la del enlace bajo el cursor si lo hay.
     InsertLink,
@@ -153,6 +161,8 @@ impl Command {
             Command::View(ViewMode::Editor) => "win.view-editor",
             Command::View(ViewMode::Split) => "win.view-split",
             Command::View(ViewMode::Preview) => "win.view-preview",
+            Command::ShowAllFiles => "win.show-all-files",
+            Command::ShowHiddenFiles => "win.show-hidden-files",
             Command::InsertLink => "win.insert-link",
             Command::InsertCallout => "win.insert-callout",
             Command::InsertImage => "win.insert-image",
@@ -209,6 +219,8 @@ impl Command {
             Command::ToggleExplorer => "Toggle Explorer",
             Command::CommandPalette => "Command Palette",
             Command::View(mode) => mode.label(),
+            Command::ShowAllFiles => "Show All Files",
+            Command::ShowHiddenFiles => "Show Hidden Files",
             Command::InsertLink => "Link",
             Command::InsertCallout => "Callout",
             Command::InsertImage => "Image",
@@ -244,6 +256,14 @@ impl Command {
             self,
             Command::PreviewComposition | Command::ExportCompositionPdf
         )
+    }
+
+    /// ¿La acción es stateful con estado booleano (#70, §14.4/§14.5)? El
+    /// menú View la muestra como ítem marcable y la ventana voltea el estado
+    /// al activarla (patrón stateful de [`Command::InsertCallout`], con
+    /// `bool` en lugar de tono).
+    pub fn has_boolean_state(&self) -> bool {
+        matches!(self, Command::ShowAllFiles | Command::ShowHiddenFiles)
     }
 }
 
@@ -293,6 +313,13 @@ pub trait Commands {
     fn toggle_visual_syntax(&self);
     /// Muestra/oculta el explorador (§14.3); sin-op en ventanas standalone.
     fn toggle_explorer(&self);
+    /// `win.show-all-files` (§14.4, #70): alterna `Show All Files` en el
+    /// explorador de la ventana; la acción lleva el estado booleano y la
+    /// implementación lo voltea al aplicar el filtro.
+    fn show_all_files(&self) {}
+    /// `win.show-hidden-files` (§14.5, #70): alterna `Show Hidden Files` en
+    /// el explorador de la ventana.
+    fn show_hidden_files(&self) {}
     fn set_view(&self, mode: ViewMode);
     /// Aplica `win.format-strong` (negrita) sobre la selección o el bloque
     /// del cursor vía [`TabManager::apply_format_active`](crate::tabs::TabManager::apply_format_active)
@@ -433,6 +460,8 @@ pub const ALL_COMMANDS: &[Command] = &[
     Command::View(ViewMode::Editor),
     Command::View(ViewMode::Split),
     Command::View(ViewMode::Preview),
+    Command::ShowAllFiles,
+    Command::ShowHiddenFiles,
     Command::InsertLink,
     Command::InsertCallout,
     Command::InsertImage,
@@ -474,10 +503,12 @@ type SubmenuSpec = (&'static str, &'static [SectionSpec]);
 
 /// Modelo de menú §36 en datos puros: File, Edit, View, Insert, Format,
 /// Project y Help. View agrupa «Markdown/Visual» (ToggleMode) y la sección
-/// radio implícita Editor/Split/Preview (§36) más la Command Palette §38;
-/// Insert (Link, Callout, Image, Table, Equation, Citation) y Format
-/// (Heading 1–6, Bold, Italic, Strikethrough, Code) llegan con la fase 7
-/// (#29/#30/#31); Project nace con las composiciones (§20, ISSUE-022).
+/// radio implícita Editor/Split/Preview (§36) más la Command Palette §38, y
+/// cierra con los toggles marcables del explorador Show All Files/Show
+/// Hidden Files (#70, §14.4/§14.5); Insert (Link, Callout, Image, Table,
+/// Equation, Citation) y Format (Heading 1–6, Bold, Italic, Strikethrough,
+/// Code) llegan con la fase 7 (#29/#30/#31); Project nace con las
+/// composiciones (§20, ISSUE-022).
 const MENUBAR_SPEC: &[SubmenuSpec] = &[
     (
         "File",
@@ -521,6 +552,12 @@ const MENUBAR_SPEC: &[SubmenuSpec] = &[
                 ("Editor", "win.view-editor"),
                 ("Split", "win.view-split"),
                 ("Preview", "win.view-preview"),
+            ],
+            // #70 (§14.4/§14.5): los toggles del explorador, que antes vivían
+            // en su cabecera, como ítems marcables de una sección propia.
+            &[
+                ("Show All Files", "win.show-all-files"),
+                ("Show Hidden Files", "win.show-hidden-files"),
             ],
         ],
     ),
@@ -614,6 +651,8 @@ fn dispatch(cmd: Command, host: &dyn Commands, callout_tone: &str) {
         Command::ToggleExplorer => host.toggle_explorer(),
         Command::CommandPalette => host.command_palette(),
         Command::View(mode) => host.set_view(mode),
+        Command::ShowAllFiles => host.show_all_files(),
+        Command::ShowHiddenFiles => host.show_hidden_files(),
         Command::InsertLink => host.insert_link(),
         Command::InsertCallout => host.insert_callout(callout_tone),
         Command::InsertImage => host.insert_image(),
@@ -661,8 +700,13 @@ pub fn action_group(host: &Rc<dyn Commands>) -> gio::SimpleActionGroup {
         // la paleta §38 la activa con `activate_action(id, None)`); el
         // popover de controles fija el estado antes de activarla para
         // retonar, y menú/atajos usan el último tono (inicial `note`).
+        // Los toggles del explorador #70 llevan estado booleano (inicial
+        // `false`): el menú View los dibuja marcables y la ventana los
+        // voltea al activarlos.
         let action = if cmd == Command::InsertCallout {
             gio::SimpleAction::new_stateful(name, None, &glib::Variant::from(DEFAULT_CALLOUT_TONE))
+        } else if cmd.has_boolean_state() {
+            gio::SimpleAction::new_stateful(name, None, &glib::Variant::from(false))
         } else {
             gio::SimpleAction::new(name, None)
         };
@@ -1122,11 +1166,112 @@ mod tests {
         );
     }
 
+    /// #70 (§14.4/§14.5): `Show All Files` y `Show Hidden Files` son
+    /// comandos con `action_id`/etiqueta propios, stateful booleano en el
+    /// grupo (menú View marcable, estado inicial `false`) y sin
+    /// aceleradores; la activación llega al receptor por el mismo camino
+    /// `win.*` que menú y paleta §38.
+    #[test]
+    fn filtros_explorador_70_stateful_en_view_sin_atajos() {
+        /// Receptor que solo registra los toggles #70 recibidos.
+        struct Toggles(Rc<std::cell::RefCell<Vec<&'static str>>>);
+        impl Commands for Toggles {
+            fn new(&self) {}
+            fn new_window(&self) {}
+            fn open(&self) {}
+            fn quick_open(&self) {}
+            fn open_folder(&self) {}
+            fn import_markdown(&self) {}
+            fn save(&self) {}
+            fn save_as(&self) {}
+            fn export_pdf(&self) {}
+            fn close_tab(&self) {}
+            fn undo(&self) {}
+            fn redo(&self) {}
+            fn find(&self) {}
+            fn replace(&self) {}
+            fn project_search(&self) {}
+            fn toggle_mode(&self) {}
+            fn toggle_visual_syntax(&self) {}
+            fn toggle_explorer(&self) {}
+            fn set_view(&self, _mode: ViewMode) {}
+            fn about(&self) {}
+            fn shortcuts(&self) {}
+            fn show_all_files(&self) {
+                self.0.borrow_mut().push("show-all-files");
+            }
+            fn show_hidden_files(&self) {
+                self.0.borrow_mut().push("show-hidden-files");
+            }
+        }
+
+        for (cmd, id, label) in [
+            (
+                Command::ShowAllFiles,
+                "win.show-all-files",
+                "Show All Files",
+            ),
+            (
+                Command::ShowHiddenFiles,
+                "win.show-hidden-files",
+                "Show Hidden Files",
+            ),
+        ] {
+            assert_eq!(cmd.action_id(), id, "action_id de {label}");
+            assert_eq!(cmd.label(), label, "etiqueta de {id}");
+            assert!(
+                ALL_COMMANDS.contains(&cmd),
+                "{id} ausente de ALL_COMMANDS (§38)"
+            );
+            assert!(cmd.has_boolean_state(), "{id} es stateful booleana (#70)");
+            assert!(!cmd.requires_composition(), "{id} sin composiciones (§20)");
+            assert!(
+                !ACCELERATORS.iter().any(|(accel_id, _)| *accel_id == id),
+                "{id} no lleva acelerador (#70 añade los toggles sin atajos)"
+            );
+            // Ítem de una sección del menú View (§36).
+            assert!(
+                MENUBAR_SPEC.iter().any(|(title, sections)| *title == "View"
+                    && sections
+                        .iter()
+                        .any(|entries| entries.iter().any(|(_, entry_id)| *entry_id == id))),
+                "{id} ausente del menú View (§36)"
+            );
+        }
+
+        let received = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let host: Rc<dyn Commands> = Rc::new(Toggles(Rc::clone(&received)));
+        let group = action_group(&host);
+        for id in ["show-all-files", "show-hidden-files"] {
+            let action = group
+                .lookup_action(id)
+                .unwrap_or_else(|| panic!("falta la acción win.{id} (§36)"))
+                .downcast::<gio::SimpleAction>()
+                .expect("SimpleAction");
+            assert!(
+                action.state_type().is_some(),
+                "win.{id} debe ser stateful (#70)"
+            );
+            assert_eq!(
+                action.state().and_then(|state| state.get::<bool>()),
+                Some(false),
+                "win.{id} arranca sin marcar (§14.4/§14.5)"
+            );
+            action.activate(None::<&glib::Variant>);
+        }
+        assert_eq!(
+            received.borrow().as_slice(),
+            ["show-all-files", "show-hidden-files"],
+            "las dos activaciones llegan al receptor (dispatch §3.7)"
+        );
+    }
+
     /// §36: estructura exacta del menú — File (New/New Window/Open/Quick
     /// Open/Open Folder/Import Markdown/Save/Save As/Export PDF/Export
     /// Composition PDF/Close Tab, ISSUE-021/029/035/023), Edit (Undo/Redo/
     /// Find/Replace/Project Search, §40.1/§40.2), View (Markdown/Visual +
-    /// Editor/Split/Preview + Command Palette §38), Insert (Link/Callout/
+    /// Editor/Split/Preview + Command Palette §38 + Show All Files/Show
+    /// Hidden Files #70), Insert (Link/Callout/
     /// Image/Table/Equation/Citation), Format (Heading 1–6/Bold/Italic/
     /// Strikethrough/Code),
     /// Project (Preview
@@ -1177,6 +1322,10 @@ mod tests {
                         ("Editor", "win.view-editor"),
                         ("Split", "win.view-split"),
                         ("Preview", "win.view-preview"),
+                    ],
+                    &[
+                        ("Show All Files", "win.show-all-files"),
+                        ("Show Hidden Files", "win.show-hidden-files"),
                     ],
                 ],
             ),

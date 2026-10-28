@@ -21,6 +21,23 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
   El área del diagrama usa fondo claro para que los colores por defecto de
   DOT sean legibles también en tema oscuro (el DOT puede fijar los suyos).
 
+### Cambiado
+
+- Los toggles **Show All Files** y **Show Hidden Files** (issue #70, §14.4/
+  §14.5) dejan la cabecera del explorador y pasan al menú **View**, en una
+  sección propia al final: ítems marcables sobre acciones stateful booleanas
+  `win.show-all-files` / `win.show-hidden-files`, sin aceleradores y con el
+  estado por ventana — el menú refleja el filtro vigente, también cuando el
+  panel cambia un filtro por código, y activarlos desde él o desde la
+  Command Palette §38 actualiza el explorador sin releer el árbol;
+  `Show All Files` sigue alimentando Quick Open (ISSUE-029).
+- Barra lateral estrecha (issue #70): el explorador ya no lleva cabecera —
+  su ancho mínimo pasa de 268px a **46px medidos**, regresión cubierta por
+  tests—, las filas elipsan los nombres largos y el `Paned` exterior marca
+  `shrink_start_child`, con lo que el ancho mínimo del explorador no se suma
+  al de la ventana: el tamaño mínimo de la ventana lo marcan el editor y el
+  preview, no el explorador.
+
 ### Limitaciones aceptadas (diagramas)
 
 - La sintaxis es DOT (Graphviz), no mermaid: decisión del propietario que
