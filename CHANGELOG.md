@@ -9,6 +9,20 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 
 ## [Unreleased]
 
+### Añadido
+
+- `Open With…` (issue #72, §14.8): el menú contextual del explorador
+  ofrece «abrir con» sobre archivos (la acción queda insensible en las
+  carpetas y en la raíz del proyecto) con el selector de aplicaciones del
+  sistema; elegir una app la lanza con el archivo elegido y cancelar,
+  Escape o cerrar el diálogo no tiene efectos.
+
+### Cambiado
+
+- CLI (issue #72, ISSUE-021): `minmark .` —cualquier carpeta relativa—
+  abre la carpeta canonizada como ventana de proyecto, igual que con una
+  ruta absoluta; los archivos de la línea de comandos conservan su grafía.
+
 ## [0.6.0] — 2026-10-28
 
 ### Corregido

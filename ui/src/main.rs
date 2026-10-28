@@ -1228,6 +1228,30 @@ impl AppCmds {
                     display.clipboard().set_text(&rel);
                 }
             }
+            ExplorerAction::OpenWith => {
+                // #72 (§14.8): selector de aplicaciones del sistema sobre un
+                // archivo; el menú deja la acción insensible en la raíz y en
+                // las carpetas, aquí se rechaza igual por si acaso.
+                let Some(target) = target.filter(|path| !path.is_dir()) else {
+                    return;
+                };
+                let window = self.window.clone();
+                glib::spawn_future_local(async move {
+                    let Some(app) = dialogs::open_with(&window, &target).await else {
+                        // Cancelar/Escape/cerrar el diálogo ⇒ cero efectos (§3.7).
+                        return;
+                    };
+                    let uri = gtk4::gio::File::for_path(&target).uri();
+                    if let Err(err) =
+                        app.launch_uris(&[uri.as_str()], None::<&gtk4::gio::AppLaunchContext>)
+                    {
+                        show_error(
+                            &window,
+                            &format!("No se pudo abrir con la app elegida: {err}"),
+                        );
+                    }
+                });
+            }
             ExplorerAction::Delete => {
                 // §14.9: a la papelera del sistema, con confirmación §3.7.
                 let Some(target) = target else { return };
@@ -3595,6 +3619,25 @@ fn ensure_sandbox_usable() {
     }
 }
 
+/// Argumentos de la CLI (ISSUE-021, #72): `(archivos, carpetas)` — cada
+/// carpeta abre una ventana de proyecto y cada archivo una ventana
+/// standalone con sus pestañas. Las carpetas se canonizan aquí mismo para
+/// que `minmark .` (cualquier carpeta relativa) se comporte como una ruta
+/// absoluta; los archivos conservan su grafía tal cual.
+fn classify_args<I: IntoIterator<Item = String>>(args: I) -> (Vec<PathBuf>, Vec<PathBuf>) {
+    let mut files: Vec<PathBuf> = Vec::new();
+    let mut folders: Vec<PathBuf> = Vec::new();
+    for arg in args {
+        let path = PathBuf::from(arg);
+        if path.is_dir() {
+            folders.push(minmark_fs::canonicalize(&path).unwrap_or(path));
+        } else {
+            files.push(path);
+        }
+    }
+    (files, folders)
+}
+
 fn main() {
     runtime::configure();
     // Antes de tocar ningún widget de WebKit (§4.5: el sandbox es un medio,
@@ -3607,16 +3650,7 @@ fn main() {
     }
     // Argumentos (ISSUE-021): cada carpeta abre una ventana de proyecto y los
     // archivos una ventana standalone con sus pestañas (como Notepad++).
-    let mut files: Vec<PathBuf> = Vec::new();
-    let mut folders: Vec<PathBuf> = Vec::new();
-    for arg in std::env::args().skip(1) {
-        let path = PathBuf::from(arg);
-        if path.is_dir() {
-            folders.push(path);
-        } else {
-            files.push(path);
-        }
-    }
+    let (files, folders) = classify_args(std::env::args().skip(1));
     let app = Application::builder().application_id("app.minmark").build();
     app.connect_activate(move |app| {
         if !files.is_empty() {
@@ -3637,6 +3671,32 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #72: la carpeta de la CLI se canoniza antes de abrir la ventana de
+    /// proyecto — `minmark .` equivale a la carpeta actual en forma canónica
+    /// y `minmark carpeta` a la absoluta — mientras que los archivos
+    /// conservan su grafía sin tocar (ISSUE-021).
+    #[test]
+    fn cli_carpetas_canonicas_y_archivos_intactos_72() {
+        let cwd = std::env::current_dir().expect("cwd del test");
+        let canonica = minmark_fs::canonicalize(&cwd).expect("cwd canónico");
+
+        // `minmark .` → la carpeta actual canónica; el archivo relativo,
+        // exista o no, no se toca.
+        let (files, folders) = classify_args([".".to_string(), "no-existe.md".to_string()]);
+        assert_eq!(folders.len(), 1, "una sola ventana de proyecto");
+        assert_eq!(folders[0], canonica, "minmark . abre la carpeta actual");
+        assert_eq!(
+            files,
+            [PathBuf::from("no-existe.md")],
+            "los archivos quedan intactos"
+        );
+
+        // Una carpeta ya canónica es idempotente (una ventana, no dos).
+        let (files, folders) = classify_args([canonica.to_string_lossy().into_owned()]);
+        assert!(files.is_empty());
+        assert_eq!(folders, [canonica], "idempotente con forma canónica");
+    }
 
     /// ISSUE-026 criterio 3: los cambios generados por nuestras operaciones
     /// §14.8 no avisan como cambio externo; una entrada por evento.
@@ -7900,6 +7960,95 @@ mod gtk_integration_tests {
             !estado(&cmds, "show-hidden-files"),
             "su acción queda desmarcada"
         );
+
+        cmds.window.destroy();
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// #72 (§14.8): «Open With…» en el menú contextual del explorador —
+    /// activo sobre archivos, insensible en carpetas y en la raíz del
+    /// proyecto. Activarlo (el mismo camino que el ítem del menú) abre el
+    /// selector de aplicaciones del sistema; cancelarlo o cerrarlo destruye
+    /// el diálogo con cero efectos (ni pestañas ni lanzamientos). El
+    /// lanzamiento real de la app elegida no es asertable de forma fiable.
+    #[test]
+    #[ignore = "requiere sesión gráfica GTK/WebKit"]
+    // `AppChooserDialog`/`DialogExt::response` están marcados como
+    // obsoletos desde GTK 4.10 pero son el selector de apps que pide #72.
+    #[allow(deprecated)]
+    fn gtk_open_with_72_dialogo_y_cancelacion_sin_efectos() {
+        gtk4::init().expect("GTK display");
+        ensure_sandbox_usable();
+        let root = std::env::temp_dir().join(format!("minmark-openwith72-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("carpeta")).unwrap();
+        std::fs::write(root.join("documento.md"), "# doc\n").unwrap();
+
+        let app = Application::builder()
+            .application_id("app.minmark.test.openwith72")
+            .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk4::gio::Cancellable>).unwrap();
+        let cmds = build_window(&app, WindowScope::Project(root.clone()), &[]);
+        pump_until(|| cmds.index.borrow().is_some());
+        let side = cmds
+            .sidebar
+            .as_ref()
+            .expect("la ventana de proyecto tiene barra lateral");
+        let explorer = &side.explorer;
+        pump_until(|| !explorer.row_names().is_empty());
+
+        /// El `AppChooserDialog` vivo (#72: es el único toplevel de ese tipo).
+        fn selector() -> Option<gtk4::AppChooserDialog> {
+            gtk4::Window::list_toplevels()
+                .into_iter()
+                .find_map(|widget| widget.downcast::<gtk4::AppChooserDialog>().ok())
+        }
+
+        let pestañas = cmds.tabs.borrow().tabs().len();
+
+        // Sensibilidad por destino (#72): el archivo sí; carpeta y raíz, no.
+        assert!(
+            explorer.test_context_open_with(Some(root.join("documento.md"))),
+            "sobre un archivo, Open With… activo"
+        );
+        assert!(
+            !explorer.test_context_open_with(Some(root.join("carpeta"))),
+            "sobre una carpeta, insensible"
+        );
+        assert!(
+            !explorer.test_context_open_with(None),
+            "en la raíz, insensible"
+        );
+
+        // Activar sobre el archivo (mismo camino que el ítem del menú) abre
+        // el selector de aplicaciones del sistema.
+        assert!(explorer.test_context_open_with(Some(root.join("documento.md"))));
+        explorer.test_activate_open_with();
+        pump_until(|| selector().is_some());
+        let dialog = selector().expect("AppChooserDialog abierto (#72)");
+        assert_eq!(dialog.title().as_deref(), Some("Open With…"));
+
+        // Cancelar ⇒ el diálogo se destruye y no queda ningún efecto.
+        dialog.response(gtk4::ResponseType::Cancel);
+        pump_until(|| selector().is_none());
+        assert!(selector().is_none(), "cancelar destruye el diálogo");
+        assert_eq!(
+            cmds.tabs.borrow().tabs().len(),
+            pestañas,
+            "cancelar no abre pestañas"
+        );
+
+        // El cierre (Escape / cerrar la ventana del diálogo) también es
+        // cero efectos: el futuro lo destruye igual.
+        assert!(explorer.test_context_open_with(Some(root.join("documento.md"))));
+        explorer.test_activate_open_with();
+        pump_until(|| selector().is_some());
+        let dialog = selector().expect("selector reabierto");
+        dialog.close();
+        pump_until(|| selector().is_none());
+        assert!(selector().is_none(), "cerrar destruye el diálogo");
+        assert_eq!(cmds.tabs.borrow().tabs().len(), pestañas);
 
         cmds.window.destroy();
         let _ = std::fs::remove_dir_all(&root);
