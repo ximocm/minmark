@@ -1470,6 +1470,43 @@ impl AppCmds {
         }
     }
 
+    /// #70 (§14.4/§14.5): alterna un toggle del menú View sobre el explorador
+    /// de ESTA ventana. El explorador manda: su setter aplica el filtro y
+    /// notifica a los consumidores, y el integrador refleja el valor en el
+    /// estado booleano de la acción `win.*` — así la activación del menú y un
+    /// set programático convergen en la misma sincronía y el estado nunca
+    /// queda desfasado. Sin explorador (ventana standalone) es un sin-op
+    /// documentado, como [`Commands::toggle_explorer`].
+    fn toggle_explorer_filter(&self, show_all: bool) {
+        let Some(side) = &self.sidebar else { return };
+        if show_all {
+            let siguiente = !side.explorer.show_all();
+            side.explorer.set_show_all(siguiente);
+        } else {
+            let siguiente = !side.explorer.show_hidden();
+            side.explorer.set_show_hidden(siguiente);
+        }
+    }
+
+    /// #70 (revisión): refleja un filtro ya aplicado en el explorador en el
+    /// estado booleano de la acción `win.<nombre>` de esta ventana, para que
+    /// el menú View lo muestre marcado. Solo usa `set_state`, nunca
+    /// `activate`: el cambio de estado no realimenta la acción, así que no
+    /// hay bucle.
+    fn sync_explorer_filter_action(&self, nombre: &str, valor: bool) {
+        let Some(accion) = self
+            .action_group
+            .borrow()
+            .as_ref()
+            .and_then(|group| group.upgrade())
+            .and_then(|group| group.lookup_action(nombre))
+            .and_then(|accion| accion.downcast::<gtk4::gio::SimpleAction>().ok())
+        else {
+            return;
+        };
+        accion.set_state(&gtk4::glib::Variant::from(valor));
+    }
+
     /// Texto seleccionado del tab activo para precargar la búsqueda (§4,
     /// estilo VS Code); solo selección de una línea.
     fn selection_seed(&self) -> Option<String> {
@@ -2093,6 +2130,16 @@ impl Commands for AppCmds {
     fn set_view(&self, mode: ViewMode) {
         self.view.set(mode);
         self.apply_view();
+    }
+
+    /// #70 (§14.4): `win.show-all-files` desde el menú View.
+    fn show_all_files(&self) {
+        self.toggle_explorer_filter(true);
+    }
+
+    /// #70 (§14.5): `win.show-hidden-files` desde el menú View.
+    fn show_hidden_files(&self) {
+        self.toggle_explorer_filter(false);
     }
 
     // Controles contextuales §44 (fase 7 #29): menú, atajos, paleta y
@@ -3142,11 +3189,29 @@ fn build_window(app: &Application, scope: WindowScope, open_paths: &[PathBuf]) -
             };
             let explorer = Rc::new(ExplorerPane::new(root, on_open, on_action));
 
-            // §14.4 (ISSUE-029): el toggle `Show All Files` del explorador
-            // alimenta la consulta de Quick Open.
+            // §14.4 (ISSUE-029, #70): `Show All Files` alimenta la consulta
+            // de Quick Open y refleja el valor en su acción `win.*` (menú
+            // marcado); el reflejo vive en el notificador para que un set
+            // programático del panel también sincronice el menú (revisión #70).
             explorer.set_on_show_all_changed({
+                let slot = slot.clone();
                 let quickopen = quickopen.clone();
-                Rc::new(move |show_all: bool| quickopen.set_show_all_files(show_all))
+                Rc::new(move |show_all: bool| {
+                    quickopen.set_show_all_files(show_all);
+                    if let Some(me) = slot.borrow().as_ref().and_then(Weak::upgrade) {
+                        me.sync_explorer_filter_action("show-all-files", show_all);
+                    }
+                })
+            });
+            // §14.5 (#70): mismo reflejo para `Show Hidden Files` por su
+            // notificador propio (Quick Open no consume este filtro).
+            explorer.set_on_show_hidden_changed({
+                let slot = slot.clone();
+                Rc::new(move |show_hidden: bool| {
+                    if let Some(me) = slot.borrow().as_ref().and_then(Weak::upgrade) {
+                        me.sync_explorer_filter_action("show-hidden-files", show_hidden);
+                    }
+                })
             });
 
             // Búsqueda en el proyecto (§40.2, ISSUE-028) con su raíz (§14.1) y
@@ -3312,6 +3377,10 @@ fn build_window(app: &Application, scope: WindowScope, open_paths: &[PathBuf]) -
             search.widget().set_visible(false);
             let outer = Paned::new(Orientation::Horizontal);
             outer.set_wide_handle(true);
+            // #70: la barra lateral se estrecha libremente (también por debajo
+            // de su ancho mínimo) y el mínimo de la ventana lo marca el
+            // editor+preview, no el explorador.
+            outer.set_shrink_start_child(true);
             outer.set_end_child(Some(&paned));
             if explorer_state.visible {
                 outer.set_start_child(Some(&sidebar_box));
@@ -7629,5 +7698,179 @@ mod gtk_integration_tests {
         );
 
         cmds.window.destroy();
+    }
+
+    /// #70 (§14.4/§14.5 + §36): los toggles del explorador viven en el menú
+    /// View como acciones stateful `win.*` — activarlas voltea el estado
+    /// booleano, cambia el filtrado de ESTA ventana (§47.5: sin releer) y el
+    /// `Show All Files` alimenta Quick Open (ISSUE-029).
+    #[test]
+    #[ignore = "requiere sesión gráfica GTK/WebKit"]
+    fn gtk_filtros_del_explorador_en_view_via_gaction() {
+        gtk4::init().expect("GTK display");
+        ensure_sandbox_usable();
+        let root = std::env::temp_dir().join(format!("minmark-filtros70-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("documento.md"), "# doc\n").unwrap();
+        std::fs::write(root.join(".oculto.md"), "# oculto\n").unwrap();
+        std::fs::write(root.join("datos.dat"), "x\n").unwrap();
+
+        let app = Application::builder()
+            .application_id("app.minmark.test.filtros70")
+            .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk4::gio::Cancellable>).unwrap();
+        let cmds = build_window(&app, WindowScope::Project(root.clone()), &[]);
+        pump_until(|| cmds.index.borrow().is_some());
+        let side = cmds
+            .sidebar
+            .as_ref()
+            .expect("la ventana de proyecto tiene barra lateral");
+        let explorer = &side.explorer;
+        pump_until(|| !explorer.row_names().is_empty());
+
+        /// Estado booleano de una acción `win.*` del grupo de esta ventana.
+        fn estado(cmds: &AppCmds, id: &str) -> bool {
+            cmds.action_group
+                .borrow()
+                .as_ref()
+                .and_then(|group| group.upgrade())
+                .and_then(|group| group.lookup_action(id))
+                .and_then(|action| action.state())
+                .and_then(|state| state.get::<bool>())
+                .unwrap_or_else(|| panic!("win.{id} stateful booleana registrada (#70)"))
+        }
+
+        // Estado inicial: ambos toggles sin marcar y sin cambios en el filtro.
+        let nombres = explorer.row_names();
+        assert!(
+            nombres.contains(&"documento.md".to_owned()),
+            "el documento del proyecto se lista"
+        );
+        assert!(
+            !nombres.contains(&"datos.dat".to_owned()),
+            "§14.4: sin Show All solo tipos documentales"
+        );
+        assert!(
+            !nombres.contains(&".oculto.md".to_owned()),
+            "§14.5: los ocultos están fuera por defecto"
+        );
+        assert!(!explorer.show_all(), "§14.4 arranca apagado");
+        assert!(!explorer.show_hidden(), "§14.5 arranca apagado");
+        assert!(!estado(&cmds, "show-all-files"), "acción sin marcar");
+        assert!(!estado(&cmds, "show-hidden-files"), "acción sin marcar");
+        assert!(
+            !cmds.quickopen.test_show_all_files(),
+            "Quick Open arranca con Show All apagado (ISSUE-029)"
+        );
+
+        // Show All Files: voltea el estado, cambia el filtrado y notifica a
+        // Quick Open por el MISMO camino `win.*` que menú y paleta §38.
+        gtk4::prelude::WidgetExt::activate_action(&cmds.window, "win.show-all-files", None)
+            .expect("win.show-all-files registrada (§36)");
+        assert!(
+            estado(&cmds, "show-all-files"),
+            "el estado GAction voltea (#70)"
+        );
+        assert!(explorer.show_all(), "el explorador aplica §14.4");
+        assert!(
+            explorer.row_names().contains(&"datos.dat".to_owned()),
+            "Show All Files revela los no-documentales (§14.4)"
+        );
+        assert!(
+            cmds.quickopen.test_show_all_files(),
+            "el notificador §14.4 alimenta Quick Open (ISSUE-029)"
+        );
+
+        // Y la MISMA acción lo vuelve a apagar.
+        gtk4::prelude::WidgetExt::activate_action(&cmds.window, "win.show-all-files", None)
+            .expect("win.show-all-files reactivable");
+        assert!(
+            !estado(&cmds, "show-all-files"),
+            "segunda activación ⇒ false"
+        );
+        assert!(!explorer.show_all(), "§14.4 se apaga");
+        assert!(
+            !explorer.row_names().contains(&"datos.dat".to_owned()),
+            "los no-documentales vuelven a salir"
+        );
+        assert!(
+            !cmds.quickopen.test_show_all_files(),
+            "Quick Open vuelve a Show All apagado"
+        );
+
+        // Show Hidden Files §14.5: idéntico camino sobre su propio filtro.
+        gtk4::prelude::WidgetExt::activate_action(&cmds.window, "win.show-hidden-files", None)
+            .expect("win.show-hidden-files registrada (§36)");
+        assert!(
+            estado(&cmds, "show-hidden-files"),
+            "el estado GAction voltea (#70)"
+        );
+        assert!(explorer.show_hidden(), "el explorador aplica §14.5");
+        assert!(
+            explorer.row_names().contains(&".oculto.md".to_owned()),
+            "Show Hidden Files revela los ocultos (§14.5)"
+        );
+        gtk4::prelude::WidgetExt::activate_action(&cmds.window, "win.show-hidden-files", None)
+            .expect("win.show-hidden-files reactivable");
+        assert!(!explorer.show_hidden(), "§14.5 se apaga");
+        assert!(
+            !explorer.row_names().contains(&".oculto.md".to_owned()),
+            "los ocultos vuelven a salir"
+        );
+
+        // Ruta programática (#70 revisión): un set directo sobre el panel
+        // refleja su valor en la acción `win.*` — antes quedaba desfasada y
+        // la siguiente activación re-aplicaba el mismo valor en vez de
+        // conmutar—, y el menú marcado/desmarcado sigue al explorador.
+        explorer.set_show_all(true);
+        assert!(explorer.show_all(), "el set programático aplica §14.4");
+        assert!(
+            explorer.row_names().contains(&"datos.dat".to_owned()),
+            "el set programático también re-renderiza el filtrado"
+        );
+        assert!(
+            estado(&cmds, "show-all-files"),
+            "el set programático marca la acción win.* (#70 revisión)"
+        );
+        assert!(
+            cmds.quickopen.test_show_all_files(),
+            "el set programático alimenta Quick Open (ISSUE-029)"
+        );
+        gtk4::prelude::WidgetExt::activate_action(&cmds.window, "win.show-all-files", None)
+            .expect("win.show-all-files tras set programático");
+        assert!(
+            !explorer.show_all(),
+            "la siguiente activación APAGA: sin estado desfasado (#70)"
+        );
+        assert!(
+            !estado(&cmds, "show-all-files"),
+            "la acción queda desmarcada"
+        );
+        assert!(
+            !cmds.quickopen.test_show_all_files(),
+            "Quick Open sigue al explorador"
+        );
+
+        explorer.set_show_hidden(true);
+        assert!(explorer.show_hidden(), "el set programático aplica §14.5");
+        assert!(
+            estado(&cmds, "show-hidden-files"),
+            "el set programático marca su acción win.* (#70 revisión)"
+        );
+        gtk4::prelude::WidgetExt::activate_action(&cmds.window, "win.show-hidden-files", None)
+            .expect("win.show-hidden-files tras set programático");
+        assert!(
+            !explorer.show_hidden(),
+            "la siguiente activación apaga §14.5 (#70)"
+        );
+        assert!(
+            !estado(&cmds, "show-hidden-files"),
+            "su acción queda desmarcada"
+        );
+
+        cmds.window.destroy();
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
