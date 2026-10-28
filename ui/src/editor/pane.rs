@@ -393,6 +393,10 @@ impl EditorPane {
         // insertados— para ver todo el texto escrito sin scroll horizontal
         // (sustituye al `wrap-mode` `GTK_WRAP_NONE` de §34.2 en el editor).
         text_view.set_wrap_mode(gtk::WrapMode::WordChar);
+        text_view.set_left_margin(12);
+        text_view.set_right_margin(12);
+        text_view.set_top_margin(8);
+        text_view.set_bottom_margin(8);
 
         // Marcado de búsqueda (§40.1): discreto para todas las coincidencias
         // y distinto para la activa; colores de la [`Palette`] (§23).
@@ -738,7 +742,9 @@ fn apply_tag_style(tag: &TextTag, style: &tags::TagStyle) {
     } else {
         pango::Underline::None
     });
-    tag.set_left_margin(style.left_margin.unwrap_or(0) as i32);
+    tag.set_left_margin(style.left_margin.unwrap_or(0) as i32 + 12);
+    // Los tags sin sangría no deben anular el margen del TextView.
+    tag.set_property("left-margin-set", style.left_margin.is_some());
 }
 
 /// `mark-set` solo propaga las marcas de cursor/selección (`insert` y

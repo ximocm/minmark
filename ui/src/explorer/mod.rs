@@ -20,7 +20,7 @@
 mod model;
 mod state;
 
-pub use state::{load as load_state, save as save_state, ExplorerState};
+pub use state::{load as load_state, save as save_state, ExplorerState, MIN_WIDTH};
 
 use gtk4 as gtk;
 use gtk4::glib;

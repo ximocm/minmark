@@ -186,6 +186,10 @@ pub struct PreviewPane {
 
 impl PreviewPane {
     #[cfg(test)]
+    pub fn test_has_loaded_document(&self) -> bool {
+        self.document_key.borrow().is_some() && !self.engine.is_loading()
+    }
+    #[cfg(test)]
     pub fn test_snapshot(&self, path: &std::path::Path, done: std::rc::Rc<std::cell::Cell<bool>>) {
         self.engine.snapshot(path, done);
     }

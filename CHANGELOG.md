@@ -9,6 +9,19 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 
 ## [Unreleased]
 
+### Corregido
+
+- Windows (#67): la barra lateral restaurada a un ancho pequeño desplazaba
+  nombres y controles fuera del borde de la ventana — ahora se respeta el
+  ancho mínimo del panel y la cabecera de toggles ya no existe (#70), por lo
+  que no hay contenido que se corte; el Preview en ventana restaurada
+  dejaba 28 px vacíos a la derecha y solapaba 24 px de las pestañas — la
+  conversión GTK → HWND suma los márgenes de decoración para alinearlo; el
+  editor incorpora márgenes propios que los tags sin sangría ya no anulan.
+  Añadida verificación del ancho lateral mínimo y de las coordenadas reales
+  del Preview en la autocomprobación (`--check-preview`), y la prueba de
+  composición espera al primer documento cargado antes de consultar WebView2.
+
 ### Añadido
 
 - Diagramas DOT (issue #68, §7.3.1, ADR-007): los bloques cercados

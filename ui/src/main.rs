@@ -3377,10 +3377,12 @@ fn build_window(app: &Application, scope: WindowScope, open_paths: &[PathBuf]) -
             search.widget().set_visible(false);
             let outer = Paned::new(Orientation::Horizontal);
             outer.set_wide_handle(true);
-            // #70: la barra lateral se estrecha libremente (también por debajo
-            // de su ancho mínimo) y el mínimo de la ventana lo marca el
-            // editor+preview, no el explorador.
-            outer.set_shrink_start_child(true);
+            // #70/#67: el mínimo del panel es el de la lista (elipsizada),
+            // pero NO se asigna por debajo del mínimo: en Windows un ancho
+            // restaurado pequeño desplazaba el contenido fuera del borde de
+            // la ventana. El mínimo de la ventana lo marcan editor+preview,
+            // no el explorador.
+            outer.set_shrink_start_child(false);
             outer.set_end_child(Some(&paned));
             if explorer_state.visible {
                 outer.set_start_child(Some(&sidebar_box));
@@ -4240,6 +4242,32 @@ fn wait_preview_allocation(cmds: &AppCmds) -> Result<(), String> {
 }
 
 fn check_preview_allocation(cmds: &AppCmds) -> Result<(), String> {
+    if let Some(sidebar) = &cmds.sidebar {
+        let was_visible = sidebar.visible.get();
+        if !was_visible {
+            cmds.toggle_explorer();
+        }
+        let previous = sidebar.paned.position();
+        // Regresión Windows: un estado guardado de 160 px desplazaba la
+        // cabecera y los nombres 87 px fuera de la ventana.
+        sidebar.paned.set_position(explorer::MIN_WIDTH);
+        wait_preview_allocation(cmds)?;
+        let bounds = sidebar
+            .widget
+            .compute_bounds(&cmds.window)
+            .ok_or("no se pudo medir la barra lateral")?;
+        if bounds.x() < 0.0 || bounds.width() > sidebar.paned.position() as f32 + 1.0 {
+            return Err(format!(
+                "barra lateral recortada al restaurar su ancho mínimo: {bounds:?}"
+            ));
+        }
+        sidebar.paned.set_position(previous);
+        wait_preview_allocation(cmds)?;
+        if !was_visible {
+            cmds.toggle_explorer();
+            wait_preview_allocation(cmds)?;
+        }
+    }
     #[cfg(any(windows, target_os = "macos"))]
     if cmds.preview.native_widget().layout_manager().is_some() {
         return Err("el host nativo no debe interceptar size_allocate con BoxLayout".into());
@@ -4988,6 +5016,9 @@ mod gtk_integration_tests {
 
     /// Evalúa `script` en la WebView y devuelve el número observado.
     fn eval_js(pane: &PreviewPane, script: &str) -> f64 {
+        // WebView2 crea el controlador de forma asíncrona. La ventana puede
+        // estar visible antes de que llegue el primer HTML de la composición.
+        pump_until(|| pane.test_has_loaded_document());
         let result = Rc::new(Cell::new(None));
         pane.test_eval_number(script, result.clone());
         pump_until(|| result.get().is_some());
