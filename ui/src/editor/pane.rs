@@ -157,6 +157,9 @@ pub struct EditorPane {
     broken_link: TextTag,
     wiki_links: Cell<bool>,
     completion: RefCell<Option<super::completion::CompletionPopup>>,
+    /// Controles contextuales §44 (fase 7 #29): popover anclado al TextView
+    /// que sigue a cursor/selección vía [`EditorPane::update_context`].
+    context: RefCell<Option<super::context_controls::ContextControls>>,
     /// Guardia de reentrancia: las reescrituras programáticas del buffer
     /// (`load`) no invocan al [`EditSink`] ni a `on_edited`.
     guard: Rc<Cell<bool>>,
@@ -201,6 +204,98 @@ impl EditorPane {
             .borrow()
             .as_ref()
             .is_some_and(|p| p.test_selected_visible(index))
+    }
+
+    /// Actualiza los controles contextuales §44 (fase 7 #29) con el estado
+    /// vigente `(tab, mode, source, selection)` leído del modelo: muestra el
+    /// popover solo si aporta utilidad, lo actualiza o lo cierra.
+    pub fn update_context(
+        &self,
+        source: &str,
+        selection: Selection,
+        tab: usize,
+        mode: EditMode,
+    ) {
+        if let Some(controls) = self.context.borrow().as_ref() {
+            controls.update(&self.text_view, source, selection, tab, mode);
+        }
+    }
+
+    /// Enlaza el fijado del tono de `win.insert-callout` del popover (la
+    /// resuelve el integrador sobre el grupo «win», main.rs).
+    pub fn connect_context_tone(&self, setter: Rc<dyn Fn(String)>) {
+        if let Some(controls) = self.context.borrow().as_ref() {
+            controls.set_tone_setter(setter);
+        }
+    }
+
+    /// Cierra los controles contextuales (recarga de pestaña/modo §37/§8).
+    fn hide_context(&self) {
+        if let Some(controls) = self.context.borrow().as_ref() {
+            controls.hide();
+        }
+    }
+
+    #[cfg(test)]
+    pub fn test_context_visible(&self) -> bool {
+        self.context
+            .borrow()
+            .as_ref()
+            .is_some_and(|controls| controls.is_visible())
+    }
+
+    #[cfg(test)]
+    pub fn test_context_has_button(&self, name: &str) -> bool {
+        self.context
+            .borrow()
+            .as_ref()
+            .and_then(|controls| controls.test_button(name))
+            .is_some()
+    }
+
+    /// Botón del popover por nombre accesible (teclado/pruebas §29).
+    #[cfg(test)]
+    pub fn test_context_button(&self, name: &str) -> Option<gtk::Button> {
+        self.context
+            .borrow()
+            .as_ref()
+            .and_then(|controls| controls.test_button(name))
+    }
+
+    /// ¿El popover admite foco? (§29: Tab/Enter/Space nativos.)
+    #[cfg(test)]
+    pub fn test_context_can_focus(&self) -> bool {
+        self.context
+            .borrow()
+            .as_ref()
+            .is_some_and(|controls| controls.test_can_focus())
+    }
+
+    /// ¿Algún control tiene el foco? (tras `Ctrl+.`.)
+    #[cfg(test)]
+    pub fn test_context_focus_inside(&self) -> bool {
+        self.context
+            .borrow()
+            .as_ref()
+            .is_some_and(|controls| controls.test_focus_inside())
+    }
+
+    /// Emite `clicked` sobre un botón del popover; `false` si no existe.
+    /// La guardia de pestaña vive en el handler del popover.
+    #[cfg(test)]
+    pub fn test_context_click(&self, name: &str) -> bool {
+        self.context
+            .borrow()
+            .as_ref()
+            .is_some_and(|controls| controls.test_click(name))
+    }
+
+    #[cfg(test)]
+    pub fn test_context_tone(&self) -> Option<String> {
+        self.context
+            .borrow()
+            .as_ref()
+            .and_then(|controls| controls.test_tone_state())
     }
     pub fn set_wiki_links(&self, enabled: bool) {
         self.wiki_links.set(enabled);
@@ -385,6 +480,12 @@ impl EditorPane {
         scroll.set_vexpand(true);
         root.append(&scroll);
 
+        // Controles contextuales §44 (fase 7 #29): popover anclado al
+        // TextView; la actualización llega con cada cambio de cursor o
+        // selección (mark_set → EditSink::set_selection → main.rs).
+        let context =
+            RefCell::new(Some(super::context_controls::ContextControls::new(&text_view)));
+
         Self {
             root,
             buffer,
@@ -397,6 +498,7 @@ impl EditorPane {
             broken_link,
             wiki_links: Cell::new(false),
             completion: RefCell::new(None),
+            context,
             guard,
             reveal,
         }
@@ -419,6 +521,9 @@ impl EditorPane {
         if let Some(popup) = self.completion.borrow().as_ref() {
             popup.hide();
         }
+        // Cambio de tab/modo/recarga: el popover de controles contextuales
+        // se cierra y su registro de pestaña queda invalidado (§UI #29).
+        self.hide_context();
         let text = editor.document().content();
         self.guard.set(true);
         self.buffer.set_text(text);

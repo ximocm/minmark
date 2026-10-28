@@ -45,6 +45,46 @@ impl Range {
     }
 }
 
+/// Inicio de bytes de cada línea del fuente (índice de posiciones).
+pub(crate) fn line_starts(content: &str) -> Vec<usize> {
+    let mut starts = vec![0];
+    starts.extend(
+        content
+            .bytes()
+            .enumerate()
+            .filter(|(_, b)| *b == b'\n')
+            .map(|(i, _)| i + 1),
+    );
+    starts
+}
+
+/// Offset de bytes de una posición semántica sobre `content` (§8.6).
+///
+/// `starts` es [`line_starts`] del mismo `content`. `None` = posición fuera
+/// del buffer.
+pub(crate) fn offset_of(content: &str, starts: &[usize], position: Position) -> Option<usize> {
+    let line = position.line as usize;
+    let &line_start = starts.get(line)?;
+    let segment_end = starts.get(line + 1).copied().unwrap_or(content.len());
+    let segment = &content[line_start..segment_end];
+    let column = position.column as usize;
+    if column == segment.chars().count() {
+        return Some(segment_end);
+    }
+    segment
+        .char_indices()
+        .nth(column)
+        .map(|(i, _)| line_start + i)
+}
+
+/// Posición semántica de un offset de bytes sobre `content` (§8.6).
+pub(crate) fn position_of(content: &str, starts: &[usize], offset: usize) -> Position {
+    let line = starts.partition_point(|&p| p <= offset) - 1;
+    let line_start = starts[line];
+    let column = content[line_start..offset].chars().count();
+    Position::new(line as u32, column as u32)
+}
+
 /// Selección semántica (§8.6). Con `anchor == head` es un cursor sin
 /// selección; el texto seleccionado va de la posición mínima a la máxima.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
