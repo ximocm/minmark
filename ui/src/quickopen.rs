@@ -357,6 +357,13 @@ impl QuickOpen {
         self.input.emit_activate();
     }
 
+    /// `Show All Files` (§14.4, #70) vigente en la paleta: lo que el
+    /// notificador del explorador le ha comunicado.
+    #[cfg(test)]
+    pub fn test_show_all_files(&self) -> bool {
+        self.state.borrow().show_all_files
+    }
+
     pub fn set_title(&self, title: &str) {
         self.state.borrow_mut().document_list = true;
         self.window.set_title(Some(title));

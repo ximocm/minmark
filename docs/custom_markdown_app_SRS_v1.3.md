@@ -834,13 +834,14 @@ El explorador mostrará por defecto archivos relevantes para documentación:
 - `.toml`;
 - recursos documentales reconocidos.
 
-Existirá `Show All Files`.
+Existirá `Show All Files`, activable desde el menú **View** (no dentro del
+panel del explorador, que debe poder estrecharse libremente).
 
 ## 14.5 Hidden files
 
 Los archivos ocultos estarán ocultos por defecto.
 
-Existirá `Show Hidden Files`.
+Existirá `Show Hidden Files`, activable desde el menú **View**.
 
 ## 14.6 `.gitignore`
 
