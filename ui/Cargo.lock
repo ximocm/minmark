@@ -1798,6 +1798,7 @@ dependencies = [
  "minmark-config",
  "minmark-document",
  "minmark-fs",
+ "minmark-math",
  "minmark-parser",
  "minmark-pdf",
  "minmark-renderer",

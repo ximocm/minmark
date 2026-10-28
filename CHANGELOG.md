@@ -61,6 +61,36 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
   el destino único `TabManager::apply_format_active` con menús, atajos,
   paleta §38 y popover §44. Sin atajos nuevos: #30 no registra
   aceleradores (los de #39/#29 se conservan intactos).
+- Controles para ecuaciones y citas (fase 7, #31; §24, §25.2, §26.4): el
+  popover §44 muestra «Edit Equation» + «Equation Attributes» cuando el
+  cursor o la selección caen dentro de una ecuación —los atributos SOLO
+  para `$$…$$` de bloque (§26.4)— y «Edit Citation» dentro de una cita
+  `[@…]`, con las mismas garantías de foco, teclado y guardia de pestaña
+  que #29/#30. El menú **Insert** gana Equation y Citation:
+  `win.insert-equation` envuelve la selección como LaTeX (monolínea `$…$`,
+  multilínea `$$…$$`) o, sin selección, pide el LaTeX en un diálogo
+  multilinea con diagnóstico EN VIVO —fuera del subconjunto ADR-002 se
+  muestra el marcador «⚠ [math no soportado: …]» como aviso NO bloqueante:
+  aceptar sigue siendo válido y el contenido se conserva visible y
+  editable (§24) y SIN campos de atributos; `win.edit-equation` precarga
+  el LaTeX del contexto y `MathEdit` sustituye SOLO el contenido LaTeX
+  (marcadores y línea de atributos intactos); `win.equation-attrs` usa el
+  MISMO formulario ID/Caption que Table Attributes para crear, reemplazar
+  o eliminar la línea `{#id "caption"}` del bloque; `win.insert-citation` y
+  `win.edit-citation` comparten un diálogo de items (clave + localizador)
+  con añadir/quitar filas y autocompletado bibliográfico §25.3 (clave,
+  autor, título y año) reutilizando `intelligence::citation_completions`
+  con el popup de completado existente y cargando la MISMA bibliografía que
+  la inteligencia de la fase 5. Los campos se validan contra la gramática
+  que consumen parser y núcleo (§25.2): la clave admite letras, dígitos y
+  `: . _ - * + / !` y el localizador no puede estar vacío ni contener `;`,
+  `]` ni saltos de línea — fuera de esa gramática el diálogo RETIENE el
+  error en abierto y no se cierra. Aceptar deja la cita en forma canónica
+  `[@k1, loc; @k2]`; Cancelar, Escape o cerrar cualquier diálogo es cero
+  cambios y sin transacción nueva. Los cinco comandos comparten el destino
+  único `TabManager::apply_format_active` con menú Insert, paleta §38 y
+  popover §44. Sin atajos nuevos: #31 no registra aceleradores (los de
+  #39/#29 se conservan intactos).
 
 ### Limitaciones aceptadas (#29)
 
@@ -84,6 +114,23 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
   acción `win.*`.
 - El GIF se renderiza estático (§18.1): es comportamiento de Preview/PDF,
   no de edición.
+
+### Limitaciones aceptadas (#31)
+
+- La detección de `$…$` sigue la sintaxis canónica (§24): `$` escapados
+  con `\`, `$` pegados a texto sin separador y ecuaciones multilínea en
+  inline no se detectan como constructo, así que su botón contextual no
+  aparece —el contenido sigue siendo editable escribiendo sobre el mismo
+  buffer—; la detección de bloque exige `$$` en línea propia.
+- El control de citas edita la lista de items (§25.2); el estilo CSL y la
+  precedencia de citas son de render (§25.4) y no se tocan: «mantener CSL
+  y precedencia efectivos» significa no romperlos.
+- Los atributos `{#id "caption"}` existen SOLO para ecuaciones de bloque
+  (§26.4): en inline `MathAttrs` no aplica y «Equation Attributes» no se
+  muestra en el popover.
+- Sin atajos nuevos para #31 (el contrato §UI lo pide documentado): Equation
+  y Citation se activan desde el menú Insert, la Command Palette §38 y el
+  popover §44; los aceleradores de #39/#29 siguen intactos.
 
 ### Verificación
 
@@ -116,6 +163,31 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
   render (§Verificación) comprueba en HTML del Preview que la imagen editada
   `{#fig:…}` y la tabla con `{#tbl:… "caption"}` producen su numeración y
   pie §26.5.
+- Fase 7 #31: `cargo test` del binario UI con 153 en verde (los 144 previos
+  más 9 headless de #31: comandos hasta el receptor, cancelar formularios
+  sin acción, derivación de la forma canónica `$…$`/`$$…$$`, `MathAttrs`
+  reutilizando los campos de Table Attributes, parseo de items de cita con
+  localizador, `format::context` de ecuación/cita, `apply_format_active` de
+  ecuaciones y citas —no-op, fuera de constructo y UNA transacción por
+  acción— y el smoke de render de ecuación editada + cita compuesta con
+  bibliografía) y 25 ignorados gráficos. `cargo clippy --all-targets`
+  reproduce el recuento del HEAD (15 avisos bin, 15 de `qa_preview` y 22
+  del target de test, sin avisos nuevos). Los seis tests gráficos nuevos
+  corren cada uno bajo su propio `xvfb-run … --ignored --test-threads=1`:
+  edición de ecuación válida con el popover inline SIN «Equation
+  Attributes» y Escape byte a byte idéntico, ecuación no soportada con el
+  marcador ADR-002 visible, contenido editable, aceptación válida y cancelar
+  limpio, atributos de ecuación creando/reemplazando/quitando solo su línea
+  del bloque (y sin botón en inline), inserción y edición de citas con
+  items múltiples y locator (añadir y quitar filas, precarga desde el
+  contexto), autocompletado bibliográfico §25.3 —clave y autor con
+  `intelligence::citation_completions`, Enter acepta la fila, sin
+  coincidencias cierra el popup, Escape cierra SOLO el popup y un segundo
+  Escape cancela sin tocar el documento— y guardia de pestaña/modo sobre
+  «Edit Equation»/«Edit Citation». Los 19 tests gráficos previos siguen en
+  verde. El smoke de render comprueba en HTML del Preview la ecuación
+  editada (math con el LaTeX nuevo en `aria-label`) y la cita resuelta con
+  la bibliografía §25.4 sin rastro de la cita original.
 
 ## [0.4.3] — 2026-10-26
 

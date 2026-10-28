@@ -11,6 +11,7 @@
 //! se puede expresar como edición limpia (sintaxis no soportada §8.4, rango
 //! inválido, no-op) devuelve `None` y el documento queda intacto.
 
+use crate::ast::CitationItem;
 use crate::document::LineEnding;
 use crate::position::{self, Range, Selection};
 
@@ -57,6 +58,25 @@ pub enum FormatAction {
         id: Option<String>,
         caption: Option<String>,
     },
+    /// Insertar ecuación LaTeX (§24, ADR-002): inline `$…$` o bloque
+    /// `$$\n…\n$$` según `block`. Con selección no vacía, el texto
+    /// seleccionado es el LaTeX. Los atributos se editan con [`Self::MathAttrs`].
+    MathInsert { block: bool, latex: String },
+    /// Editar SOLO el LaTeX de la ecuación que contiene la selección;
+    /// marcadores y atributos intactos. `latex` vacío → no aplicable.
+    MathEdit { latex: String },
+    /// Editar los atributos `{#id "caption"}` de la ecuación de bloque
+    /// (§26.4, §28.3), análogo a [`Self::TableAttrs`]. En inline → no
+    /// aplicable.
+    MathAttrs {
+        id: Option<String>,
+        caption: Option<String>,
+    },
+    /// Insertar cita Pandoc (§25.2) con los items dados (canónica
+    /// `[@k1, loc; @k2]`). Items vacíos → no aplicable.
+    CitationInsert { items: Vec<CitationItem> },
+    /// Editar la cita que contiene la selección con los items dados.
+    CitationEdit { items: Vec<CitationItem> },
 }
 
 /// Plan de una acción: ediciones disjuntas sobre el buffer original (sin
@@ -111,6 +131,25 @@ pub struct TableContext {
     pub caption: Option<String>,
 }
 
+/// Ecuación LaTeX (§24) que contiene la selección.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MathContext {
+    /// Rango del constructo completo (marcadores y atributos incluidos).
+    pub range: Range,
+    pub latex: String,
+    /// `$$…$$` de bloque frente a inline `$…$`.
+    pub block: bool,
+    pub id: Option<String>,
+    pub caption: Option<String>,
+}
+
+/// Cita Pandoc (§25.2) que contiene la selección.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CitationContext {
+    pub range: Range,
+    pub items: Vec<CitationItem>,
+}
+
 /// Contexto editorial bajo la selección (§44): lo que los controles
 /// contextuales muestran como utilidad. No muta nada.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -121,6 +160,8 @@ pub struct EditContext {
     pub callout: Option<CalloutContext>,
     pub image: Option<ImageContext>,
     pub table: Option<TableContext>,
+    pub math: Option<MathContext>,
+    pub citation: Option<CitationContext>,
     /// La selección ya está envuelta por el marcador correspondiente.
     pub strong: bool,
     pub emphasis: bool,
@@ -188,6 +229,15 @@ pub fn plan(source: &str, selection: Selection, action: &FormatAction) -> Option
         FormatAction::TableAttrs { id, caption } => {
             table_attrs_plan(source, &starts, a, b, id.as_deref(), caption.as_deref())?
         }
+        FormatAction::MathInsert { block, latex } => {
+            math_insert_plan(source, a, b, *block, latex)?
+        }
+        FormatAction::MathEdit { latex } => math_edit_plan(source, a, b, latex)?,
+        FormatAction::MathAttrs { id, caption } => {
+            math_attrs_plan(source, &starts, a, b, id.as_deref(), caption.as_deref())?
+        }
+        FormatAction::CitationInsert { items } => citation_insert_plan(source, a, b, items)?,
+        FormatAction::CitationEdit { items } => citation_edit_plan(source, a, b, items)?,
     };
 
     let result = apply_edits(source, &edits);
@@ -246,6 +296,8 @@ pub fn context(source: &str, selection: Selection) -> EditContext {
         callout: callout_at(source, &starts, a, b),
         image: image_at(source, &starts, a, b),
         table: table_at(source, &starts, a, b),
+        math: math_at(source, &starts, a, b),
+        citation: citation_at(source, a, b),
         strong: a < b && wrapped(source, a, b, Inline::Strong),
         emphasis: a < b && wrapped(source, a, b, Inline::Emphasis),
         strikethrough: a < b && wrapped(source, a, b, Inline::Strikethrough),
@@ -1264,6 +1316,27 @@ struct TableFound {
     columns: usize,
 }
 
+/// Línea de atributos `{...}` propia inmediatamente después de la línea
+/// `last` (§26.3): `(número de línea, spans)`. El offset se calcula solo con
+/// la sangre inicial: los `\r`/espacios finales no desplazan el `{`.
+fn attrs_line_after(
+    source: &str,
+    starts: &[usize],
+    lines: &[&str],
+    last: usize,
+) -> (Option<usize>, Option<AttrSpans>) {
+    lines
+        .get(last + 1)
+        .and_then(|text| {
+            let trimmed = text.trim();
+            let indent = text.len() - text.trim_start().len();
+            let offset = starts.get(last + 1)? + indent;
+            let spans = attrs_spans(source, offset)?;
+            (spans.range.1 == offset + trimmed.len()).then_some((last + 1, spans))
+        })
+        .unzip()
+}
+
 fn table_found(source: &str, starts: &[usize], a: usize, b: usize) -> Option<TableFound> {
     let lines: Vec<&str> = source.split('\n').collect();
     let line_at = |offset: usize| position::position_of(source, starts, offset).line as usize;
@@ -1291,18 +1364,8 @@ fn table_found(source: &str, starts: &[usize], a: usize, b: usize) -> Option<Tab
     }
     let (block_start, _) = line_span(source, starts, first);
     let block_end = line_content_end(source, starts, last as u32);
-    // Línea de atributos propia posterior (§26.3). El offset se calcula solo
-    // con la sangre inicial: los `\r`/espacios finales no desplazan el `{`.
-    let (attrs_line, attrs) = lines
-        .get(last + 1)
-        .and_then(|text| {
-            let trimmed = text.trim();
-            let indent = text.len() - text.trim_start().len();
-            let offset = starts.get(last + 1)? + indent;
-            let spans = attrs_spans(source, offset)?;
-            (spans.range.1 == offset + trimmed.len()).then_some((last + 1, spans))
-        })
-        .unzip();
+    // Línea de atributos propia posterior (§26.3).
+    let (attrs_line, attrs) = attrs_line_after(source, starts, &lines, last);
     // La selección debe estar en el bloque de filas o en su línea de atributos.
     let in_block = a >= block_start && b <= block_end;
     let in_attrs = attrs
@@ -1544,18 +1607,44 @@ fn table_attrs_plan(
     id: Option<&str>,
     caption: Option<&str>,
 ) -> Option<RawPlan> {
+    let found = table_found(source, starts, a, b)?;
+    let edits = attrs_line_edits(
+        source,
+        starts,
+        found.attrs.as_ref(),
+        found.attrs_line,
+        found.block.1,
+        id,
+        caption,
+    )?;
+    let after = (map_offset(&edits, a), map_offset(&edits, b));
+    Some((edits, after))
+}
+
+/// Edita la línea de atributos `{#id "caption"}` asociada a un bloque
+/// (tablas §26.3, ecuaciones §26.4): SOLO los campos que cambian, con span
+/// por token; el bloque se crea si falta y se elimina si queda vacío sin
+/// tokens nuevos. `None` = no-op.
+fn attrs_line_edits(
+    source: &str,
+    starts: &[usize],
+    attrs: Option<&AttrSpans>,
+    attrs_line: Option<usize>,
+    block_end: usize,
+    id: Option<&str>,
+    caption: Option<&str>,
+) -> Option<Vec<RawEdit>> {
     if let Some(id) = id {
         if !valid_id(id) {
             return None;
         }
     }
     let caption = caption.filter(|text| !text.trim().is_empty());
-    let found = table_found(source, starts, a, b)?;
     let mut edits: Vec<RawEdit> = Vec::new();
     let mut deleted: Vec<(usize, usize)> = Vec::new();
 
     let mut new_tokens: Vec<String> = Vec::new();
-    match (&found.attrs, id) {
+    match (attrs, id) {
         (Some(spans), Some(id)) => match spans.id {
             Some(span) if attr_id_value(source, span) != id => {
                 edits.push((span.0, span.1, format!("#{id}")));
@@ -1571,7 +1660,7 @@ fn table_attrs_plan(
         (None, Some(id)) => new_tokens.push(format!("#{id}")),
         (None, None) => {}
     }
-    match (&found.attrs, caption) {
+    match (attrs, caption) {
         (Some(spans), Some(caption)) => match spans.caption {
             Some(span) if attr_caption_value(source, span) != caption => {
                 edits.push((span.0, span.1, quote_caption(caption)));
@@ -1591,7 +1680,7 @@ fn table_attrs_plan(
     for (start, end) in extend_attr_deletes(source, &deleted) {
         edits.push((start, end, String::new()));
     }
-    if let Some(spans) = &found.attrs {
+    if let Some(spans) = attrs {
         if !new_tokens.is_empty() {
             let text = new_tokens.join("");
             edits.push((spans.range.0 + 1, spans.range.0 + 1, text));
@@ -1610,7 +1699,7 @@ fn table_attrs_plan(
             }
             if inner.trim().is_empty() {
                 edits.retain(|(s, e, t)| !(t.is_empty() && *s >= spans.range.0 && *e <= spans.range.1));
-                let line = found.attrs_line?;
+                let line = attrs_line?;
                 let line_start = starts[line];
                 let mut end = line_content_end(source, starts, line as u32);
                 if source.as_bytes().get(end) == Some(&b'\r') {
@@ -1626,14 +1715,370 @@ fn table_attrs_plan(
         let tokens: Vec<&str> = new_tokens.iter().map(|t| t.trim_end()).collect();
         let line = format!("{{{}}}", tokens.join(" "));
         let nl = LineEnding::detect(source).as_str();
-        edits.push((found.block.1, found.block.1, format!("{nl}{line}")));
+        edits.push((block_end, block_end, format!("{nl}{line}")));
     }
 
     if edits.is_empty() {
         return None; // no-op.
     }
     edits.sort_by_key(|(start, end, _)| (*start, *end));
+    Some(edits)
+}
+
+// ---------------------------------------------------------------------------
+// Ecuaciones LaTeX (§24, ADR-002) y citas Pandoc (§25.2)
+// ---------------------------------------------------------------------------
+
+/// Estado detectado de una ecuación: el constructo (marcadores y, en bloque,
+/// la línea de atributos) más los extremos del contenido LaTeX.
+struct MathFound {
+    /// Rango completo (marcadores incluidos; en bloque, atributos también).
+    start: usize,
+    end: usize,
+    /// `[inicio, fin)` del contenido LaTeX entre los marcadores.
+    latex: (usize, usize),
+    block: bool,
+    /// Fin del bloque `$$…$$` (sin atributos): dónde se crea la línea.
+    block_end: usize,
+    attrs: Option<AttrSpans>,
+    attrs_line: Option<usize>,
+}
+
+/// Ecuación que contiene `[a, b]` (§24 canónico: bloque con `$$` en línea
+/// propia; inline `$…$` sin salto de línea).
+fn math_found(source: &str, starts: &[usize], a: usize, b: usize) -> Option<MathFound> {
+    let lines: Vec<&str> = source.split('\n').collect();
+    // El código cercado no contiene sintaxis de ecuación (como el parser).
+    let mask = fenced_mask(&lines);
+    let mut open: Option<usize> = None;
+    for (index, text) in lines.iter().enumerate() {
+        if mask[index] || text.trim() != "$$" {
+            continue;
+        }
+        let Some(first) = open else {
+            open = Some(index);
+            continue;
+        };
+        open = None;
+        if index == first + 1 {
+            continue; // bloque sin contenido: no es un constructo editable.
+        }
+        let (block_start, _) = line_span(source, starts, first);
+        let block_end = line_content_end(source, starts, index as u32);
+        let (attrs_line, attrs) = attrs_line_after(source, starts, &lines, index);
+        let end = attrs.as_ref().map_or(block_end, |spans| spans.range.1);
+        if a >= block_start && b <= end {
+            let latex = if index == first + 1 {
+                let at = starts[index];
+                (at, at)
+            } else {
+                (
+                    starts[first + 1],
+                    line_content_end(source, starts, index as u32 - 1),
+                )
+            };
+            return Some(MathFound {
+                start: block_start,
+                end,
+                latex,
+                block: true,
+                block_end,
+                attrs,
+                attrs_line,
+            });
+        }
+    }
+
+    // Inline `$…$` en la línea de la selección (fuera de código cercado).
+    let line = position::position_of(source, starts, a).line as usize;
+    if position::position_of(source, starts, b).line as usize != line || mask.get(line) == Some(&true)
+    {
+        return None;
+    }
+    let (line_start, line_end) = line_span(source, starts, line);
+    let text = &source[line_start..line_end];
+    let dollars: Vec<usize> = text
+        .bytes()
+        .enumerate()
+        .filter(|(i, byte)| {
+            *byte == b'$'
+                && text.as_bytes().get(i.wrapping_sub(1)) != Some(&b'$')
+                && text.as_bytes().get(i + 1) != Some(&b'$')
+                && (*i == 0 || text.as_bytes()[i - 1] != b'\\')
+        })
+        .map(|(i, _)| i)
+        .collect();
+    for pair in dollars.as_chunks::<2>().0 {
+        let (open, close) = (pair[0], pair[1]);
+        if close <= open + 1 {
+            continue; // contenido vacío.
+        }
+        if a >= line_start + open && b <= line_start + close + 1 {
+            return Some(MathFound {
+                start: line_start + open,
+                end: line_start + close + 1,
+                latex: (line_start + open + 1, line_start + close),
+                block: false,
+                block_end: line_start + close + 1,
+                attrs: None,
+                attrs_line: None,
+            });
+        }
+    }
+    None
+}
+
+/// Ecuación que contiene `[a, b]` para el contexto (§44).
+fn math_at(source: &str, starts: &[usize], a: usize, b: usize) -> Option<MathContext> {
+    let found = math_found(source, starts, a, b)?;
+    let pos = |offset| position::position_of(source, starts, offset);
+    let attrs = found.attrs.as_ref();
+    Some(MathContext {
+        range: Range::new(pos(found.start), pos(found.end)),
+        latex: source[found.latex.0..found.latex.1].to_string(),
+        block: found.block,
+        id: attrs.and_then(|spans| spans.id).map(|span| attr_id_value(source, span)),
+        caption: attrs
+            .and_then(|spans| spans.caption)
+            .map(|span| attr_caption_value(source, span)),
+    })
+}
+
+fn math_insert_plan(
+    source: &str,
+    a: usize,
+    b: usize,
+    block: bool,
+    latex: &str,
+) -> Option<RawPlan> {
+    if latex.trim().is_empty() {
+        return None;
+    }
+    // Con selección no vacía, el texto seleccionado es el LaTeX.
+    let latex = if a < b { &source[a..b] } else { latex };
+    if block {
+        if latex.lines().any(|line| line.trim() == "$$") {
+            return None; // rompería el pareado de los delimitadores.
+        }
+        let nl = LineEnding::detect(source).as_str();
+        // Los `$$` van en línea propia (§24): se separan del texto vecino.
+        let line_start = source[..a].rfind('\n').map_or(0, |i| i + 1);
+        let line_end = source[a..].find('\n').map_or(source.len(), |i| a + i);
+        let prefix = if a > line_start { nl } else { "" };
+        let suffix = if a < line_end { nl } else { "" };
+        let text = format!("{prefix}$${nl}{latex}{nl}$${suffix}");
+        let content_start = prefix.len() + 2 + nl.len();
+        return Some((
+            vec![(a, b, text)],
+            (a + content_start, a + content_start + latex.len()),
+        ));
+    }
+    if !valid_inline_latex(latex) {
+        return None; // el inline del parser no admite estos contenidos.
+    }
+    Some((
+        vec![(a, b, format!("${latex}$"))],
+        (a + 1, a + 1 + latex.len()),
+    ))
+}
+
+/// Cuerpo válido para math inline según el parser (`try_math`): no vacío,
+/// sin saltos de línea, sin `$` y sin espacios en los bordes.
+fn valid_inline_latex(latex: &str) -> bool {
+    !latex.is_empty()
+        && !latex.contains('\n')
+        && !latex.contains('$')
+        && !latex.starts_with(char::is_whitespace)
+        && !latex.ends_with(char::is_whitespace)
+}
+
+fn math_edit_plan(source: &str, a: usize, b: usize, latex: &str) -> Option<RawPlan> {
+    if latex.trim().is_empty() {
+        return None;
+    }
+    let starts = position::line_starts(source);
+    let found = math_found(source, &starts, a, b)?;
+    if !found.block {
+        // Los marcadores se conservan: el contenido debe seguir siendo
+        // inline válido (§24), o la ecuación se volvería texto literal.
+        if !valid_inline_latex(latex) {
+            return None;
+        }
+    } else if latex.lines().any(|line| line.trim() == "$$") {
+        return None; // rompería el pareado de los delimitadores.
+    }
+    if &source[found.latex.0..found.latex.1] == latex {
+        return None; // no-op.
+    }
+    let edits = vec![(found.latex.0, found.latex.1, latex.to_string())];
+    let after = (found.latex.0, found.latex.0 + latex.len());
+    Some((edits, after))
+}
+
+fn math_attrs_plan(
+    source: &str,
+    starts: &[usize],
+    a: usize,
+    b: usize,
+    id: Option<&str>,
+    caption: Option<&str>,
+) -> Option<RawPlan> {
+    let found = math_found(source, starts, a, b)?;
+    if !found.block {
+        return None; // los atributos son de bloque (§26.4).
+    }
+    let edits = attrs_line_edits(
+        source,
+        starts,
+        found.attrs.as_ref(),
+        found.attrs_line,
+        found.block_end,
+        id,
+        caption,
+    )?;
     let after = (map_offset(&edits, a), map_offset(&edits, b));
+    Some((edits, after))
+}
+
+/// Cita `[...]` que contiene `[a, b]`.
+struct CitationFound {
+    start: usize,
+    end: usize,
+    items: Vec<CitationItem>,
+}
+
+/// Claves de cita según el parser (`try_citation`): `is_id_char` más
+/// `* + / !`. Cualquier otra cosa no es sintaxis.
+fn valid_citation_key(key: &str) -> bool {
+    !key.is_empty()
+        && key
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, ':' | '.' | '_' | '-' | '*' | '+' | '/' | '!'))
+}
+
+/// Localizador según el parser: texto libre que ni introduce separadores de
+/// items (`;`), ni cierra la cita (`]`), ni salta de línea.
+fn valid_citation_locator(locator: &str) -> bool {
+    !locator.is_empty() && !locator.contains([';', ']', '\n'])
+}
+
+/// Interior `@clave, localizador; @otra` de una cita (§25.2). Mismas reglas
+/// que el parser para que la detección no ofrezca controles sobre texto
+/// literal.
+fn parse_citation_items(inner: &str) -> Option<Vec<CitationItem>> {
+    let mut items = Vec::new();
+    for part in inner.split(';') {
+        let rest = part.trim().strip_prefix('@')?;
+        let (key, locator) = match rest.split_once(',') {
+            Some((key, locator)) => {
+                let locator = locator.trim();
+                (key.trim(), (!locator.is_empty()).then(|| locator.to_string()))
+            }
+            None => (rest.trim(), None),
+        };
+        if !valid_citation_key(key) {
+            return None;
+        }
+        if let Some(locator) = &locator {
+            if !valid_citation_locator(locator) {
+                return None;
+            }
+        }
+        items.push(CitationItem {
+            key: key.to_string(),
+            locator,
+        });
+    }
+    (!items.is_empty()).then_some(items)
+}
+
+/// Forma canónica `[@k1, loc; @k2]` (§25.2).
+fn render_citation(items: &[CitationItem]) -> String {
+    let inner = items
+        .iter()
+        .map(|item| match &item.locator {
+            Some(locator) => format!("@{}, {}", item.key, locator),
+            None => format!("@{}", item.key),
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    format!("[{inner}]")
+}
+
+/// Cita que contiene `[a, b]` (§25.2; el `[` escapado no es sintaxis).
+fn citation_found(source: &str, a: usize, b: usize) -> Option<CitationFound> {
+    let bytes = source.as_bytes();
+    let mut search = 0;
+    while let Some(offset) = source[search..].find("[@") {
+        let start = search + offset;
+        search = start + 2;
+        if start > 0 && bytes[start - 1] == b'\\' {
+            continue;
+        }
+        let close = start + source[start..].find(']')?;
+        let end = close + 1;
+        // Un candidato mal formado no invalida las citas siguientes.
+        let Some(items) = parse_citation_items(&source[start + 1..close]) else {
+            continue;
+        };
+        if a >= start && b <= end {
+            return Some(CitationFound { start, end, items });
+        }
+    }
+    None
+}
+
+/// Cita que contiene `[a, b]` para el contexto (§44).
+fn citation_at(source: &str, a: usize, b: usize) -> Option<CitationContext> {
+    let found = citation_found(source, a, b)?;
+    let starts = position::line_starts(source);
+    Some(CitationContext {
+        range: Range::new(
+            position::position_of(source, &starts, found.start),
+            position::position_of(source, &starts, found.end),
+        ),
+        items: found.items,
+    })
+}
+
+fn valid_citation_items(items: &[CitationItem]) -> bool {
+    !items.is_empty()
+        && items.iter().all(|item| {
+            valid_citation_key(item.key.trim())
+                && item
+                    .locator
+                    .as_deref()
+                    .is_none_or(|locator| valid_citation_locator(locator.trim()))
+        })
+}
+
+fn citation_insert_plan(source: &str, a: usize, b: usize, items: &[CitationItem]) -> Option<RawPlan> {
+    if !valid_citation_items(items) {
+        return None;
+    }
+    let text = render_citation(items);
+    if a < b && source[a..b] == text {
+        return None; // la selección ya es esta cita: no-op.
+    }
+    Some((vec![(a, b, text.clone())], (a, a + text.len())))
+}
+
+fn citation_edit_plan(
+    source: &str,
+    a: usize,
+    b: usize,
+    items: &[CitationItem],
+) -> Option<RawPlan> {
+    if !valid_citation_items(items) {
+        return None;
+    }
+    let found = citation_found(source, a, b)?;
+    let text = render_citation(items);
+    if source[found.start..found.end] == text {
+        return None; // no-op.
+    }
+    let edits = vec![(found.start, found.end, text.clone())];
+    let after = (found.start, found.start + text.len());
     Some((edits, after))
 }
 
@@ -2657,6 +3102,328 @@ mod tests {
         assert_eq!(
             applied(text, selection, &action),
             Some("![y](a.png) {#fig:x}".to_string())
+        );
+    }
+
+    // ---- Ecuaciones (§24) y citas (§25.2) ----
+
+    #[test]
+    fn math_inline_insertar_editar_y_no_op() {
+        let action = FormatAction::MathInsert {
+            block: false,
+            latex: "E=mc^2".into(),
+        };
+        assert_eq!(
+            applied("hola", Selection::collapsed(pos(0, 2)), &action),
+            Some("ho$E=mc^2$la".to_string())
+        );
+        // Editar el LaTeX sin tocar los marcadores.
+        let text = "ho$E=mc^2$la";
+        let cursor = text.find("E=mc").unwrap();
+        let action = FormatAction::MathEdit { latex: "x".into() };
+        assert_eq!(
+            applied(text, Selection::collapsed(sel_of(text, cursor, cursor).anchor), &action),
+            Some("ho$x$la".to_string())
+        );
+        // Mismo LaTeX: no-op.
+        assert_eq!(
+            plan(
+                text,
+                Selection::collapsed(sel_of(text, cursor, cursor).anchor),
+                &FormatAction::MathEdit { latex: "E=mc^2".into() }
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn math_bloque_insertar_editar_conservando_atributos() {
+        let action = FormatAction::MathInsert {
+            block: true,
+            latex: "E=mc^2".into(),
+        };
+        let result = applied("", Selection::collapsed(pos(0, 0)), &action).unwrap();
+        assert_eq!(result, "$$\nE=mc^2\n$$");
+        // Editar con la línea de atributos presente: solo cambia el LaTeX.
+        let text = "$$\nE=mc^2\n$$\n{#eq:a \"c\"}\n";
+        let cursor = text.find("E=mc").unwrap();
+        let action = FormatAction::MathEdit { latex: "x".into() };
+        assert_eq!(
+            applied(text, Selection::collapsed(sel_of(text, cursor, cursor).anchor), &action),
+            Some("$$\nx\n$$\n{#eq:a \"c\"}\n".to_string())
+        );
+    }
+
+    #[test]
+    fn math_atributos_de_bloque_crea_edita_y_elimina_linea() {
+        let at = |text: &str| {
+            let cursor = text.find('E').unwrap();
+            Selection::collapsed(sel_of(text, cursor, cursor).anchor)
+        };
+        // Crear la línea.
+        let text = "$$\nE\n$$\n";
+        let action = FormatAction::MathAttrs {
+            id: Some("eq:x".into()),
+            caption: None,
+        };
+        assert_eq!(
+            applied(text, at(text), &action),
+            Some("$$\nE\n$$\n{#eq:x}\n".to_string())
+        );
+        // Editar solo el id conservando la caption.
+        let text = "$$\nE\n$$\n{#eq:a \"c\"}\n";
+        let action = FormatAction::MathAttrs {
+            id: Some("eq:b".into()),
+            caption: Some("c".into()),
+        };
+        assert_eq!(
+            applied(text, at(text), &action),
+            Some("$$\nE\n$$\n{#eq:b \"c\"}\n".to_string())
+        );
+        // Vaciar id y caption elimina la línea.
+        let action = FormatAction::MathAttrs {
+            id: None,
+            caption: None,
+        };
+        assert_eq!(
+            applied(text, at(text), &action),
+            Some("$$\nE\n$$\n".to_string())
+        );
+    }
+
+    #[test]
+    fn math_inline_sin_atributos_y_fuera_de_constructo() {
+        let text = "$x$";
+        let cursor = text.find('x').unwrap();
+        let at = Selection::collapsed(sel_of(text, cursor, cursor).anchor);
+        // Los atributos son solo de bloque (§26.4).
+        assert_eq!(
+            plan(text, at, &FormatAction::MathAttrs { id: Some("eq:a".into()), caption: None }),
+            None
+        );
+        // Fuera de todo: no aplicable.
+        assert_eq!(plan("hola", sel_of("hola", 0, 4), &FormatAction::MathEdit { latex: "x".into() }), None);
+        // LaTeX vacío: no aplicable.
+        assert_eq!(plan(text, at, &FormatAction::MathEdit { latex: "  ".into() }), None);
+    }
+
+    #[test]
+    fn cita_insertar_simple_multiple_y_localizador() {
+        let items = vec![CitationItem {
+            key: "a".into(),
+            locator: None,
+        }];
+        assert_eq!(
+            applied("hola", Selection::collapsed(pos(0, 4)), &FormatAction::CitationInsert { items }),
+            Some("hola[@a]".to_string())
+        );
+        let items = vec![
+            CitationItem {
+                key: "a".into(),
+                locator: None,
+            },
+            CitationItem {
+                key: "b".into(),
+                locator: Some("p. 4".into()),
+            },
+        ];
+        assert_eq!(
+            applied("", Selection::collapsed(pos(0, 0)), &FormatAction::CitationInsert { items }),
+            Some("[@a; @b, p. 4]".to_string())
+        );
+    }
+
+    #[test]
+    fn cita_editar_y_no_op() {
+        let text = "ver [@a; @b, p. 4] ya";
+        let cursor = text.find("[@").unwrap() + 1;
+        let at = Selection::collapsed(sel_of(text, cursor, cursor).anchor);
+        let items = vec![CitationItem {
+            key: "b".into(),
+            locator: Some("p. 4".into()),
+        }];
+        assert_eq!(
+            applied(text, at, &FormatAction::CitationEdit { items: items.clone() }),
+            Some("ver [@b, p. 4] ya".to_string())
+        );
+        // Los mismos items: no-op.
+        assert_eq!(plan(text, at, &FormatAction::CitationEdit { items: vec![
+            CitationItem { key: "a".into(), locator: None },
+            CitationItem { key: "b".into(), locator: Some("p. 4".into()) },
+        ] }), None);
+    }
+
+    #[test]
+    fn cita_items_invalidos_no_aplican() {
+        assert_eq!(
+            plan("", Selection::collapsed(pos(0, 0)), &FormatAction::CitationInsert { items: vec![] }),
+            None
+        );
+        assert_eq!(
+            plan("", Selection::collapsed(pos(0, 0)), &FormatAction::CitationInsert {
+                items: vec![CitationItem { key: " ".into(), locator: None }]
+            }),
+            None
+        );
+    }
+
+    #[test]
+    fn contexto_math_y_cita() {
+        let text = "$$\nE\n$$\n{#eq:a \"c\"}\n\ninline $x$ y [@k1, p. 2; @k2]\n";
+        // Bloque con atributos.
+        let cursor = text.find('E').unwrap();
+        let math = context(text, Selection::collapsed(sel_of(text, cursor, cursor).anchor))
+            .math
+            .expect("math bloque");
+        assert!(math.block);
+        assert_eq!(math.latex, "E");
+        assert_eq!(math.id.as_deref(), Some("eq:a"));
+        assert_eq!(math.caption.as_deref(), Some("c"));
+        // Inline.
+        let cursor = text.find('x').unwrap();
+        let math = context(text, Selection::collapsed(sel_of(text, cursor, cursor).anchor))
+            .math
+            .expect("math inline");
+        assert!(!math.block);
+        assert_eq!(math.latex, "x");
+        // Cita con items y localizador.
+        let cursor = text.find("k1").unwrap();
+        let citation = context(text, Selection::collapsed(sel_of(text, cursor, cursor).anchor))
+            .citation
+            .expect("cita");
+        assert_eq!(
+            citation.items,
+            vec![
+                CitationItem { key: "k1".into(), locator: Some("p. 2".into()) },
+                CitationItem { key: "k2".into(), locator: None },
+            ]
+        );
+    }
+
+    #[test]
+    fn cita_editar_es_una_transaccion_con_undo_redo() {
+        use crate::document::Document;
+        use crate::Editor;
+
+        let text = "ver [@a] ya";
+        let cursor = text.find("[@").unwrap() + 1;
+        let selection = Selection::collapsed(sel_of(text, cursor, cursor).anchor);
+        let action = FormatAction::CitationEdit {
+            items: vec![CitationItem {
+                key: "b".into(),
+                locator: None,
+            }],
+        };
+        let plan = plan(text, selection, &action).unwrap();
+        let mut editor = Editor::new(Document::from_text(None, text.to_string()));
+        editor.set_selection(selection).unwrap();
+        editor
+            .replace_all_selecting(&plan.edits, plan.selection)
+            .unwrap();
+        assert_eq!(editor.document().content(), "ver [@b] ya");
+        assert!(editor.undo());
+        assert_eq!(editor.document().content(), text);
+        assert_eq!(editor.selection(), selection);
+        assert!(editor.redo());
+        assert_eq!(editor.document().content(), "ver [@b] ya");
+    }
+
+    // ---- Regresiones del review de #31 ----
+
+    #[test]
+    fn math_bloque_en_medio_de_parrafo_gana_lineas_propias() {
+        // Los `$$` deben quedar en línea propia (§24) aunque se inserte en
+        // medio de un párrafo.
+        let text = "uno dos";
+        let action = FormatAction::MathInsert {
+            block: true,
+            latex: "x\ny".into(),
+        };
+        assert_eq!(
+            applied(text, Selection::collapsed(pos(0, 4)), &action),
+            Some("uno \n$$\nx\ny\n$$\ndos".to_string())
+        );
+    }
+
+    #[test]
+    fn math_inline_no_acepta_contenido_multilinea() {
+        // El inline del parser no admite saltos de línea: con los marcadores
+        // conservados, la sustitución se rechaza en vez de romper la ecuación.
+        let text = "$x$";
+        let cursor = text.find('x').unwrap();
+        let at = Selection::collapsed(sel_of(text, cursor, cursor).anchor);
+        assert_eq!(
+            plan(text, at, &FormatAction::MathEdit { latex: "x\ny".into() }),
+            None
+        );
+        assert_eq!(
+            plan("", Selection::collapsed(pos(0, 0)), &FormatAction::MathInsert {
+                block: false,
+                latex: "x\ny".into()
+            }),
+            None
+        );
+    }
+
+    #[test]
+    fn cita_valida_segun_la_gramatica_del_parser() {
+        // Claves con espacios y localizadores con `;` no son sintaxis.
+        assert_eq!(
+            plan("", Selection::collapsed(pos(0, 0)), &FormatAction::CitationInsert {
+                items: vec![CitationItem { key: "smith 2025".into(), locator: None }]
+            }),
+            None
+        );
+        assert_eq!(
+            plan("", Selection::collapsed(pos(0, 0)), &FormatAction::CitationInsert {
+                items: vec![CitationItem { key: "a".into(), locator: Some("p. 1; fig. 2".into()) }]
+            }),
+            None
+        );
+    }
+
+    #[test]
+    fn math_ignora_delimitadores_en_codigo_cercado() {
+        // El `$$` literal del ejemplo cercado no se aparea con la ecuación real.
+        let text = "```\n$$\n```\n\n$$\nE\n$$\n";
+        let cursor = text.find('E').unwrap();
+        let math = context(text, Selection::collapsed(sel_of(text, cursor, cursor).anchor))
+            .math
+            .expect("ecuación real");
+        assert!(math.block);
+        assert_eq!(math.latex, "E");
+    }
+
+    #[test]
+    fn cita_mal_formada_no_bloquea_las_siguientes() {
+        let text = "literal [@] y valida [@smith2025]";
+        let cursor = text.find("smith").unwrap();
+        let citation = context(text, Selection::collapsed(sel_of(text, cursor, cursor).anchor))
+            .citation
+            .expect("cita válida");
+        assert_eq!(
+            citation.items,
+            vec![CitationItem { key: "smith2025".into(), locator: None }]
+        );
+    }
+
+    #[test]
+    fn math_bloque_vacio_no_es_constructo() {
+        let text = "$$\n$$";
+        let at = Selection::collapsed(sel_of(text, 2, 2).anchor);
+        assert_eq!(context(text, at).math, None);
+        assert_eq!(plan(text, at, &FormatAction::MathEdit { latex: "x".into() }), None);
+    }
+
+    #[test]
+    fn cita_insertar_identico_a_la_seleccion_es_no_op() {
+        let text = "ver [@a] ya";
+        let selection = sel_of(text, text.find("[@a]").unwrap(), text.find("[@a]").unwrap() + 4);
+        assert_eq!(
+            plan(text, selection, &FormatAction::CitationInsert {
+                items: vec![CitationItem { key: "a".into(), locator: None }]
+            }),
+            None
         );
     }
 }
