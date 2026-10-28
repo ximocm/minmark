@@ -8,7 +8,7 @@ cloud. Su objetivo es mantener Markdown como fuente de verdad, con edición
 visual y vista previa en la misma ventana.
 
 **En desarrollo:** las fases de core Linux, proyectos y edición visual están
-completadas. La versión actual es `0.5.0`; consulta las novedades y el trabajo
+completadas. La versión actual es `0.6.0`; consulta las novedades y el trabajo
 pendiente en el [changelog](CHANGELOG.md).
 
 Linux es la plataforma principal y es la que publica releases hoy. La CI

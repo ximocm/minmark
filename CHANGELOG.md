@@ -9,6 +9,8 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-10-28
+
 ### Corregido
 
 - Windows (#67): la barra lateral restaurada a un ancho pequeño desplazaba

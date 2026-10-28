@@ -1307,18 +1307,18 @@ dependencies = [
 
 [[package]]
 name = "minmark-config"
-version = "0.5.0"
+version = "0.6.0"
 
 [[package]]
 name = "minmark-diagram"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "layout-rs",
 ]
 
 [[package]]
 name = "minmark-document"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "minmark-config",
  "minmark-parser",
@@ -1327,7 +1327,7 @@ dependencies = [
 
 [[package]]
 name = "minmark-fs"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "minmark-config",
  "minmark-document",
@@ -1339,11 +1339,11 @@ dependencies = [
 
 [[package]]
 name = "minmark-math"
-version = "0.5.0"
+version = "0.6.0"
 
 [[package]]
 name = "minmark-parser"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "minmark-document",
  "pulldown-cmark",
@@ -1351,7 +1351,7 @@ dependencies = [
 
 [[package]]
 name = "minmark-pdf"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "minmark-config",
  "minmark-document",
@@ -1366,7 +1366,7 @@ dependencies = [
 
 [[package]]
 name = "minmark-renderer"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "fontdb",
  "hayagriva 0.10.1",
