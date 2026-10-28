@@ -22,14 +22,18 @@ pub struct MiniWorld {
     files: std::collections::BTreeMap<PathBuf, Vec<u8>>,
 }
 
+/// Liberation Sans (SIL OFL 1.1, `assets/fonts/OFL.txt`): familia sans-serif
+/// del world (§33) y fuente determinista del render de diagramas (ADR-007,
+/// [`crate::diagram`]).
+pub(crate) const SANS_FONTS: [&[u8]; 4] = [
+    include_bytes!("../assets/fonts/LiberationSans-Regular.ttf"),
+    include_bytes!("../assets/fonts/LiberationSans-Italic.ttf"),
+    include_bytes!("../assets/fonts/LiberationSans-Bold.ttf"),
+    include_bytes!("../assets/fonts/LiberationSans-BoldItalic.ttf"),
+];
+
 impl MiniWorld {
     pub fn new(text: String, files: std::collections::BTreeMap<PathBuf, Vec<u8>>) -> Self {
-        const SANS_FONTS: [&[u8]; 4] = [
-            include_bytes!("../assets/fonts/LiberationSans-Regular.ttf"),
-            include_bytes!("../assets/fonts/LiberationSans-Italic.ttf"),
-            include_bytes!("../assets/fonts/LiberationSans-Bold.ttf"),
-            include_bytes!("../assets/fonts/LiberationSans-BoldItalic.ttf"),
-        ];
         let fonts: Vec<Font> = typst_assets::fonts()
             .filter_map(|data| Font::new(Bytes::new(data), 0))
             // §33: Liberation Sans (SIL OFL 1.1, `assets/fonts/OFL.txt`) como

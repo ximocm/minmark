@@ -1,0 +1,9 @@
+[package]
+name = "minmark-diagram"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Diagramas DOT (Graphviz) → SVG para Preview y PDF (ADR-007, §7.3.1)"
+
+[dependencies]
+layout-rs = "0.1.3"

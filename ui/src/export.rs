@@ -136,6 +136,7 @@ fn ast_assets(
 ) -> Result<std::collections::BTreeMap<std::path::PathBuf, Vec<u8>>, PdfError> {
     let mut assets = Assets::new(base, root);
     assets.walk(ast)?;
+    diagramize(ast, &mut assets.files);
     Ok(assets.files)
 }
 
@@ -246,10 +247,10 @@ fn document_assets(
     PdfError,
 > {
     let Some(base) = document.and_then(std::path::Path::parent) else {
-        return Ok((
-            crate::academic::prepare_pdf(&minmark_parser::parse(source), settings),
-            std::collections::BTreeMap::new(),
-        ));
+        let mut ast = minmark_parser::parse(source);
+        let mut files = std::collections::BTreeMap::new();
+        diagramize(&mut ast, &mut files);
+        return Ok((crate::academic::prepare_pdf(&ast, settings), files));
     };
     let base = minmark_fs::canonicalize(if base.as_os_str().is_empty() {
         std::path::Path::new(".")
@@ -265,12 +266,137 @@ fn document_assets(
             ..Default::default()
         },
     );
-    let files = {
+    let mut files = {
         let mut assets = Assets::new(&base, &root);
         assets.walk(&mut ast)?;
         assets.files
     };
+    diagramize(&mut ast, &mut files);
     Ok((crate::academic::prepare_pdf(&ast, settings), files))
+}
+
+/// Diagramas DOT del documento (§7.3.1, ADR-007): cada bloque `dot` se
+/// sustituye por una imagen con alias propio que embebe el MISMO SVG que el
+/// Preview (paridad) o, si el DOT es inválido, por el marcador visible
+/// (patrón ADR-002: nunca silenciar ni deformar). El fuente Markdown sigue
+/// siendo el bloque de código (§6.1) y vive en el editor.
+fn diagramize(
+    ast: &mut minmark_document::Ast,
+    files: &mut std::collections::BTreeMap<std::path::PathBuf, Vec<u8>>,
+) {
+    use minmark_document::{Block, BlockKind, Inline};
+
+    fn walk(blocks: &mut [Block], files: &mut std::collections::BTreeMap<std::path::PathBuf, Vec<u8>>) {
+        for block in blocks {
+            match &mut block.kind {
+                BlockKind::CodeBlock { language, code }
+                    if language.as_deref() == Some("dot") =>
+                {
+                    // Mismo SVG que el Preview (paridad ADR-007): el helper
+                    // del renderer ya resuelve los glifos a contornos.
+                    match minmark_renderer::diagram_svg(code) {
+                        Ok(svg) => {
+                            let alias = format!("assets/diagram-{}.svg", files.len());
+                            files.insert(std::path::PathBuf::from(&alias), svg.into_bytes());
+                            block.kind = BlockKind::Paragraph {
+                                content: vec![Inline::Image {
+                                    destination: alias,
+                                    title: String::new(),
+                                    alt: vec![Inline::Text("diagrama DOT".into())],
+                                    attrs: None,
+                                }],
+                            };
+                        }
+                        Err(marker) => {
+                            block.kind = BlockKind::Paragraph {
+                                content: vec![Inline::Text(marker)],
+                            };
+                        }
+                    }
+                }
+                BlockKind::Quote { blocks: inner }
+                | BlockKind::Callout { blocks: inner, .. }
+                | BlockKind::FootnoteDefinition { blocks: inner, .. } => walk(inner, files),
+                BlockKind::List { items, .. } => {
+                    for item in items {
+                        walk(&mut item.blocks, files);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    walk(&mut ast.blocks, files);
+}
+
+#[cfg(test)]
+mod diagram_tests {
+    use super::*;
+    use minmark_document::{BlockKind, Inline};
+
+    #[test]
+    fn diagrama_dot_se_convierte_en_imagen_con_el_svg_del_motor() {
+        let source = "intro\n\n```dot\ndigraph { a -> b; }\n```\n";
+        let mut ast = minmark_parser::parse(source);
+        let mut files = std::collections::BTreeMap::new();
+        diagramize(&mut ast, &mut files);
+        assert_eq!(files.len(), 1, "un diagrama, un recurso");
+        let (path, bytes) = files.iter().next().unwrap();
+        assert_eq!(path.extension().and_then(|e| e.to_str()), Some("svg"));
+        // Paridad (ADR-007): el PDF embebe el MISMO SVG que el Preview.
+        let expected = minmark_renderer::diagram_svg("digraph { a -> b; }").expect("render");
+        assert_eq!(String::from_utf8(bytes.clone()).unwrap(), expected);
+        match &ast.blocks[1].kind {
+            BlockKind::Paragraph { content } => match &content[0] {
+                Inline::Image { destination, .. } => {
+                    assert_eq!(destination, path.to_str().unwrap())
+                }
+                other => panic!("esperaba imagen: {other:?}"),
+            },
+            other => panic!("esperaba párrafo: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn diagrama_invalido_lleva_el_marcador_visible() {
+        // §7.3.1 (ADR-002): nunca silenciar ni deformar; el marcador es el
+        // mismo que muestra el Preview.
+        let mut ast = minmark_parser::parse("```dot\ndigraph { a = ; }\n```\n");
+        let mut files = std::collections::BTreeMap::new();
+        diagramize(&mut ast, &mut files);
+        assert!(files.is_empty());
+        match &ast.blocks[0].kind {
+            BlockKind::Paragraph { content } => match &content[0] {
+                Inline::Text(text) => {
+                    assert!(text.starts_with("⚠ [diagrama no válido:"), "{text}")
+                }
+                other => panic!("esperaba texto: {other:?}"),
+            },
+            other => panic!("esperaba párrafo: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn diagrama_anidado_en_listas_y_callouts_se_procesa() {
+        let source = "- item\n\n  ```dot\n  digraph { a -> b; }\n  ```\n\n::: note\n```dot\ndigraph { b -> c; }\n```\n:::\n";
+        let mut ast = minmark_parser::parse(source);
+        let mut files = std::collections::BTreeMap::new();
+        diagramize(&mut ast, &mut files);
+        assert_eq!(files.len(), 2, "ambos diagramas anidados");
+    }
+
+    #[test]
+    fn documento_con_diagrama_exporta_pdf() {
+        let source = "# T\n\n```dot\ndigraph { a -> b; }\n```\n\n```dot\ndigraph { a = ; }\n```\n";
+        let meta = DocumentMeta::from_ast(&minmark_parser::parse(source));
+        let pdf =
+            export_document_at(source, &Settings::default(), None, None, &meta).expect("exportación");
+        assert!(pdf.starts_with(b"%PDF"));
+        let preview =
+            paginated_preview_at(source, &Settings::default(), None, None, &meta).expect("preview");
+        assert!(preview.contains("<svg"), "el preview paginado dibuja páginas SVG");
+    }
 }
 
 #[cfg(test)]
