@@ -1057,4 +1057,187 @@ mod tests {
             "la acción no aplicable no añade transacción"
         );
     }
+
+    /// Fase 7 #30: `win.insert-table` llega a `apply_format_active` y genera
+    /// el esqueleto GFM §35 — cabecera vacía, fila de alineación y `rows`
+    /// filas — con la selección posterior en la primera celda de cabecera
+    /// (§8.6); UNA transacción y fuera de rango (§35) sin cambios.
+    #[test]
+    fn apply_format_active_inserta_tabla_esqueleto_30() {
+        use minmark_document::format::FormatAction;
+
+        let mut tabs = TabManager::new();
+        tabs.insert_active(Position::new(0, 0), "");
+        assert!(tabs.apply_format_active(&FormatAction::TableInsert { rows: 2, cols: 3 }));
+        assert_eq!(
+            tabs.active().editor.document().content(),
+            "|     |     |     |\n\
+             | --- | --- | --- |\n\
+             |     |     |     |\n\
+             |     |     |     |"
+        );
+        assert_eq!(
+            tabs.active().editor.selection(),
+            Selection::collapsed(Position::new(0, 2)),
+            "§8.6: la selección posterior es la primera celda de cabecera"
+        );
+
+        // UNA transacción (§8.5): undo la revierte entera, redo la repone.
+        assert!(tabs.undo_active());
+        assert_eq!(tabs.active().editor.document().content(), "");
+        assert!(tabs.redo_active());
+        assert_eq!(
+            tabs.active().editor.document().content(),
+            "|     |     |     |\n\
+             | --- | --- | --- |\n\
+             |     |     |     |\n\
+             |     |     |     |"
+        );
+
+        // Límites §35: fuera de rango `plan` no aplica y no se toca nada.
+        for (rows, cols) in [(0, 3), (51, 3), (2, 0), (2, 9)] {
+            assert!(
+                !tabs.apply_format_active(&FormatAction::TableInsert { rows, cols }),
+                "filas={rows} columnas={cols} fuera de §35"
+            );
+        }
+    }
+
+    /// Fase 7 #30: `win.edit-image` llega a `apply_format_active` — editar
+    /// SOLO un campo (el ancho) deja byte a byte intactos los demás (ruta,
+    /// alt, título `"..."`, id y caption), el no-op devuelve `false` sin
+    /// transacción y undo revierte la edición en UN paso (§8.5).
+    #[test]
+    fn apply_format_active_edit_imagen_conserva_bytes_ajenos_30() {
+        use minmark_document::format::FormatAction;
+
+        let mut tabs = TabManager::new();
+        let fuente = "Ver ![Diagrama](diagram.png \"Título\") {#fig:d \"La caption\" width=40%} fin.\n";
+        tabs.insert_active(Position::new(0, 0), fuente);
+        tabs.set_selection_active(Selection::collapsed(Position::new(0, 6)));
+
+        assert!(tabs.apply_format_active(&FormatAction::ImageEdit {
+            destination: "diagram.png".to_owned(),
+            alt: "Diagrama".to_owned(),
+            id: Some("fig:d".to_owned()),
+            width_percent: Some(50),
+        }));
+        assert_eq!(
+            tabs.active().editor.document().content(),
+            "Ver ![Diagrama](diagram.png \"Título\") {#fig:d \"La caption\" width=50%} fin.\n",
+            "solo cambia width: título, caption y resto intactos"
+        );
+
+        // No-op (mismos valores que el estado detectado): false, sin cambios
+        // y sin transacción nueva (§8.4).
+        assert!(!tabs.apply_format_active(&FormatAction::ImageEdit {
+            destination: "diagram.png".to_owned(),
+            alt: "Diagrama".to_owned(),
+            id: Some("fig:d".to_owned()),
+            width_percent: Some(50),
+        }));
+        assert!(tabs.undo_active());
+        assert_eq!(
+            tabs.active().editor.document().content(),
+            fuente,
+            "undo revierte SOLO la edición (UNA transacción §8.5)"
+        );
+        assert!(tabs.undo_active(), "el undo siguiente es el insert inicial");
+        assert_eq!(tabs.active().editor.document().content(), "");
+        assert!(
+            !tabs.undo_active(),
+            "el no-op no añadió transacción: nada queda tras el insert"
+        );
+    }
+
+    /// Fase 7 #30: `win.edit-table-attrs` llega a `apply_format_active` —
+    /// crea la línea de atributos §26.3 sin tocar la tabla, reemplaza SOLO
+    /// esa línea al cambiar el caption, la elimina al vaciar ambos campos y
+    /// no aplica fuera del constructo (§8.4, cero cambios).
+    #[test]
+    fn apply_format_active_atributos_de_tabla_solo_la_linea_30() {
+        use minmark_document::format::FormatAction;
+
+        let mut tabs = TabManager::new();
+        let tabla = "Intro\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n";
+        tabs.insert_active(Position::new(0, 0), tabla);
+        tabs.set_selection_active(Selection::collapsed(Position::new(4, 2)));
+
+        // Crear: la línea aparece tras el bloque, la tabla es idéntica.
+        assert!(tabs.apply_format_active(&FormatAction::TableAttrs {
+            id: Some("tbl:x".to_owned()),
+            caption: Some("Resultados".to_owned()),
+        }));
+        assert_eq!(
+            tabs.active().editor.document().content(),
+            "Intro\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n{#tbl:x \"Resultados\"}\n"
+        );
+
+        // Reemplazar SOLO el caption: id y tabla intactos byte a byte.
+        assert!(tabs.apply_format_active(&FormatAction::TableAttrs {
+            id: Some("tbl:x".to_owned()),
+            caption: Some("Nueva caption".to_owned()),
+        }));
+        let reemplazado =
+            "Intro\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n{#tbl:x \"Nueva caption\"}\n";
+        assert_eq!(tabs.active().editor.document().content(), reemplazado);
+
+        // Vaciar ambos campos ⇒ la línea de atributos desaparece entera
+        // (§26.3) y la fuente vuelve a ser byte a byte la original.
+        assert!(tabs.apply_format_active(&FormatAction::TableAttrs {
+            id: None,
+            caption: None,
+        }));
+        assert_eq!(tabs.active().editor.document().content(), tabla);
+
+        // Fuera del constructo tabla ⇒ `None` (§8.4): sin cambios.
+        tabs.set_selection_active(Selection::collapsed(Position::new(0, 0)));
+        assert!(!tabs.apply_format_active(&FormatAction::TableAttrs {
+            id: Some("tbl:z".to_owned()),
+            caption: None,
+        }));
+        assert_eq!(tabs.active().editor.document().content(), tabla);
+    }
+
+    /// Fase 7 #30 (hallazgo 7): el caption precargado con espacios
+    /// (`{#tbl:x " Caption "}`) se entrega VERBATIM al `TableAttrs`, así
+    /// que aceptar sin cambios es no-op — cero ediciones y SIN transacción
+    /// — y al editar SOLO el id los bytes del caption (espacios incluidos)
+    /// quedan intactos.
+    #[test]
+    fn apply_format_active_caption_precargado_es_no_op_verbatim_30() {
+        use minmark_document::format::FormatAction;
+
+        let mut tabs = TabManager::new();
+        let fuente = "| A | B |\n| --- | --- |\n| 1 | 2 |\n{#tbl:x \" Caption \"}\n";
+        tabs.insert_active(Position::new(0, 0), fuente);
+        tabs.set_selection_active(Selection::collapsed(Position::new(2, 2)));
+
+        // Precarga intacta (caption VERBATIM, con sus espacios): false,
+        // byte a byte idéntico y sin transacción nueva (§8.4).
+        assert!(!tabs.apply_format_active(&FormatAction::TableAttrs {
+            id: Some("tbl:x".to_owned()),
+            caption: Some(" Caption ".to_owned()),
+        }));
+        assert_eq!(tabs.active().editor.document().content(), fuente);
+
+        // Solo cambia el id: el caption con espacios queda intacto byte a
+        // byte (UNA transacción, §8.5).
+        assert!(tabs.apply_format_active(&FormatAction::TableAttrs {
+            id: Some("tbl:y".to_owned()),
+            caption: Some(" Caption ".to_owned()),
+        }));
+        assert_eq!(
+            tabs.active().editor.document().content(),
+            "| A | B |\n| --- | --- |\n| 1 | 2 |\n{#tbl:y \" Caption \"}\n",
+            "solo cambia el id; el caption conserva sus espacios"
+        );
+
+        // Dos transacciones en total: el no-op no añadió ninguna.
+        assert!(tabs.undo_active());
+        assert_eq!(tabs.active().editor.document().content(), fuente);
+        assert!(tabs.undo_active());
+        assert_eq!(tabs.active().editor.document().content(), "");
+        assert!(!tabs.undo_active(), "el no-op del caption no dejó transacción");
+    }
 }

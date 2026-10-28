@@ -2,12 +2,14 @@
 //!
 //! Integra el core (`core/`) con la UI decidida en ADR-001:
 //! - menús §36 (File, Edit, View, Insert, Format, Project, Help) y menú
-//!   Insert/Format de los controles contextuales (fase 7, #29);
+//!   Insert/Format de los controles contextuales (fase 7, #29/#30: Image y
+//!   Table con #30);
 //! - atajos §39 (Ctrl+N/O/S, Ctrl+Shift+S, Ctrl+W, Ctrl+Alt+M, más los de
 //!   la fase 7: Ctrl+Shift+B/C/X, Ctrl+I/K, Ctrl+1..6, Ctrl+Shift+P);
 //! - Command Palette §38 (`Ctrl+Shift+P`) y popover de controles
-//!   contextuales §44 (#29): mismas acciones `win.*` que menú y atajos,
-//!   con destino único `TabManager::apply_format_active`;
+//!   contextuales §44 (#29/#30, con «Edit Image» y «Table Attributes»):
+//!   mismas acciones `win.*` que menú y atajos, con destino único
+//!   `TabManager::apply_format_active`;
 //! - composiciones (§20, ISSUE-022/023): Preview combinado y PDF único desde
 //!   el menú Project/File, con la cadena de ajustes §58 y la bibliografía
 //!   unida de los archivos incluidos (ISSUE-024);
@@ -697,20 +699,25 @@ impl AppCmds {
         self.refresh_navigation();
     }
 
-    /// Acción editorial contextual §44 (fase 7 #29): ÚNICO dispatch de
-    /// formato — menú Insert/Format, atajos, Command Palette y popover
-    /// llegan aquí vía la acción `win.*` →
+    /// Acción editorial contextual §44 (fase 7 #29/#30): ÚNICO dispatch de
+    /// formato — menú Insert/Format, atajos, Command Palette, popover y los
+    /// flujos de imagen/tabla #30 llegan aquí vía la acción `win.*` →
     /// [`TabManager::apply_format_active`] (UNA transacción §8.5 con la
     /// selección §8.6 registrada). Sin plan aplicable el documento no se
     /// toca. Tras aplicar se refresca la vista (`reload_active`, §8.6:
     /// `load` restaura cursor/selección desde el modelo) y se reevalúan los
     /// controles contextuales (actualizan o cierran el popover).
-    fn apply_format(&self, action: &minmark_document::format::FormatAction) {
+    ///
+    /// `true` = aplicado; `false` = no aplicable o error de edición (el
+    /// documento queda intacto — lo usa la importación #30 para retirar la
+    /// copia si la edición no llegara a aplicarse).
+    fn apply_format(&self, action: &minmark_document::format::FormatAction) -> bool {
         let applied = self.tabs.borrow_mut().apply_format_active(action);
         if applied {
             self.reload_active();
         }
         self.refresh_context_controls();
+        applied
     }
 
     /// Reevalúa el popover de controles contextuales con el estado vigente
@@ -724,6 +731,109 @@ impl AppCmds {
             tabs.active_index(),
             tab.mode,
         );
+    }
+
+    /// #30 §18.2: base de la importación de imagen — la raíz del proyecto
+    /// (ventanas de proyecto) o, en standalone, la carpeta del documento
+    /// activo — junto a la carpeta del documento para la ruta relativa §17
+    /// (`None` si el documento aún no tiene ruta: se usa la raíz). `None` =
+    /// no hay carpeta (documento sin guardar en standalone).
+    fn image_import_scope(&self) -> Option<(PathBuf, Option<PathBuf>)> {
+        let doc_dir = {
+            let tabs = self.tabs.borrow();
+            tabs.active()
+                .path
+                .as_deref()
+                .and_then(Path::parent)
+                .map(Path::to_path_buf)
+        };
+        let root = match self.scope.project_root() {
+            Some(root) => root,
+            None => doc_dir.clone()?,
+        };
+        Some((root, doc_dir))
+    }
+
+    /// #30: formulario de campos de la imagen elegida en `win.insert-image` —
+    /// Ruta (destino provisional `assets/<nombre>`, §18.2), Alt (nombre del
+    /// fichero sin extensión, §UI) y ID/Ancho opcionales. El fichero se copia
+    /// SOLO al aceptar: Cancelar/Escape en el formulario (o en el selector
+    /// anterior) ⇒ cero cambios y NO hay copia (§UI).
+    fn start_image_import(&self, source: PathBuf) {
+        let Some((root, doc_dir)) = self.image_import_scope() else {
+            show_error(
+                &self.window,
+                "No se puede importar la imagen: guarda el documento en una carpeta \
+                 (se copia junto a él y el enlace se inserta con ruta relativa, §17).",
+            );
+            return;
+        };
+        let name = source
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let alt = source
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let fields = vec![
+            dialogs::FormField::new("Ruta", format!("assets/{name}")),
+            dialogs::FormField::new("Alt", alt),
+            dialogs::FormField::new("ID", ""),
+            dialogs::FormField::new("Ancho %", ""),
+        ];
+        let slot = Rc::clone(&self.slot);
+        dialogs::form_dialog(
+            &self.window,
+            actions::Command::InsertImage.label(),
+            &fields,
+            Some(validate_image_import_form),
+            Rc::new(move |values| {
+                // Cancelar/Escape ⇒ `None`: NO copia y NO edita (§UI #30).
+                let Some(values) = values else { return };
+                let Some(me) = slot.borrow().as_ref().and_then(Weak::upgrade) else {
+                    return;
+                };
+                me.import_image_apply(&source, &root, doc_dir.as_deref(), values);
+            }),
+        );
+    }
+
+    /// #30: aceptado el formulario — copia el fichero a `<raíz>/<ruta>` con
+    /// renombrado §18.3 (`diagram.png`, `diagram-2.png`, …) y aplica
+    /// `ImageInsert` con la ruta relativa §17 a la carpeta del documento.
+    /// Si la copia falla el error es visible (§3.7); si la edición no
+    /// aplicara, la copia recién creada se retira (cero cambios).
+    fn import_image_apply(
+        &self,
+        source: &Path,
+        root: &Path,
+        doc_dir: Option<&Path>,
+        values: Vec<String>,
+    ) {
+        let Some((target, action)) = image_import_plan(root, doc_dir, Some(values)) else {
+            return;
+        };
+        if let Some(parent) = target.parent() {
+            if let Err(error) = std::fs::create_dir_all(parent) {
+                show_error(
+                    &self.window,
+                    &format!("No se pudo crear la carpeta de imágenes: {error}"),
+                );
+                return;
+            }
+        }
+        if let Err(error) = std::fs::copy(source, &target) {
+            show_error(
+                &self.window,
+                &format!("No se pudo copiar la imagen: {error}"),
+            );
+            return;
+        }
+        if !self.apply_format(&action) {
+            // La edición no aplicó: no se deja el huérfano copiado.
+            let _ = std::fs::remove_file(&target);
+        }
     }
 
     /// Contexto de Quick Open (§41, ISSUE-029) con el tab activo: `rel_path`
@@ -2060,6 +2170,125 @@ impl Commands for AppCmds {
         });
     }
 
+    // Flujos de imágenes y tablas (fase 7 #30): menú, paleta y popover §38/
+    // §44 activan estas MISMAS acciones `win.*` con destino único
+    // `TabManager::apply_format_active`; Cancelar/Escape en cualquier
+    // diálogo ⇒ cero cambios.
+
+    fn insert_image(&self) {
+        // §18.2: selector de fichero (§18.1) → formulario de campos → copia
+        // a `<raíz>/assets/` §18.3 → `ImageInsert` con ruta relativa §17.
+        // Cancelar en CUALQUIER punto ⇒ cero cambios y NO hay copia.
+        let Some(me) = self.slot() else { return };
+        let window = self.window.clone();
+        glib::spawn_future_local(async move {
+            let Some(source) = dialogs::open_image(&window).await else {
+                return;
+            };
+            me.start_image_import(source);
+        });
+    }
+
+    fn insert_table(&self) {
+        // §35/#30: filas 1–50 y columnas 1–8; fuera de rango el diálogo no
+        // se cierra (validación) y Cancelar/Escape ⇒ cero cambios.
+        let slot = Rc::clone(&self.slot);
+        dialogs::form_dialog(
+            &self.window,
+            actions::Command::InsertTable.label(),
+            &[
+                dialogs::FormField::new("Filas", "2"),
+                dialogs::FormField::new("Columnas", "2"),
+            ],
+            Some(validate_table_dims),
+            Rc::new(move |values| {
+                let Some(values) = values else { return };
+                let Some(me) = slot.borrow().as_ref().and_then(Weak::upgrade) else {
+                    return;
+                };
+                if let Some(action) = table_insert_action(Some(values)) {
+                    me.apply_format(&action);
+                }
+            }),
+        );
+    }
+
+    fn edit_image(&self) {
+        // Precarga Ruta/Alt/ID/Ancho desde `format::context` (§UI #30). Sin
+        // constructo imagen bajo la selección no hay diálogo (el popover solo
+        // ofrece «Edit Image» dentro de la imagen y `ImageEdit` fuera del
+        // constructo no aplica → cero cambios).
+        let imagen = {
+            let tabs = self.tabs.borrow();
+            let tab = tabs.active();
+            minmark_document::format::context(
+                tab.editor.document().content(),
+                tab.editor.selection(),
+            )
+            .image
+        };
+        let Some(imagen) = imagen else { return };
+        let slot = Rc::clone(&self.slot);
+        dialogs::form_dialog(
+            &self.window,
+            actions::Command::EditImage.label(),
+            &[
+                dialogs::FormField::new("Ruta", imagen.destination),
+                dialogs::FormField::new("Alt", imagen.alt),
+                dialogs::FormField::new("ID", imagen.id.unwrap_or_default()),
+                dialogs::FormField::new(
+                    "Ancho %",
+                    imagen
+                        .width_percent
+                        .map(|width| width.to_string())
+                        .unwrap_or_default(),
+                ),
+            ],
+            Some(validate_image_form),
+            Rc::new(move |values| {
+                let Some(me) = slot.borrow().as_ref().and_then(Weak::upgrade) else {
+                    return;
+                };
+                if let Some(action) = image_edit_action(values) {
+                    me.apply_format(&action);
+                }
+            }),
+        );
+    }
+
+    fn edit_table_attrs(&self) {
+        // Precarga ID/Caption de la tabla bajo la selección (§UI #30); sin
+        // constructo tabla no hay diálogo (cero cambios).
+        let tabla = {
+            let tabs = self.tabs.borrow();
+            let tab = tabs.active();
+            minmark_document::format::context(
+                tab.editor.document().content(),
+                tab.editor.selection(),
+            )
+            .table
+        };
+        let Some(tabla) = tabla else { return };
+        let slot = Rc::clone(&self.slot);
+        dialogs::form_dialog(
+            &self.window,
+            actions::Command::EditTableAttrs.label(),
+            &[
+                dialogs::FormField::new("ID", tabla.id.unwrap_or_default()),
+                dialogs::FormField::new("Caption", tabla.caption.unwrap_or_default()),
+            ],
+            Some(validate_table_attrs_form),
+            Rc::new(move |values| {
+                let Some(me) = slot.borrow().as_ref().and_then(Weak::upgrade) else {
+                    return;
+                };
+                if let Some(action) = table_attrs_action(values) {
+                    me.apply_format(&action);
+                }
+            }),
+        );
+    }
+
     fn command_palette(&self) {
         // §38/§39: `Ctrl+Shift+P` presenta la paleta modal; aceptar activa
         // la MISMA acción `win.*` del comando elegido.
@@ -2167,6 +2396,265 @@ fn install_theme_css(palette: &Palette, theme: ResolvedTheme) {
             gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Fase 7 #30: imágenes y tablas (§18, §26.3, §35) — lógica pura
+// ---------------------------------------------------------------------------
+
+/// #30 §18.3: `diagram.png` libre o `diagram-2.png`, `diagram-3.png`, … en
+/// `dir` — nunca sobrescribe (§3.7), con el mismo criterio que `minmark_fs`
+/// para Markdown (#15). `dir` puede no existir aún (la copia lo crea).
+fn free_asset_path(dir: &Path, stem: &str, ext: &str) -> PathBuf {
+    let render = |n: u32| {
+        let name = if n <= 1 {
+            stem.to_owned()
+        } else {
+            format!("{stem}-{n}")
+        };
+        dir.join(format!("{name}.{ext}"))
+    };
+    let mut n = 1u32;
+    while render(n).exists() || render(n).is_symlink() {
+        n += 1;
+    }
+    render(n)
+}
+
+/// #30: nombre con extensión obligatoria para la ruta de una imagen (p. ej.
+/// `diagram.png`); `None` si no la tiene.
+fn split_stem_ext(name: &str) -> Option<(&str, &str)> {
+    let (stem, ext) = name.rsplit_once('.')?;
+    match stem {
+        "" | "." => None,
+        _ if ext.is_empty() => None,
+        _ => Some((stem, ext)),
+    }
+}
+
+/// #30: ID limpio del formulario — se admite teclear el `#` inicial, que la
+/// gramática de atributos §7.4.3 no incluye; vacío ⇒ `None` (sin id).
+fn parse_form_id(raw: &str) -> Option<String> {
+    let id = raw.trim();
+    let id = id.strip_prefix('#').unwrap_or(id);
+    (!id.is_empty()).then(|| id.to_owned())
+}
+
+/// #30: ¿el id encaja con la gramática de atributos §7.4.3
+/// (`[A-Za-z0-9:._-]+`)? Es la misma regla que valida `format::plan`.
+fn valid_form_id(id: &str) -> bool {
+    !id.is_empty()
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, ':' | '.' | '_' | '-'))
+}
+
+/// #30: ancho del formulario → porcentaje §18.5 (1–100); vacío ⇒ `None`
+/// (sin ancho). No distingue «vacío» de «inválido»: eso lo hace el
+/// validador del formulario antes de entregar los valores.
+fn parse_form_width(raw: &str) -> Option<u8> {
+    let width = raw.trim().parse::<u8>().ok()?;
+    (1..=100).contains(&width).then_some(width)
+}
+
+/// #30: ID/Ancho compartidos por los dos formularios de imagen — vacío
+/// admitido, con gramática §7.4.3 y rango §18.5. Devuelve el mensaje de
+/// error o `None` si todo encaja.
+fn validate_image_id_width(values: &[String]) -> Option<String> {
+    let id = values.get(2)?;
+    let id = id.trim();
+    let id = id.strip_prefix('#').unwrap_or(id);
+    if !id.is_empty() && !valid_form_id(id) {
+        return Some("ID: solo letras, dígitos, «:», «.», «_» y «-» (§7.4.3)".to_owned());
+    }
+    let width = values.get(3)?;
+    if !width.trim().is_empty() && parse_form_width(width).is_none() {
+        return Some("Ancho %: entero entre 1 y 100 (§18.5)".to_owned());
+    }
+    None
+}
+
+/// #30: formulario de edición de imagen (`win.edit-image`) — Ruta obligatoria
+/// más ID/Ancho §7.4.3/§18.5. La ruta editada puede ser relativa, absoluta o
+/// un destino externo: `ImageEdit` solo la sustituye en el constructo.
+fn validate_image_form(values: &[String]) -> Option<String> {
+    if values.first().is_none_or(|ruta| ruta.trim().is_empty()) {
+        return Some("La ruta es obligatoria".to_owned());
+    }
+    validate_image_id_width(values)
+}
+
+/// #30 §48: mensaje si `ruta` no es relativa sin salirse de la raíz (ni
+/// absoluta ni con `..`/componentes extraños); `None` si es admisible.
+fn reject_non_relative(ruta: &str) -> Option<String> {
+    let path = Path::new(ruta);
+    let invalid = path.is_absolute()
+        || path
+            .components()
+            .any(|component| !matches!(component, std::path::Component::Normal(_)));
+    invalid.then(|| "La ruta debe ser relativa y no salirse de la raíz (§48)".to_owned())
+}
+
+/// #30: formulario de importación (`win.insert-image`) — además de ID/Ancho
+/// exige una ruta relativa a la raíz que apunte a un fichero con extensión:
+/// la copia va a `<raíz>/<ruta>` (renombrado §18.3) y el enlace se inserta
+/// con la ruta relativa §17 a la carpeta del documento.
+fn validate_image_import_form(values: &[String]) -> Option<String> {
+    let Some(ruta) = values.first() else {
+        return Some("La ruta es obligatoria".to_owned());
+    };
+    let ruta = ruta.trim();
+    if ruta.is_empty() {
+        return Some("La ruta es obligatoria".to_owned());
+    }
+    if let Some(message) = reject_non_relative(ruta) {
+        return Some(message);
+    }
+    if split_stem_ext(Path::new(ruta).file_name()?.to_str()?).is_none() {
+        return Some(
+            "La ruta debe apuntar a un fichero con extensión (p. ej. assets/diagram.png)"
+                .to_owned(),
+        );
+    }
+    validate_image_id_width(values)
+}
+
+/// #30: formulario de atributos de tabla (`win.edit-table-attrs`) — ID con
+/// la gramática §7.4.3 si no está vacío; Caption es texto libre.
+fn validate_table_attrs_form(values: &[String]) -> Option<String> {
+    let id = values.first()?;
+    let id = id.trim();
+    let id = id.strip_prefix('#').unwrap_or(id);
+    if !id.is_empty() && !valid_form_id(id) {
+        return Some("ID: solo letras, dígitos, «:», «.», «_» y «-» (§7.4.3)".to_owned());
+    }
+    None
+}
+
+/// Dimensión de tabla dentro de `limites` (#35); `None` si no es un entero
+/// del rango.
+fn parse_dimension(raw: &str, limites: std::ops::RangeInclusive<usize>) -> Option<usize> {
+    let value = raw.trim().parse::<usize>().ok()?;
+    limites.contains(&value).then_some(value)
+}
+
+/// #30: diálogo de inserción de tabla — filas 1–50 y columnas 1–8 (§35,
+/// límites del contrato); fuera de rango `format::plan` devuelve `None`.
+fn validate_table_dims(values: &[String]) -> Option<String> {
+    if values
+        .first()
+        .is_none_or(|rows| parse_dimension(rows, 1..=50).is_none())
+    {
+        return Some("Filas: entero entre 1 y 50 (§35)".to_owned());
+    }
+    if values
+        .get(1)
+        .is_none_or(|cols| parse_dimension(cols, 1..=8).is_none())
+    {
+        return Some("Columnas: entero entre 1 y 8 (§35)".to_owned());
+    }
+    None
+}
+
+/// #30: valores aceptados del formulario de imagen (Ruta, Alt, ID, Ancho %)
+/// → `ImageEdit`; `None` = cancelación (el formulario entregó `None`) o
+/// valores inválidos: cero cambios en el documento.
+fn image_edit_action(form: Option<Vec<String>>) -> Option<minmark_document::format::FormatAction> {
+    let values = form?;
+    let [ruta, alt, id, width] = values.as_slice() else {
+        return None;
+    };
+    let destination = ruta.trim().to_owned();
+    if destination.is_empty() {
+        return None;
+    }
+    let id = parse_form_id(id);
+    if id.as_deref().is_some_and(|id| !valid_form_id(id)) {
+        return None;
+    }
+    if !width.trim().is_empty() && parse_form_width(width).is_none() {
+        return None;
+    }
+    Some(minmark_document::format::FormatAction::ImageEdit {
+        destination,
+        // El alt es texto libre: se lee tal cual se precargó/escribió para
+        // que un valor intacto siga siendo no-op byte a byte.
+        alt: alt.clone(),
+        id,
+        width_percent: parse_form_width(width),
+    })
+}
+
+/// #30: valores aceptados del formulario de atributos (ID, Caption) →
+/// `TableAttrs`; `None` = cancelación o id inválido: cero cambios. Un campo
+/// vacío llega como `None` y quita ese atributo (§26.3). El caption se
+/// entrega VERBATIM —los espacios del valor precargado son bytes del
+/// documento, así que un valor intacto sigue siendo no-op byte a byte
+/// (hallazgo 7)—; solo un valor vacío o de solo espacios lo quita.
+fn table_attrs_action(
+    form: Option<Vec<String>>,
+) -> Option<minmark_document::format::FormatAction> {
+    let values = form?;
+    let [id, caption] = values.as_slice() else {
+        return None;
+    };
+    let id = parse_form_id(id);
+    if id.as_deref().is_some_and(|id| !valid_form_id(id)) {
+        return None;
+    }
+    let caption = (!caption.trim().is_empty()).then(|| caption.clone());
+    Some(minmark_document::format::FormatAction::TableAttrs { id, caption })
+}
+
+/// #30: valores aceptados del diálogo de dimensiones (Filas, Columnas) →
+/// `TableInsert` dentro de los límites §35; `None` = cancelación o fuera de
+/// rango: cero cambios.
+fn table_insert_action(
+    form: Option<Vec<String>>,
+) -> Option<minmark_document::format::FormatAction> {
+    let values = form?;
+    let [rows, cols] = values.as_slice() else {
+        return None;
+    };
+    let rows = parse_dimension(rows, 1..=50)?;
+    let cols = parse_dimension(cols, 1..=8)?;
+    Some(minmark_document::format::FormatAction::TableInsert { rows, cols })
+}
+
+/// #30 §18.2/§18.3: plan de importación SIN tocar el disco — `None` =
+/// cancelación del formulario (cero cambios, NO hay copia) o valores
+/// inválidos. Devuelve `(copia, acción)` con el destino libre §18.3 en
+/// `<raíz>/<ruta>` y el destino de markdown RELATIVO §17 desde la carpeta
+/// del documento (`doc_dir`), o desde la raíz si el documento aún no tiene
+/// ruta. La copia la hace el llamador (y la retira si la edición no
+/// aplicara), para que aceptar el formulario sea el único punto con efectos.
+fn image_import_plan(
+    root: &Path,
+    doc_dir: Option<&Path>,
+    form: Option<Vec<String>>,
+) -> Option<(PathBuf, minmark_document::format::FormatAction)> {
+    let values = form?;
+    let [ruta, alt, id, width] = values.as_slice() else {
+        return None;
+    };
+    if validate_image_import_form(&values).is_some() {
+        return None;
+    }
+    let ruta = ruta.trim();
+    let name = Path::new(ruta).file_name()?.to_str()?;
+    let (stem, ext) = split_stem_ext(name)?;
+    let target = free_asset_path(root.join(ruta).parent()?, stem, ext);
+    let destination = minmark_fs::relative_path(doc_dir.unwrap_or(root), &target);
+    let id = parse_form_id(id);
+    Some((
+        target,
+        minmark_document::format::FormatAction::ImageInsert {
+            destination,
+            alt: alt.clone(),
+            id,
+            width_percent: parse_form_width(width),
+        },
+    ))
 }
 
 fn build_window(app: &Application, scope: WindowScope, open_paths: &[PathBuf]) -> Rc<AppCmds> {
@@ -2901,6 +3389,244 @@ mod tests {
             .collect();
         assert_eq!(rel_paths, ["a.md", "carpeta/b.md", "imagen.png"]);
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Fase 7 #30: cancelar un formulario (botón, Escape o cierre ⇒ `None`)
+    /// no produce NINGUNA acción: sin acción no hay edición (cero cambios,
+    /// §UI) y, en la importación, tampoco hay plan de copia (el disco solo
+    /// se toca tras aceptar).
+    #[test]
+    fn formularios_30_cancelar_no_producen_accion() {
+        assert!(image_edit_action(None).is_none());
+        assert!(table_attrs_action(None).is_none());
+        assert!(table_insert_action(None).is_none());
+        assert!(
+            image_import_plan(Path::new("/raiz"), Some(Path::new("/raiz")), None).is_none(),
+            "cancelar la importación no planifica copia ni edición"
+        );
+    }
+
+    /// #30: el formulario de edición de imagen parsea Ruta/Alt/ID/Ancho con
+    /// la gramática §7.4.3 y el rango §18.5; campo vacío ⇒ `None` (quita ese
+    /// atributo) y valor inválido ⇒ sin acción (cero cambios).
+    #[test]
+    fn edit_image_action_parsea_campos_30() {
+        use minmark_document::format::FormatAction;
+        let form = |ruta: &str, alt: &str, id: &str, ancho: &str| {
+            Some(vec![
+                ruta.to_owned(),
+                alt.to_owned(),
+                id.to_owned(),
+                ancho.to_owned(),
+            ])
+        };
+        assert_eq!(
+            image_edit_action(form("img.png", "Diagrama", "fig:d", "40")).unwrap(),
+            FormatAction::ImageEdit {
+                destination: "img.png".to_owned(),
+                alt: "Diagrama".to_owned(),
+                id: Some("fig:d".to_owned()),
+                width_percent: Some(40),
+            }
+        );
+        // El `#` inicial se admite tecleado; ancho vacío ⇒ sin ancho.
+        assert_eq!(
+            image_edit_action(form("img.png", "alt", "#fig:d", "")).unwrap(),
+            FormatAction::ImageEdit {
+                destination: "img.png".to_owned(),
+                alt: "alt".to_owned(),
+                id: Some("fig:d".to_owned()),
+                width_percent: None,
+            }
+        );
+        // Ruta vacía, ID con caracteres ajenos o ancho fuera de §18.5.
+        assert!(image_edit_action(form("", "alt", "", "")).is_none());
+        assert!(image_edit_action(form("img.png", "alt", "mal id", "")).is_none());
+        assert!(image_edit_action(form("img.png", "alt", "", "101")).is_none());
+        // El alt es texto libre: se lee tal cual (un valor intacto sigue
+        // siendo no-op byte a byte dentro de `ImageEdit`).
+        assert_eq!(
+            image_edit_action(form("img.png", "  alt  ", "", "")).unwrap(),
+            FormatAction::ImageEdit {
+                destination: "img.png".to_owned(),
+                alt: "  alt  ".to_owned(),
+                id: None,
+                width_percent: None,
+            }
+        );
+    }
+
+    /// #30 §35: el diálogo de tabla solo genera `TableInsert` dentro de los
+    /// límites (filas 1–50, columnas 1–8); cancelar o salirse del rango ⇒
+    /// sin acción. Los validadores del diálogo retienen el error (§UI).
+    #[test]
+    fn insert_table_limites_35() {
+        use minmark_document::format::FormatAction;
+        let dims = |rows: &str, cols: &str| Some(vec![rows.to_owned(), cols.to_owned()]);
+        assert_eq!(
+            table_insert_action(dims("2", "3")).unwrap(),
+            FormatAction::TableInsert { rows: 2, cols: 3 }
+        );
+        assert_eq!(
+            table_insert_action(dims("1", "1")).unwrap(),
+            FormatAction::TableInsert { rows: 1, cols: 1 }
+        );
+        assert_eq!(
+            table_insert_action(dims("50", "8")).unwrap(),
+            FormatAction::TableInsert { rows: 50, cols: 8 }
+        );
+        for (rows, cols) in [("0", "3"), ("51", "3"), ("2", "0"), ("2", "9"), ("x", "3")] {
+            assert!(
+                table_insert_action(dims(rows, cols)).is_none(),
+                "filas={rows} columnas={cols} fuera de §35"
+            );
+        }
+        assert!(validate_table_dims(&["0".to_owned(), "3".to_owned()]).is_some());
+        assert!(validate_table_dims(&["2".to_owned(), "9".to_owned()]).is_some());
+        assert!(validate_table_dims(&["2".to_owned(), "3".to_owned()]).is_none());
+    }
+
+    /// #30: los atributos de tabla llegan como `None` cuando el campo está
+    /// vacío (quita id/caption, §26.3); el caption se entrega VERBATIM
+    /// (hallazgo 7: un valor precargado intacto debe seguir siendo no-op);
+    /// id inválido ⇒ sin acción.
+    #[test]
+    fn table_attrs_action_parsea_campos_30() {
+        use minmark_document::format::FormatAction;
+        let form = |id: &str, caption: &str| Some(vec![id.to_owned(), caption.to_owned()]);
+        // Caption con espacios de relleno: se conserva byte a byte (solo un
+        // cambio real llega al documento).
+        assert_eq!(
+            table_attrs_action(form("#tbl:x", " Resultados ")).unwrap(),
+            FormatAction::TableAttrs {
+                id: Some("tbl:x".to_owned()),
+                caption: Some(" Resultados ".to_owned()),
+            }
+        );
+        assert_eq!(
+            table_attrs_action(form("tbl:x", "Nueva caption")).unwrap(),
+            FormatAction::TableAttrs {
+                id: Some("tbl:x".to_owned()),
+                caption: Some("Nueva caption".to_owned()),
+            }
+        );
+        // Vacío o solo espacios ⇒ `None`: quita el caption (§26.3).
+        assert_eq!(
+            table_attrs_action(form("", "   ")).unwrap(),
+            FormatAction::TableAttrs {
+                id: None,
+                caption: None,
+            }
+        );
+        assert!(table_attrs_action(form("mal id", "c")).is_none());
+    }
+
+    /// #30 §18.2/§18.3/§17: el plan de importación elige el destino libre
+    /// (`diagram.png`, `diagram-2.png`, …) bajo `<raíz>/<ruta>`, devuelve la
+    /// ruta RELATIVA a la carpeta del documento y NO toca el disco (la copia
+    /// es del llamador, que la retira si la edición no aplicara); cancelar o
+    /// datos inválidos ⇒ sin plan ⇒ sin copia.
+    #[test]
+    fn import_imagen_plan_renombrado_18_3_y_relativa_17() {
+        use minmark_document::format::FormatAction;
+        let base = std::env::temp_dir().join(format!("minmark-import30-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let root = base.join("proyecto");
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        std::fs::create_dir_all(root.join("assets")).unwrap();
+        std::fs::write(root.join("assets/diagram.png"), "viejo").unwrap();
+
+        let form = |ruta: &str| {
+            Some(vec![
+                ruta.to_owned(),
+                "Diagrama".to_owned(),
+                String::new(),
+                String::new(),
+            ])
+        };
+
+        // Colisión §18.3: `diagram.png` ocupado ⇒ `diagram-2.png`, con la
+        // ruta relativa §17 desde la carpeta del documento (aquí, la raíz).
+        let (target, action) =
+            image_import_plan(&root, Some(&root), form("assets/diagram.png")).expect("plan");
+        assert_eq!(target, root.join("assets/diagram-2.png"));
+        assert!(
+            !target.exists(),
+            "el plan NO copia: la copia es del llamador (§UI «cero cambios»)"
+        );
+        assert_eq!(
+            action,
+            FormatAction::ImageInsert {
+                destination: "assets/diagram-2.png".to_owned(),
+                alt: "Diagrama".to_owned(),
+                id: None,
+                width_percent: None,
+            }
+        );
+
+        // Documento en subcarpeta: la relativa §17 sale con `..`.
+        let (_, action) =
+            image_import_plan(&root, Some(&root.join("docs")), form("assets/diagram.png"))
+                .expect("plan");
+        assert_eq!(
+            action,
+            FormatAction::ImageInsert {
+                destination: "../assets/diagram-2.png".to_owned(),
+                alt: "Diagrama".to_owned(),
+                id: None,
+                width_percent: None,
+            }
+        );
+
+        // Sin colisión: primer nombre libre §18.3.
+        let (target, _) = image_import_plan(&root, Some(&root), form("assets/figura.png"))
+            .expect("plan");
+        assert_eq!(target, root.join("assets/figura.png"));
+
+        // §48: ruta absoluta, con `..` o sin extensión no se planifican.
+        for ruta in ["/abs/figura.png", "../fuera.png", "assets/sin-extension"] {
+            assert!(
+                image_import_plan(&root, Some(&root), form(ruta)).is_none(),
+                "ruta no admisible: {ruta}"
+            );
+        }
+        // ID o ancho inválidos tampoco: no se copia nada que no se va a enlazar.
+        let mut id_malo = form("assets/x.png").unwrap();
+        id_malo[2] = "mal id".to_owned();
+        assert!(image_import_plan(&root, Some(&root), Some(id_malo)).is_none());
+        let mut ancho_malo = form("assets/x.png").unwrap();
+        ancho_malo[3] = "0".to_owned();
+        assert!(image_import_plan(&root, Some(&root), Some(ancho_malo)).is_none());
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// #30: los validadores de los formularios retienen el error en abierto
+    /// (§UI) — ruta obligatoria en edición, ruta relativa con extensión en
+    /// importación (§48/§18.2) e ID/Ancho §7.4.3/§18.5 en ambos.
+    #[test]
+    fn validadores_de_formularios_30() {
+        let valores = |ruta: &str, id: &str, ancho: &str| {
+            vec![
+                ruta.to_owned(),
+                "Alt".to_owned(),
+                id.to_owned(),
+                ancho.to_owned(),
+            ]
+        };
+        assert!(validate_image_form(&valores("", "", "")).is_some(), "ruta obligatoria");
+        assert!(validate_image_form(&valores("img.png", "", "")).is_none());
+        // La edición acepta cualquier destino no vacío (externo incluido)…
+        assert!(validate_image_form(&valores("https://x/y.png", "", "")).is_none());
+        // …la importación exige una ruta relativa con extensión (§48).
+        assert!(validate_image_import_form(&valores("assets/x.png", "", "")).is_none());
+        assert!(validate_image_import_form(&valores("/abs/x.png", "", "")).is_some());
+        assert!(validate_image_import_form(&valores("../x.png", "", "")).is_some());
+        assert!(validate_image_import_form(&valores("assets/", "", "")).is_some());
+        assert!(validate_image_form(&valores("img.png", "", "101")).is_some());
+        assert!(validate_image_form(&valores("img.png", "mal id", "")).is_some());
+        assert!(validate_table_attrs_form(&["mal id".to_owned(), "c".to_owned()]).is_some());
+        assert!(validate_table_attrs_form(&["tbl:x".to_owned(), String::new()]).is_none());
     }
 }
 
@@ -4898,6 +5624,681 @@ mod gtk_integration_tests {
         assert_eq!(
             cmds.tabs.borrow().active().editor.document().content(),
             "hola **mundo**"
+        );
+
+        cmds.window.destroy();
+    }
+
+    // ── Fase 7 #30: imágenes y tablas (§18, §26.3, §35) ─────────────────
+
+    /// Diálogo toplevel por título (#30: los formularios se titulan con el
+    /// label de su `Command`).
+    fn dialog_titled(title: &str) -> Option<Widget> {
+        gtk4::Window::list_toplevels().into_iter().find(|widget| {
+            widget
+                .downcast_ref::<gtk4::Window>()
+                .is_some_and(|window| window.title().as_deref() == Some(title))
+        })
+    }
+
+    /// Entries de `widget` en orden de aparición (campos del formulario).
+    fn collect_entries(widget: &Widget, out: &mut Vec<gtk4::Entry>) {
+        if let Some(entry) = widget.downcast_ref::<gtk4::Entry>() {
+            out.push(entry.clone());
+        }
+        let mut child = widget.first_child();
+        while let Some(widget) = child {
+            collect_entries(&widget, out);
+            child = widget.next_sibling();
+        }
+    }
+
+    fn dialog_entries(dialog: &Widget) -> Vec<gtk4::Entry> {
+        let mut entries = Vec::new();
+        collect_entries(dialog, &mut entries);
+        entries
+    }
+
+    /// Botón por etiqueta dentro del árbol (patrón de los tests #29).
+    fn find_button_in(widget: &Widget, label: &str) -> Option<gtk4::Button> {
+        if let Some(button) = widget.downcast_ref::<gtk4::Button>() {
+            if button.label().as_deref() == Some(label) {
+                return Some(button.clone());
+            }
+        }
+        let mut child = widget.first_child();
+        while let Some(widget) = child {
+            if let Some(button) = find_button_in(&widget, label) {
+                return Some(button);
+            }
+            child = widget.next_sibling();
+        }
+        None
+    }
+
+    /// Etiqueta con texto exacto (errores de validación retenidos, §UI).
+    fn find_label_text(widget: &Widget, text: &str) -> Option<gtk4::Label> {
+        if let Some(label) = widget.downcast_ref::<gtk4::Label>() {
+            if label.text() == text {
+                return Some(label.clone());
+            }
+        }
+        let mut child = widget.first_child();
+        while let Some(widget) = child {
+            if let Some(label) = find_label_text(&widget, text) {
+                return Some(label);
+            }
+            child = widget.next_sibling();
+        }
+        None
+    }
+
+    /// Pulsación sintética de Escape sobre los controllers de `widget` (el
+    /// controlador de Escape vive en la ventana del formulario).
+    fn emit_escape_key(widget: &Widget) {
+        let key = gtk4::gdk::Key::Escape;
+        let modifiers = gtk4::gdk::ModifierType::empty();
+        let controllers = widget.observe_controllers();
+        for i in 0..controllers.n_items() {
+            if let Some(controller) = controllers
+                .item(i)
+                .and_then(|c| c.downcast::<gtk4::EventControllerKey>().ok())
+            {
+                if controller.emit_by_name::<bool>("key-pressed", &[&key, &0u32, &modifiers]) {
+                    break;
+                }
+            }
+        }
+    }
+
+    /// #30: `win.edit-image` abre el formulario prellenado desde
+    /// `format::context` y aplicar cambia SOLO el campo editado — con
+    /// atributos (título, caption e id intactos) y sin ellos (añade `{...}`
+    /// tras el constructo sin tocar el resto) —; cada edición es UNA
+    /// transacción (§8.5).
+    #[test]
+    #[ignore = "requiere sesión gráfica GTK/WebKit"]
+    fn gtk_edit_image_conserva_los_bytes_ajenos() {
+        gtk4::init().expect("GTK display");
+        ensure_sandbox_usable();
+        let app = Application::builder()
+            .application_id("app.minmark.test.fase730-edit-image")
+            .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk4::gio::Cancellable>).unwrap();
+        let cmds = build_window(&app, WindowScope::Standalone, &[]);
+
+        // Caso A: imagen CON atributos — editar SOLO el ancho.
+        let fuente =
+            "Ver ![Diagrama](diagram.png \"Título\") {#fig:d \"La caption\" width=40%} fin.\n";
+        cmds.tabs
+            .borrow_mut()
+            .insert_active(Position::new(0, 0), fuente);
+        cmds.reload_active();
+        cmds.editor_pane
+            .focus_find_match(Range::new(Position::new(0, 6), Position::new(0, 6)));
+
+        gtk4::prelude::WidgetExt::activate_action(&cmds.window, "win.edit-image", None)
+            .expect("win.edit-image registrada (§36)");
+        pump_until(|| dialog_titled("Edit Image").is_some());
+        let dialog = dialog_titled("Edit Image").expect("formulario de imagen");
+        let entries = dialog_entries(&dialog);
+        assert_eq!(entries.len(), 4, "Ruta, Alt, ID, Ancho % (§UI)");
+        assert_eq!(entries[0].text(), "diagram.png");
+        assert_eq!(entries[1].text(), "Diagrama");
+        assert_eq!(entries[2].text(), "fig:d");
+        assert_eq!(entries[3].text(), "40");
+
+        entries[3].set_text("60");
+        find_button_in(&dialog, "Aceptar")
+            .expect("botón Aceptar")
+            .emit_clicked();
+        pump_until(|| dialog_titled("Edit Image").is_none());
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content(),
+            "Ver ![Diagrama](diagram.png \"Título\") {#fig:d \"La caption\" width=60%} fin.\n",
+            "solo cambia width: ruta, alt, título, id y caption intactos"
+        );
+
+        // UNA transacción (§8.5): undo restaura byte a byte la fuente.
+        assert!(cmds.tabs.borrow_mut().undo_active());
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content(),
+            fuente
+        );
+        assert!(cmds.tabs.borrow_mut().undo_active(), "el insert inicial");
+        assert_eq!(cmds.tabs.borrow().active().editor.document().content(), "");
+
+        // Caso B: imagen SIN atributos — pedir ID añade `{...}` al final del
+        // constructo y no toca un byte del resto.
+        let fuente_b = "sin ![alt](a.png) más\n";
+        cmds.tabs
+            .borrow_mut()
+            .insert_active(Position::new(0, 0), fuente_b);
+        cmds.reload_active();
+        cmds.editor_pane
+            .focus_find_match(Range::new(Position::new(0, 6), Position::new(0, 6)));
+        gtk4::prelude::WidgetExt::activate_action(&cmds.window, "win.edit-image", None)
+            .expect("win.edit-image reabre el formulario");
+        pump_until(|| dialog_titled("Edit Image").is_some());
+        let dialog = dialog_titled("Edit Image").expect("formulario de imagen");
+        let entries = dialog_entries(&dialog);
+        assert_eq!(entries[0].text(), "a.png");
+        assert_eq!(entries[1].text(), "alt");
+        assert_eq!(entries[2].text(), "");
+        assert_eq!(entries[3].text(), "");
+        entries[2].set_text("fig:x");
+        find_button_in(&dialog, "Aceptar")
+            .expect("botón Aceptar")
+            .emit_clicked();
+        pump_until(|| dialog_titled("Edit Image").is_none());
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content(),
+            "sin ![alt](a.png) {#fig:x} más\n",
+            "sin atributos se añade el bloque {{...}} tras el constructo, el resto intacto"
+        );
+
+        cmds.window.destroy();
+    }
+
+    /// #30 §UI «cero cambios»: Cancelar y Escape en el formulario de imagen
+    /// dejan el buffer byte a byte idéntico, la selección intacta y NO
+    /// añaden transacción de undo.
+    #[test]
+    #[ignore = "requiere sesión gráfica GTK/WebKit"]
+    fn gtk_dialogo_edit_image_cancelar_no_toca_el_buffer() {
+        gtk4::init().expect("GTK display");
+        ensure_sandbox_usable();
+        let app = Application::builder()
+            .application_id("app.minmark.test.fase730-edit-image-cancel")
+            .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk4::gio::Cancellable>).unwrap();
+        let cmds = build_window(&app, WindowScope::Standalone, &[]);
+        let fuente = "![alt](img.png \"T\") {#fig:x width=30%}\n";
+        cmds.tabs
+            .borrow_mut()
+            .insert_active(Position::new(0, 0), fuente);
+        cmds.reload_active();
+        cmds.editor_pane
+            .focus_find_match(Range::new(Position::new(0, 3), Position::new(0, 3)));
+        let seleccion = Selection::collapsed(Position::new(0, 3));
+
+        gtk4::prelude::WidgetExt::activate_action(&cmds.window, "win.edit-image", None)
+            .expect("win.edit-image registrada (§36)");
+        pump_until(|| dialog_titled("Edit Image").is_some());
+        let dialog = dialog_titled("Edit Image").expect("formulario");
+        let entries = dialog_entries(&dialog);
+        assert_eq!(
+            (
+                entries[0].text().to_string(),
+                entries[1].text().to_string(),
+                entries[2].text().to_string(),
+                entries[3].text().to_string()
+            ),
+            ("img.png".to_owned(), "alt".to_owned(), "fig:x".to_owned(), "30".to_owned()),
+            "precarga desde format::context (§UI #30)"
+        );
+
+        find_button_in(&dialog, "Cancelar")
+            .expect("botón Cancelar")
+            .emit_clicked();
+        pump_until(|| dialog_titled("Edit Image").is_none());
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content().as_bytes(),
+            fuente.as_bytes(),
+            "Cancelar deja el buffer byte a byte idéntico"
+        );
+        assert_eq!(cmds.tabs.borrow().active().editor.selection(), seleccion);
+
+        // Escape ⇒ el MISMO resultado que Cancelar.
+        gtk4::prelude::WidgetExt::activate_action(&cmds.window, "win.edit-image", None)
+            .expect("win.edit-image reabre el formulario");
+        pump_until(|| dialog_titled("Edit Image").is_some());
+        emit_escape_key(&dialog_titled("Edit Image").expect("formulario"));
+        pump_until(|| dialog_titled("Edit Image").is_none());
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content().as_bytes(),
+            fuente.as_bytes(),
+            "Escape deja el buffer byte a byte idéntico"
+        );
+        assert_eq!(cmds.tabs.borrow().active().editor.selection(), seleccion);
+
+        // Cero transacciones nuevas: el único undo es el insert inicial.
+        assert!(cmds.tabs.borrow_mut().undo_active());
+        assert_eq!(cmds.tabs.borrow().active().editor.document().content(), "");
+        assert!(
+            !cmds.tabs.borrow_mut().undo_active(),
+            "ni Cancelar ni Escape añadieron transacción"
+        );
+
+        cmds.window.destroy();
+    }
+
+    /// #30 §35/§UI: `win.insert-table` abre el diálogo de dimensiones (con
+    /// los límites retenidos en abierto y el error visible) y aceptar deja
+    /// el esqueleto GFM con la selección en la primera celda de cabecera;
+    /// Escape posterior = cero cambios byte a byte.
+    #[test]
+    #[ignore = "requiere sesión gráfica GTK/WebKit"]
+    fn gtk_insert_table_esqueleto_via_gaction() {
+        gtk4::init().expect("GTK display");
+        ensure_sandbox_usable();
+        let app = Application::builder()
+            .application_id("app.minmark.test.fase730-insert-table")
+            .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk4::gio::Cancellable>).unwrap();
+        let cmds = build_window(&app, WindowScope::Standalone, &[]);
+
+        gtk4::prelude::WidgetExt::activate_action(&cmds.window, "win.insert-table", None)
+            .expect("win.insert-table registrada (§36)");
+        pump_until(|| dialog_titled("Table").is_some());
+        let dialog = dialog_titled("Table").expect("diálogo de dimensiones");
+        let entries = dialog_entries(&dialog);
+        assert_eq!(entries.len(), 2, "Filas, Columnas (§UI)");
+        assert_eq!(entries[0].text(), "2");
+        assert_eq!(entries[1].text(), "2");
+
+        // §35: fuera de rango el diálogo NO se cierra y el error queda visible.
+        entries[0].set_text("99");
+        find_button_in(&dialog, "Aceptar")
+            .expect("botón Aceptar")
+            .emit_clicked();
+        assert!(
+            dialog_titled("Table").is_some(),
+            "filas fuera de 1–50 retienen el diálogo (§35)"
+        );
+        let error = find_label_text(&dialog, "Filas: entero entre 1 y 50 (§35)")
+            .expect("mensaje de validación visible");
+        assert!(error.is_visible());
+
+        // Dentro de rango: aceptar genera el esqueleto §35.
+        entries[0].set_text("2");
+        entries[1].set_text("3");
+        find_button_in(&dialog, "Aceptar")
+            .expect("botón Aceptar")
+            .emit_clicked();
+        pump_until(|| dialog_titled("Table").is_none());
+        let esqueleto = "|     |     |     |\n\
+                        | --- | --- | --- |\n\
+                        |     |     |     |\n\
+                        |     |     |     |";
+        assert_eq!(cmds.tabs.borrow().active().editor.document().content(), esqueleto);
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.selection(),
+            Selection::collapsed(Position::new(0, 2)),
+            "§8.6: la selección posterior es la primera celda de cabecera"
+        );
+
+        // Escape tras aceptar: byte idéntico y sin transacción nueva.
+        gtk4::prelude::WidgetExt::activate_action(&cmds.window, "win.insert-table", None)
+            .expect("win.insert-table reabre el diálogo");
+        pump_until(|| dialog_titled("Table").is_some());
+        emit_escape_key(&dialog_titled("Table").expect("diálogo"));
+        pump_until(|| dialog_titled("Table").is_none());
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content().as_bytes(),
+            esqueleto.as_bytes(),
+            "Escape deja el buffer byte a byte idéntico"
+        );
+
+        // UNA transacción por acción (§8.5): el primer undo vacía el buffer.
+        assert!(cmds.tabs.borrow_mut().undo_active());
+        assert_eq!(cmds.tabs.borrow().active().editor.document().content(), "");
+        assert!(!cmds.tabs.borrow_mut().undo_active(), "solo la inserción");
+
+        cmds.window.destroy();
+    }
+
+    /// #30 §26.3: «Table Attributes» aparece en el popover dentro de la
+    /// tabla y su botón abre el MISMO formulario que menú/paleta §38;
+    /// aplicar crea la línea de atributos y después reemplaza SOLO esa
+    /// línea (la tabla es byte a byte la misma).
+    #[test]
+    #[ignore = "requiere sesión gráfica GTK/WebKit"]
+    fn gtk_edit_table_attrs_crea_y_reemplaza_solo_la_linea() {
+        gtk4::init().expect("GTK display");
+        ensure_sandbox_usable();
+        let app = Application::builder()
+            .application_id("app.minmark.test.fase730-table-attrs")
+            .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk4::gio::Cancellable>).unwrap();
+        let cmds = build_window(&app, WindowScope::Standalone, &[]);
+        let tabla = "| A | B |\n| --- | --- |\n| 1 | 2 |\n";
+        cmds.tabs
+            .borrow_mut()
+            .insert_active(Position::new(0, 0), tabla);
+        cmds.reload_active();
+
+        // Cursor dentro de la tabla: popover con «Table Attributes» (y sin
+        // panel de texto, que exige selección no vacía, igual que #29).
+        cmds.editor_pane
+            .focus_find_match(Range::new(Position::new(2, 2), Position::new(2, 2)));
+        pump_until(|| cmds.editor_pane.test_context_visible());
+        let boton = cmds
+            .editor_pane
+            .test_context_button("Table Attributes")
+            .expect("botón «Table Attributes» (§UI #30)");
+        assert!(boton.is_visible(), "la fila de tabla está visible");
+        assert!(boton.can_focus(), "operable con teclado (§29 ⇒ #30)");
+        assert!(
+            !cmds
+                .editor_pane
+                .test_context_button("Bold")
+                .expect("botón Bold")
+                .is_visible(),
+            "sin selección no se muestra el panel de texto (#29 intacto)"
+        );
+
+        // El botón del popover abre el MISMO diálogo precargado (vacío: la
+        // tabla todavía no tiene atributos); Escape ⇒ cero cambios.
+        assert!(cmds.editor_pane.test_context_click("Table Attributes"));
+        pump_until(|| dialog_titled("Table Attributes").is_some());
+        let dialog = dialog_titled("Table Attributes").expect("formulario");
+        let entries = dialog_entries(&dialog);
+        assert_eq!(entries.len(), 2, "ID, Caption (§UI)");
+        assert_eq!(entries[0].text(), "");
+        assert_eq!(entries[1].text(), "");
+        emit_escape_key(&dialog);
+        pump_until(|| dialog_titled("Table Attributes").is_none());
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content(),
+            tabla,
+            "Escape en el diálogo no toca el documento"
+        );
+
+        // Crear la línea vía la MISMA acción `win.edit-table-attrs` (§38).
+        gtk4::prelude::WidgetExt::activate_action(&cmds.window, "win.edit-table-attrs", None)
+            .expect("win.edit-table-attrs registrada (§36)");
+        pump_until(|| dialog_titled("Table Attributes").is_some());
+        let dialog = dialog_titled("Table Attributes").expect("formulario");
+        let entries = dialog_entries(&dialog);
+        entries[0].set_text("tbl:x");
+        entries[1].set_text("Resultados");
+        find_button_in(&dialog, "Aceptar")
+            .expect("botón Aceptar")
+            .emit_clicked();
+        pump_until(|| dialog_titled("Table Attributes").is_none());
+        let con_atributos = "| A | B |\n| --- | --- |\n| 1 | 2 |\n{#tbl:x \"Resultados\"}\n";
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content(),
+            con_atributos,
+            "crea la línea §26.3 tras el bloque sin tocar la tabla"
+        );
+
+        // Reemplazar SOLO la línea: precarga vigente, cambia el caption.
+        gtk4::prelude::WidgetExt::activate_action(&cmds.window, "win.edit-table-attrs", None)
+            .expect("win.edit-table-attrs reabre el formulario");
+        pump_until(|| dialog_titled("Table Attributes").is_some());
+        let dialog = dialog_titled("Table Attributes").expect("formulario");
+        let entries = dialog_entries(&dialog);
+        assert_eq!(entries[0].text(), "tbl:x", "precarga ID desde el contexto");
+        assert_eq!(entries[1].text(), "Resultados", "precarga Caption");
+        entries[1].set_text("Nueva caption");
+        find_button_in(&dialog, "Aceptar")
+            .expect("botón Aceptar")
+            .emit_clicked();
+        pump_until(|| dialog_titled("Table Attributes").is_none());
+        let reemplazada = "| A | B |\n| --- | --- |\n| 1 | 2 |\n{#tbl:x \"Nueva caption\"}\n";
+        let contenido = cmds
+            .tabs
+            .borrow()
+            .active()
+            .editor
+            .document()
+            .content()
+            .to_owned();
+        assert_eq!(contenido, reemplazada);
+        assert!(
+            contenido.starts_with(tabla),
+            "los bytes de la tabla quedan intactos"
+        );
+
+        // Cada aplicación es UNA transacción (§8.5).
+        assert!(cmds.tabs.borrow_mut().undo_active());
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content(),
+            con_atributos
+        );
+        assert!(cmds.tabs.borrow_mut().undo_active());
+        assert_eq!(cmds.tabs.borrow().active().editor.document().content(), tabla);
+
+        cmds.window.destroy();
+    }
+
+    /// #30 §18.2/§18.3/§17: aceptar el formulario de importación copia el
+    /// fichero a `<raíz>/assets/` con renombrado §18.3 (`diagram.png` ya
+    /// ocupado ⇒ `diagram-2.png`, sin pisar nada) e inserta la ruta RELATIVA
+    /// a la carpeta del documento; Cancelar no copia ni edita. `<raíz>` es la
+    /// raíz del proyecto en ventanas de proyecto y la carpeta del documento
+    /// en standalone. El selector nativo §18.1 no es automatizable: el test
+    /// entra por el formulario (el camino posterior al selector).
+    #[test]
+    #[ignore = "requiere sesión gráfica GTK/WebKit"]
+    fn gtk_import_imagen_a_assets_renombrado_y_ruta_relativa() {
+        gtk4::init().expect("GTK display");
+        ensure_sandbox_usable();
+        let base = std::env::temp_dir().join(format!(
+            "minmark-gtk-import30-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&base);
+        // PNG real mínimo (1×1 RGB): la estructura IHDR/IDAT/IEND está
+        // verificada (`file` + zlib) y es lo que la importación copia.
+        const PNG_1X1: &[u8] = &[
+            0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48,
+            0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00,
+            0x00, 0x90, 0x77, 0x53, 0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41, 0x54, 0x78,
+            0xda, 0x63, 0xf8, 0xcf, 0xc0, 0x00, 0x00, 0x03, 0x01, 0x01, 0x00, 0xf7, 0x03, 0x41,
+            0x43, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+        ];
+        let src = base.join("origen");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("diagram.png"), PNG_1X1).unwrap();
+        std::fs::write(src.join("extra.png"), PNG_1X1).unwrap();
+
+        let app = Application::builder()
+            .application_id("app.minmark.test.fase730-import")
+            .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk4::gio::Cancellable>).unwrap();
+
+        // Ventana de PROYECTO: la copia va a <raíz del proyecto>/assets/ y
+        // `diagram.png` ya existe ⇒ renombrado §18.3.
+        let root = base.join("proyecto");
+        std::fs::create_dir_all(root.join("assets")).unwrap();
+        std::fs::write(root.join("assets/diagram.png"), "viejo").unwrap();
+        let nota = root.join("nota.md");
+        std::fs::write(&nota, "Nota\n").unwrap();
+        let cmds = build_window(&app, WindowScope::Project(root.clone()), &[nota]);
+        pump_until(|| cmds.index.borrow().is_some());
+        cmds.reload_active();
+        cmds.editor_pane
+            .focus_find_match(Range::new(Position::new(1, 0), Position::new(1, 0)));
+
+        cmds.start_image_import(src.join("diagram.png"));
+        pump_until(|| dialog_titled("Image").is_some());
+        let dialog = dialog_titled("Image").expect("formulario de importación");
+        let entries = dialog_entries(&dialog);
+        assert_eq!(entries.len(), 4, "Ruta, Alt, ID, Ancho % (§UI)");
+        assert_eq!(entries[0].text(), "assets/diagram.png");
+        assert_eq!(
+            entries[1].text(),
+            "diagram",
+            "Alt por defecto = nombre del fichero sin extensión (§UI)"
+        );
+        find_button_in(&dialog, "Aceptar")
+            .expect("botón Aceptar")
+            .emit_clicked();
+        pump_until(|| dialog_titled("Image").is_none());
+
+        assert_eq!(
+            std::fs::read(root.join("assets/diagram.png")).unwrap(),
+            "viejo".as_bytes(),
+            "§18.3/§3.7: nunca sobrescribe el existente"
+        );
+        assert_eq!(
+            std::fs::read(root.join("assets/diagram-2.png")).unwrap(),
+            PNG_1X1,
+            "§18.3: colisión ⇒ diagram-2.png, con el fichero copiado intacto"
+        );
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content(),
+            "Nota\n![diagram](assets/diagram-2.png)",
+            "ruta RELATIVA §17 al documento (nunca absoluta)"
+        );
+
+        // Cancelar: NI copia NI edición (§UI «cero cambios»).
+        let antes = cmds
+            .tabs
+            .borrow()
+            .active()
+            .editor
+            .document()
+            .content()
+            .to_owned();
+        cmds.start_image_import(src.join("extra.png"));
+        pump_until(|| dialog_titled("Image").is_some());
+        find_button_in(&dialog_titled("Image").expect("formulario"), "Cancelar")
+            .expect("botón Cancelar")
+            .emit_clicked();
+        pump_until(|| dialog_titled("Image").is_none());
+        assert!(
+            !root.join("assets/extra.png").exists(),
+            "cancelar NO copia el fichero (§UI)"
+        );
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content(),
+            antes,
+            "cancelar NO edita el documento (§UI)"
+        );
+
+        // Ventana STANDALONE: <raíz> = carpeta del documento activo (§UI).
+        let suelto = base.join("suelto");
+        std::fs::create_dir_all(&suelto).unwrap();
+        let doc = suelto.join("doc.md");
+        std::fs::write(&doc, "Solo\n").unwrap();
+        let cmds2 = build_window(&app, WindowScope::Standalone, &[doc]);
+        cmds2.reload_active();
+        cmds2.editor_pane
+            .focus_find_match(Range::new(Position::new(1, 0), Position::new(1, 0)));
+        cmds2.start_image_import(src.join("diagram.png"));
+        pump_until(|| dialog_titled("Image").is_some());
+        find_button_in(&dialog_titled("Image").expect("formulario"), "Aceptar")
+            .expect("botón Aceptar")
+            .emit_clicked();
+        pump_until(|| dialog_titled("Image").is_none());
+        assert_eq!(
+            std::fs::read(suelto.join("assets/diagram.png")).unwrap(),
+            PNG_1X1,
+            "standalone: la copia va a la carpeta del documento"
+        );
+        assert_eq!(
+            cmds2.tabs.borrow().active().editor.document().content(),
+            "Solo\n![diagram](assets/diagram.png)"
+        );
+
+        cmds.window.destroy();
+        cmds2.window.destroy();
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// #30 (aceptación): dentro de la imagen el popover muestra «Edit Image»
+    /// — ortogonal al panel de texto y operable con teclado — y su botón abre
+    /// el formulario precargado; cambiar de pestaña o de modo cierra el
+    /// popover y el click YA no aplica nada (guardia #29 intacta).
+    #[test]
+    #[ignore = "requiere sesión gráfica GTK/WebKit"]
+    fn gtk_popover_edit_image_guardia_de_pestana() {
+        gtk4::init().expect("GTK display");
+        ensure_sandbox_usable();
+        let app = Application::builder()
+            .application_id("app.minmark.test.fase730-popover-guard")
+            .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk4::gio::Cancellable>).unwrap();
+        let cmds = build_window(&app, WindowScope::Standalone, &[]);
+        let imagen = "foto ![alt](img.png) fin\n";
+        cmds.tabs
+            .borrow_mut()
+            .insert_active(Position::new(0, 0), imagen);
+        cmds.reload_active();
+        cmds.tabs.borrow_mut().new_tab();
+        cmds.tabs
+            .borrow_mut()
+            .insert_active(Position::new(0, 0), "otra pestaña\n");
+        cmds.reload_active();
+        cmds.select_tab(0);
+
+        // Cursor dentro de la imagen (selección vacía): solo «Edit Image».
+        cmds.editor_pane
+            .focus_find_match(Range::new(Position::new(0, 8), Position::new(0, 8)));
+        pump_until(|| cmds.editor_pane.test_context_visible());
+        let boton = cmds
+            .editor_pane
+            .test_context_button("Edit Image")
+            .expect("botón «Edit Image» (§UI #30)");
+        assert!(boton.is_visible(), "la fila de imagen está visible");
+        assert!(boton.can_focus(), "operable con teclado (§29 ⇒ #30)");
+        assert!(
+            !cmds
+                .editor_pane
+                .test_context_button("Bold")
+                .expect("botón Bold")
+                .is_visible(),
+            "cursor sin selección: el panel de texto sigue oculto (#29 intacto)"
+        );
+
+        // El botón abre el formulario precargado; Escape ⇒ cero cambios.
+        assert!(cmds.editor_pane.test_context_click("Edit Image"));
+        pump_until(|| dialog_titled("Edit Image").is_some());
+        let entries = dialog_entries(&dialog_titled("Edit Image").expect("formulario"));
+        assert_eq!(entries[0].text(), "img.png");
+        assert_eq!(entries[1].text(), "alt");
+        emit_escape_key(&dialog_titled("Edit Image").expect("formulario"));
+        pump_until(|| dialog_titled("Edit Image").is_none());
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content(),
+            imagen
+        );
+
+        // Cambio de PESTAÑA: cierra el popover y el click no aplica nada —
+        // ni diálogo ni cambios en la activa ni en la abandonada.
+        cmds.editor_pane
+            .focus_find_match(Range::new(Position::new(0, 8), Position::new(0, 8)));
+        pump_until(|| cmds.editor_pane.test_context_visible());
+        cmds.select_tab(1);
+        assert!(!cmds.editor_pane.test_context_visible());
+        assert!(cmds.editor_pane.test_context_click("Edit Image"));
+        assert!(
+            dialog_titled("Edit Image").is_none(),
+            "guardia de pestaña: sin formulario con el popover cerrado"
+        );
+        assert_eq!(
+            cmds.tabs.borrow().tabs()[1].editor.document().content(),
+            "otra pestaña\n",
+            "sin cambios en la pestaña activa"
+        );
+        assert_eq!(
+            cmds.tabs.borrow().tabs()[0].editor.document().content(),
+            imagen,
+            "sin cambios en la pestaña abandonada"
+        );
+
+        // Cambio de MODO: también cierra y no aplica.
+        cmds.select_tab(0);
+        cmds.editor_pane
+            .focus_find_match(Range::new(Position::new(0, 8), Position::new(0, 8)));
+        pump_until(|| cmds.editor_pane.test_context_visible());
+        cmds.toggle_mode();
+        assert!(!cmds.editor_pane.test_context_visible(), "cambio de modo cierra");
+        assert!(cmds.editor_pane.test_context_click("Edit Image"));
+        assert!(dialog_titled("Edit Image").is_none());
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.document().content(),
+            imagen
         );
 
         cmds.window.destroy();
