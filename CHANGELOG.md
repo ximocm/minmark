@@ -9,6 +9,8 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-10-28
+
 ### Añadido
 
 - Controles editoriales contextuales (fase 7, #29; §44): popover flotante
