@@ -9,8 +9,254 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-10-28
+
 ### Corregido
 
+- Windows (#67): la barra lateral restaurada a un ancho pequeño desplazaba
+  nombres y controles fuera del borde de la ventana — ahora se respeta el
+  ancho mínimo del panel y la cabecera de toggles ya no existe (#70), por lo
+  que no hay contenido que se corte; el Preview en ventana restaurada
+  dejaba 28 px vacíos a la derecha y solapaba 24 px de las pestañas — la
+  conversión GTK → HWND suma los márgenes de decoración para alinearlo; el
+  editor incorpora márgenes propios que los tags sin sangría ya no anulan.
+  Añadida verificación del ancho lateral mínimo y de las coordenadas reales
+  del Preview en la autocomprobación (`--check-preview`), y la prueba de
+  composición espera al primer documento cargado antes de consultar WebView2.
+
+### Añadido
+
+- Diagramas DOT (issue #68, §7.3.1, ADR-007): los bloques cercados
+  ` ```dot ` con sintaxis Graphviz se renderizan como diagrama en Preview y
+  PDF con el **mismo SVG** (paridad obligatoria). Motor Rust puro
+  (`layout-rs`, MIT) encapsulado en `minmark-diagram`: sin red, sin binarios
+  externos y sin motor de JavaScript. DOT inválido muestra el marcador
+  visible `⚠ [diagrama no válido: …]` en ambas superficies (patrón ADR-002)
+  y el fuente Markdown sigue siendo el bloque de código, visible y editable.
+  El área del diagrama usa fondo claro para que los colores por defecto de
+  DOT sean legibles también en tema oscuro (el DOT puede fijar los suyos).
+
+### Cambiado
+
+- Los toggles **Show All Files** y **Show Hidden Files** (issue #70, §14.4/
+  §14.5) dejan la cabecera del explorador y pasan al menú **View**, en una
+  sección propia al final: ítems marcables sobre acciones stateful booleanas
+  `win.show-all-files` / `win.show-hidden-files`, sin aceleradores y con el
+  estado por ventana — el menú refleja el filtro vigente, también cuando el
+  panel cambia un filtro por código, y activarlos desde él o desde la
+  Command Palette §38 actualiza el explorador sin releer el árbol;
+  `Show All Files` sigue alimentando Quick Open (ISSUE-029).
+- Barra lateral estrecha (issue #70): el explorador ya no lleva cabecera —
+  su ancho mínimo pasa de 268px a **46px medidos**, regresión cubierta por
+  tests—, las filas elipsan los nombres largos y el `Paned` exterior marca
+  `shrink_start_child`, con lo que el ancho mínimo del explorador no se suma
+  al de la ventana: el tamaño mínimo de la ventana lo marcan el editor y el
+  preview, no el explorador.
+
+### Limitaciones aceptadas (diagramas)
+
+- La sintaxis es DOT (Graphviz), no mermaid: decisión del propietario que
+  prioriza la paridad Preview/PDF y la promesa de dependencias lean (§4).
+- Subconjunto de DOT validado (ADR-007): `shape` (elipse/círculo, caja,
+  record, doble círculo), `rankdir` LR/TB, `style` solid/dashed/filled y
+  `label`/`color`/`fillcolor`/`fontsize`/`penwidth`/`width`. Lo que el motor
+  aplicaría mal o ignoraría (clusters, `diamond`, `rankdir=BT`, `fontcolor`,
+  estilos combinados…) muestra el marcador visible en vez de deformarse.
+- Tipografía de las etiquetas resuelta a contornos con fuentes empaquetadas
+  (Liberation Sans + typst-assets): los glifos sin fuente empaquetada (p. ej.
+  CJK) se dibujan con sustituto en ambas superficies por igual.
+- El editor muestra el fuente como bloque de código; el diagrama renderizado
+  vive en Preview/PDF.
+
+## [0.5.0] — 2026-10-28
+
+### Añadido
+
+- Controles editoriales contextuales (fase 7, #29; §44): popover flotante
+  anclado al cursor/selección del editor que se muestra solo cuando aporta
+  utilidad — panel de texto (Heading 1–6, Bold, Italic, Strikethrough, Code,
+  Link, Callout) con selección no vacía, «Edit link» con el cursor dentro de
+  un enlace, controles de tono (note, info, tip, warning, danger, success)
+  dentro de un callout y H1–H6 bajo el cursor en un heading; cursor plano
+  sin selección lo mantiene oculto. Escape (y el clic fuera) lo cierra sin
+  tocar el documento, `Ctrl+.` lleva el foco del editor a los controles
+  —con foco en ellos, Tab los recorre, Enter/Space los activan (GTK
+  nativo) y Escape los cierra devolviendo el foco al editor—, y cambiar de
+  pestaña o de modo lo cierra sin aplicar nada a otra pestaña.
+- Menús **Insert** (Link, Callout) y **Format** (Heading 1–6, Bold, Italic,
+  Strikethrough, Code) en el orden §36 `File Edit View Insert Format Project
+  Help`, sin toolbar permanente (§36/§44).
+- Command Palette §38 (`Ctrl+Shift+P`): ventana fuzzy sobre las etiquetas de
+  todos los comandos; Enter o doble click ejecutan el comando, Escape
+  cierra.
+- Atajos §39 nuevos, sin conflicto con los existentes: `Ctrl+Shift+B` Bold,
+  `Ctrl+I` Italic, `Ctrl+K` Link, `Ctrl+Shift+X` Strikethrough,
+  `Ctrl+Shift+C` Code, `Ctrl+1..6` Heading 1–6 y `Ctrl+Shift+P` Command
+  Palette (`Ctrl+B` sigue siendo Toggle Explorer y `Ctrl+P` Quick Open).
+- Cada acción editorial es UNA transacción de undo/redo (§8.5) que registra
+  la selección anterior y posterior (§8.6): undo restaura la selección
+  original y redo la resultante. Todas las vías de entrada — menús, atajos,
+  Command Palette y popover — ejecutan la misma acción `win.*` con destino
+  única `TabManager::apply_format_active`; el diálogo de enlace precarga la
+  URL del enlace bajo el cursor y Cancelar (o Escape) no toca el documento.
+  La ✕ de la Command Palette la oculta en lugar de destruirla: se reutiliza
+  en la siguiente apertura.
+- Controles para imágenes y tablas (fase 7, #30; §18, §26.3, §35): el
+  popover §44 muestra «Edit Image» cuando el cursor o la selección caen
+  dentro de un constructo imagen y «Table Attributes» dentro de una tabla —
+  mismas garantías de foco, teclado y guardia de pestaña que los controles
+  de #29 —, y los formularios precargan Ruta/Alt/ID/Ancho % e ID/Caption
+  desde `format::context`. El menú **Insert** gana Image y Table junto a
+  Link/Callout: `win.insert-image` abre el selector con los formatos §18.1
+  (PNG, JPG/JPEG, SVG, WebP, GIF) y, solo al aceptar, copia el fichero a
+  `<raíz>/assets/` con el renombrado §18.3 (`diagram.png`, `diagram-2.png`,
+  …, nunca sobrescribe) e inserta la ruta RELATIVA a la carpeta del
+  documento (`<raíz>` = raíz del proyecto o, en standalone, la carpeta del
+  documento); `win.insert-table` pide filas/columnas (1–50 × 1–8, §35) y
+  deja el esqueleto GFM con la selección en la primera celda de cabecera;
+  `win.edit-image` y `win.edit-table-attrs` cambian SOLO los campos
+  editados —título, caption, `clave=valor` extra y la tabla quedan byte a
+  byte intactos— y un campo vacío quita su atributo. Cancelar, Escape o
+  cerrar cualquier diálogo (incluido el selector) es cero cambios: ni
+  copia, ni edición, ni transacción nueva. Los cuatro comandos comparten
+  el destino único `TabManager::apply_format_active` con menús, atajos,
+  paleta §38 y popover §44. Sin atajos nuevos: #30 no registra
+  aceleradores (los de #39/#29 se conservan intactos).
+- Controles para ecuaciones y citas (fase 7, #31; §24, §25.2, §26.4): el
+  popover §44 muestra «Edit Equation» + «Equation Attributes» cuando el
+  cursor o la selección caen dentro de una ecuación —los atributos SOLO
+  para `$$…$$` de bloque (§26.4)— y «Edit Citation» dentro de una cita
+  `[@…]`, con las mismas garantías de foco, teclado y guardia de pestaña
+  que #29/#30. El menú **Insert** gana Equation y Citation:
+  `win.insert-equation` envuelve la selección como LaTeX (monolínea `$…$`,
+  multilínea `$$…$$`) o, sin selección, pide el LaTeX en un diálogo
+  multilinea con diagnóstico EN VIVO —fuera del subconjunto ADR-002 se
+  muestra el marcador «⚠ [math no soportado: …]» como aviso NO bloqueante:
+  aceptar sigue siendo válido y el contenido se conserva visible y
+  editable (§24) y SIN campos de atributos; `win.edit-equation` precarga
+  el LaTeX del contexto y `MathEdit` sustituye SOLO el contenido LaTeX
+  (marcadores y línea de atributos intactos); `win.equation-attrs` usa el
+  MISMO formulario ID/Caption que Table Attributes para crear, reemplazar
+  o eliminar la línea `{#id "caption"}` del bloque; `win.insert-citation` y
+  `win.edit-citation` comparten un diálogo de items (clave + localizador)
+  con añadir/quitar filas y autocompletado bibliográfico §25.3 (clave,
+  autor, título y año) reutilizando `intelligence::citation_completions`
+  con el popup de completado existente y cargando la MISMA bibliografía que
+  la inteligencia de la fase 5. Los campos se validan contra la gramática
+  que consumen parser y núcleo (§25.2): la clave admite letras, dígitos y
+  `: . _ - * + / !` y el localizador no puede estar vacío ni contener `;`,
+  `]` ni saltos de línea — fuera de esa gramática el diálogo RETIENE el
+  error en abierto y no se cierra. Aceptar deja la cita en forma canónica
+  `[@k1, loc; @k2]`; Cancelar, Escape o cerrar cualquier diálogo es cero
+  cambios y sin transacción nueva. Los cinco comandos comparten el destino
+  único `TabManager::apply_format_active` con menú Insert, paleta §38 y
+  popover §44. Sin atajos nuevos: #31 no registra aceleradores (los de
+  #39/#29 se conservan intactos).
+
+### Limitaciones aceptadas (#29)
+
+- Solo enlaces `[texto](url)`: wiki links y reference links no tienen
+  controles contextuales.
+- Code inline multilínea no es aplicable: `format::plan` lo rechaza y el
+  botón Code queda inoperante en ese rango (el documento no se toca).
+- Atajos configurables (§39) fuera de alcance: se registran solo los
+  defaults sin conflicto; no hay editor de bindings.
+
+### Limitaciones aceptadas (#30)
+
+- El contenido de las celdas y la alineación de las columnas se editan
+  escribiendo sobre el mismo buffer: los controles de tabla no los tocan.
+- La detección de imagen y tabla sigue la sintaxis canónica: una tabla sin
+  pipes extremos o sin fila de alineación, o una imagen cuyo bloque
+  `{...}` esté separado por líneas en blanco, no se detecta como constructo
+  y su botón contextual no aparece.
+- `Edit Image` y `Table Attributes` no tienen ítem de menú §36: se activan
+  desde el popover §44 y desde la Command Palette §38 sobre la MISMA
+  acción `win.*`.
+- El GIF se renderiza estático (§18.1): es comportamiento de Preview/PDF,
+  no de edición.
+
+### Limitaciones aceptadas (#31)
+
+- La detección de `$…$` sigue la sintaxis canónica (§24): `$` escapados
+  con `\`, `$` pegados a texto sin separador y ecuaciones multilínea en
+  inline no se detectan como constructo, así que su botón contextual no
+  aparece —el contenido sigue siendo editable escribiendo sobre el mismo
+  buffer—; la detección de bloque exige `$$` en línea propia.
+- El control de citas edita la lista de items (§25.2); el estilo CSL y la
+  precedencia de citas son de render (§25.4) y no se tocan: «mantener CSL
+  y precedencia efectivos» significa no romperlos.
+- Los atributos `{#id "caption"}` existen SOLO para ecuaciones de bloque
+  (§26.4): en inline `MathAttrs` no aplica y «Equation Attributes» no se
+  muestra en el popover.
+- Sin atajos nuevos para #31 (el contrato §UI lo pide documentado): Equation
+  y Citation se activan desde el menú Insert, la Command Palette §38 y el
+  popover §44; los aceleradores de #39/#29 siguen intactos.
+
+### Verificación
+
+- `cargo test` del binario UI: 130 en verde (12 ignorados que requieren
+  sesión gráfica) y `cargo clippy --all-targets` sin avisos nuevos respecto
+  al HEAD (mismo conjunto de 15 avisos preexistentes del toolchain 1.98).
+- Las seis pruebas gráficas nuevas corren bajo Xvfb con `--ignored`:
+  Bold vía `win.format-strong` con selección y undo únicos, diálogo de
+  enlace cancelado byte a byte idéntico, popover oculto con cursor
+  plano/visible con selección, cambio de pestaña y de modo con el popover
+  abierto sin aplicar nada, retonado de callout desde el popover y Command
+  Palette ejecutando un comando vía `win.*`.
+- Fase 7 #30: `cargo test` del binario UI con 144 en verde (los 130 previos
+  más 14 headless de #30: comandos hasta el receptor, cancelar formulario
+  sin acción, límites §35, parseo de campos —caption verbatim incluido—,
+  plan de importación §18.3/§17, validadores, `apply_format_active` de
+  imagen/tabla con la regresión del caption precargado con espacios y el
+  smoke de render de imagen/tabla editadas con atributos) y 19 ignorados
+  gráficos. `cargo clippy --all-targets` reproduce el recuento del HEAD
+  (15 avisos bin, 15 de `qa_preview` y 22 del target de test, con el
+  mismo reparto de tipos: sin avisos nuevos). Los seis tests gráficos
+  nuevos corren cada uno bajo su propio `xvfb-run … --ignored
+  --test-threads=1`: edición de imagen con y sin atributos conservando los
+  bytes ajenos, diálogo de imagen Cancelar/Escape byte a byte idéntico sin
+  transacción nueva, esqueleto de tabla con validación de límites en
+  abierto, atributos de tabla creando/reemplazando solo su línea,
+  importación a `assets/` con renombrado §18.3 y ruta relativa §17 (proyecto
+  y standalone; cancelar no copia) y guardia de pestaña/modo sobre
+  «Edit Image». Los 13 tests gráficos previos siguen en verde. El smoke de
+  render (§Verificación) comprueba en HTML del Preview que la imagen editada
+  `{#fig:…}` y la tabla con `{#tbl:… "caption"}` producen su numeración y
+  pie §26.5.
+- Fase 7 #31: `cargo test` del binario UI con 153 en verde (los 144 previos
+  más 9 headless de #31: comandos hasta el receptor, cancelar formularios
+  sin acción, derivación de la forma canónica `$…$`/`$$…$$`, `MathAttrs`
+  reutilizando los campos de Table Attributes, parseo de items de cita con
+  localizador, `format::context` de ecuación/cita, `apply_format_active` de
+  ecuaciones y citas —no-op, fuera de constructo y UNA transacción por
+  acción— y el smoke de render de ecuación editada + cita compuesta con
+  bibliografía) y 25 ignorados gráficos. `cargo clippy --all-targets`
+  reproduce el recuento del HEAD (15 avisos bin, 15 de `qa_preview` y 22
+  del target de test, sin avisos nuevos). Los seis tests gráficos nuevos
+  corren cada uno bajo su propio `xvfb-run … --ignored --test-threads=1`:
+  edición de ecuación válida con el popover inline SIN «Equation
+  Attributes» y Escape byte a byte idéntico, ecuación no soportada con el
+  marcador ADR-002 visible, contenido editable, aceptación válida y cancelar
+  limpio, atributos de ecuación creando/reemplazando/quitando solo su línea
+  del bloque (y sin botón en inline), inserción y edición de citas con
+  items múltiples y locator (añadir y quitar filas, precarga desde el
+  contexto), autocompletado bibliográfico §25.3 —clave y autor con
+  `intelligence::citation_completions`, Enter acepta la fila, sin
+  coincidencias cierra el popup, Escape cierra SOLO el popup y un segundo
+  Escape cancela sin tocar el documento— y guardia de pestaña/modo sobre
+  «Edit Equation»/«Edit Citation». Los 19 tests gráficos previos siguen en
+  verde. El smoke de render comprueba en HTML del Preview la ecuación
+  editada (math con el LaTeX nuevo en `aria-label`) y la cita resuelta con
+  la bibliografía §25.4 sin rastro de la cita original.
+
+## [0.4.3] — 2026-10-26
+
+### Corregido
+
+- Las ecuaciones inline cuyo primer carácter es Unicode (por ejemplo
+  `$α_0$`) podían cerrar la app al escribir, abrir o guardar. El analizador
+  conserva los límites UTF-8 y tolera también las ecuaciones incompletas.
 - Windows: Guardar un documento nuevo, Guardar como y otros selectores de
   archivos podían cerrar el proceso con «No GSettings schemas are installed
   on the system». El ZIP y el MSI incluyen los schemas de GTK compilados, y
@@ -24,19 +270,29 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
   ya no mantienen préstamos del modelo durante el refresco de la interfaz,
   que podían provocar un cierre por `RefCell`.
 
-### Verificación
+### Verificación y limitaciones
 
 - La autocomprobación `--check-preview` comprueba también el guardado y la
   sobrescritura confirmada, cierre de pestaña, redimensionado, cambios
   Split/Preview y barra lateral. Abre y cancela un selector real en
   Windows/Linux; en macOS esa interacción requiere comprobación manual.
   En Windows incluye maximizar/restaurar.
+- La regresión de Unicode cubre parseo, highlighting y modo Visual con
+  caracteres de dos, tres y cuatro bytes y sus prefijos durante la edición.
+  El diagnóstico gráfico edita una ecuación Unicode en el editor real y
+  activa el mismo comando de guardado de Ctrl+S.
 - Las comprobaciones del paquete Windows eliminan el GTK del entorno de
   compilación para detectar recursos ausentes en una instalación real.
+- La build Windows fija la versión de gvsbuild al GTK validado, y la
+  instalación de dependencias Linux acota esperas de red y evita preguntas
+  interactivas en CI.
 - La CI de Linux ejecuta los seis escenarios gráficos de integración en
   Xvfb, además de la lógica de UI.
 - Registro y alcance de la validación adelantada de fase 8:
   [estabilidad Windows](docs/qa/estabilidad-windows-2026-10-25.md).
+- Sigue pendiente la matriz manual de instalación/desinstalación MSI en
+  Windows 10/11, los cambios entre monitores con distinto DPI y la
+  interacción del selector nativo de macOS.
 
 ## [0.4.2] — 2026-10-25
 

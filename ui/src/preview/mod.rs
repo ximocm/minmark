@@ -62,8 +62,8 @@ pub enum ViewMode {
 }
 
 impl ViewMode {
-    /// Etiqueta del modo para el menú View (§9): "Editor" / "Split" / "Preview".
-    #[cfg(test)]
+    /// Etiqueta del modo para el menú View (§9): "Editor" / "Split" /
+    /// "Preview"; §38: también la etiqueta que filtra la Command Palette.
     pub fn label(self) -> &'static str {
         match self {
             ViewMode::Editor => "Editor",
@@ -185,6 +185,10 @@ pub struct PreviewPane {
 }
 
 impl PreviewPane {
+    #[cfg(test)]
+    pub fn test_has_loaded_document(&self) -> bool {
+        self.document_key.borrow().is_some() && !self.engine.is_loading()
+    }
     #[cfg(test)]
     pub fn test_snapshot(&self, path: &std::path::Path, done: std::rc::Rc<std::cell::Cell<bool>>) {
         self.engine.snapshot(path, done);
@@ -419,6 +423,123 @@ mod tests {
         assert!(html.contains("<h1 data-mm-span="), "falta el ancla del h1");
         assert!(html.contains(">Hola</h1>"));
         assert!(html.contains("<em>cuerpo</em>"));
+    }
+
+    /// Fase 7 #30 (§Verificación): la imagen y la tabla EDITADAS con sus
+    /// atributos — `{#fig:…}` por `win.edit-image` y la línea
+    /// `{#tbl:… "caption"}` por `win.edit-table-attrs`, ambas aplicadas vía
+    /// `TabManager::apply_format_active`, el mismo camino que Preview/PDF
+    /// — se renderizan con la numeración y los captions §26.5.
+    #[test]
+    fn render_refleja_imagen_y_tabla_editadas_con_atributos_30() {
+        use minmark_document::format::FormatAction;
+        use minmark_document::{Position, Selection};
+
+        let mut tabs = crate::tabs::TabManager::new();
+        tabs.insert_active(
+            Position::new(0, 0),
+            "Ver ![esquema](diagram.png) fin.\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n",
+        );
+
+        // Editar la imagen pidiendo id de figura (§26.2/§28.1).
+        tabs.set_selection_active(Selection::collapsed(Position::new(0, 6)));
+        assert!(tabs.apply_format_active(&FormatAction::ImageEdit {
+            destination: "diagram.png".to_owned(),
+            alt: "esquema".to_owned(),
+            id: Some("fig:esquema".to_owned()),
+            width_percent: None,
+        }));
+
+        // Atributos de la tabla con caption (§26.3).
+        tabs.set_selection_active(Selection::collapsed(Position::new(4, 2)));
+        assert!(tabs.apply_format_active(&FormatAction::TableAttrs {
+            id: Some("tbl:resultados".to_owned()),
+            caption: Some("Resultados".to_owned()),
+        }));
+
+        let html = render_document(
+            tabs.active().editor.document().content(),
+            &Settings::default(),
+        );
+        assert!(html.contains("Figura 1"), "numeración de figura §26.5: {html}");
+        assert!(html.contains("Tabla 1"), "numeración de tabla §26.5: {html}");
+        assert!(
+            html.contains("Resultados"),
+            "caption de la tabla §26.3 en el render: {html}"
+        );
+        assert!(
+            html.contains("mm-caption"),
+            "los pies caption llegan al HTML del Preview: {html}"
+        );
+    }
+
+    /// Fase 7 #31 (§Verificación): la ecuación EDITADA con
+    /// `FormatAction::MathEdit` (el mismo camino `apply_format_active` que
+    /// usa `win.edit-equation`) y la cita EDITADA con `CitationEdit` (el de
+    /// `win.edit-citation`) se reflejan en el HTML del Preview: el LaTeX
+    /// nuevo compone su math y la cita se resuelve con la bibliografía §25.1
+    /// sin rastro de la cita original.
+    #[test]
+    fn render_refleja_ecuacion_editada_y_cita_31() {
+        use minmark_document::format::FormatAction;
+        use minmark_document::{CitationItem, Position, Selection};
+
+        // Bibliografía + estilo reales en temporal (§25.4): la cita se
+        // compone con ellos al renderizar.
+        let base = std::env::temp_dir().join(format!("minmark-render31-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let bib = base.join("refs.bib");
+        std::fs::write(&bib, include_str!("../../../docs/qa/fixtures/references.bib")).unwrap();
+        let csl = base.join("style.csl");
+        std::fs::write(&csl, include_str!("../../../docs/qa/fixtures/author-year.csl")).unwrap();
+        let settings = Settings {
+            bibliography: vec![bib.to_string_lossy().into_owned()],
+            bibliography_style: csl.to_string_lossy().into_owned(),
+            ..Settings::default()
+        };
+
+        let mut tabs = crate::tabs::TabManager::new();
+        tabs.insert_active(
+            Position::new(0, 0),
+            "La energía es $E = mc^2$ y [@nada] fin.\n",
+        );
+
+        // Editar SOLO el LaTeX de la ecuación inline.
+        let fuente = tabs.active().editor.document().content().to_owned();
+        let dollar = fuente.find('$').expect("marcador de ecuación");
+        let en_ecuacion = tabs.active().editor.position_of(dollar + 2);
+        tabs.set_selection_active(Selection::collapsed(en_ecuacion));
+        assert!(tabs.apply_format_active(&FormatAction::MathEdit {
+            latex: "E = mc^2 + 1".to_owned(),
+        }));
+
+        // Editar la cita con una clave real de la bibliografía + locator.
+        let fuente = tabs.active().editor.document().content().to_owned();
+        let en_cita = fuente.find("[@nada]").expect("cita original") + 2;
+        let en_cita = tabs.active().editor.position_of(en_cita);
+        tabs.set_selection_active(Selection::collapsed(en_cita));
+        assert!(tabs.apply_format_active(&FormatAction::CitationEdit {
+            items: vec![CitationItem {
+                key: "smith2025".to_owned(),
+                locator: Some("p. 42".to_owned()),
+            }],
+        }));
+
+        let html = render_document(tabs.active().editor.document().content(), &settings);
+        assert!(
+            html.contains("aria-label=\"E = mc^2 + 1\""),
+            "el LaTeX editado llega al math del Preview: {html}"
+        );
+        assert!(
+            html.contains("Smith, 2025"),
+            "la cita editada se compone con la bibliografía §25.4: {html}"
+        );
+        assert!(
+            !html.contains("[@nada]"),
+            "la cita original ya no está: {html}"
+        );
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     /// §7.2: nunca HTML crudo del documento; el contenido sale escapado.

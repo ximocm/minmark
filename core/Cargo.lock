@@ -1207,6 +1207,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "layout-rs"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5b8b38bc67665e362eb770c6b6ae88b48d040d94a0a10c4904c37bc79d263b95"
+
+[[package]]
 name = "libc"
 version = "0.2.189"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1301,11 +1307,18 @@ dependencies = [
 
 [[package]]
 name = "minmark-config"
-version = "0.4.2"
+version = "0.6.0"
+
+[[package]]
+name = "minmark-diagram"
+version = "0.6.0"
+dependencies = [
+ "layout-rs",
+]
 
 [[package]]
 name = "minmark-document"
-version = "0.4.2"
+version = "0.6.0"
 dependencies = [
  "minmark-config",
  "minmark-parser",
@@ -1314,7 +1327,7 @@ dependencies = [
 
 [[package]]
 name = "minmark-fs"
-version = "0.4.2"
+version = "0.6.0"
 dependencies = [
  "minmark-config",
  "minmark-document",
@@ -1326,11 +1339,11 @@ dependencies = [
 
 [[package]]
 name = "minmark-math"
-version = "0.4.2"
+version = "0.6.0"
 
 [[package]]
 name = "minmark-parser"
-version = "0.4.2"
+version = "0.6.0"
 dependencies = [
  "minmark-document",
  "pulldown-cmark",
@@ -1338,7 +1351,7 @@ dependencies = [
 
 [[package]]
 name = "minmark-pdf"
-version = "0.4.2"
+version = "0.6.0"
 dependencies = [
  "minmark-config",
  "minmark-document",
@@ -1353,16 +1366,19 @@ dependencies = [
 
 [[package]]
 name = "minmark-renderer"
-version = "0.4.2"
+version = "0.6.0"
 dependencies = [
+ "fontdb",
  "hayagriva 0.10.1",
  "minmark-config",
+ "minmark-diagram",
  "minmark-document",
  "minmark-math",
  "minmark-parser",
  "typst",
  "typst-assets",
  "typst-svg",
+ "usvg",
 ]
 
 [[package]]

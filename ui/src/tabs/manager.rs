@@ -347,6 +347,37 @@ impl TabManager {
         replaced
     }
 
+    /// Acción editorial contextual §44 (fase 7 #29): planifica `action` con
+    /// `minmark_document::format::plan` sobre el tab activo y la aplica como
+    /// **UNA transacción** con la selección §8.6 registrada
+    /// (`Editor::replace_all_selecting`): undo restaura la selección previa
+    /// y redo la posterior.
+    ///
+    /// `false` = acción no aplicable (`plan` devuelve `None`: sintaxis no
+    /// soportada, rango inválido o no-op, §8.4) o error de edición: el
+    /// documento no se toca. El llamador refresca la vista con
+    /// `reload_active` solo si devuelve `true` (§8.6: `load` restaura
+    /// cursor/selección desde el modelo).
+    pub fn apply_format_active(&mut self, action: &minmark_document::format::FormatAction) -> bool {
+        let applied = {
+            let tab = &mut self.tabs[self.active];
+            let Some(plan) = minmark_document::format::plan(
+                tab.editor.document().content(),
+                tab.editor.selection(),
+                action,
+            ) else {
+                return false;
+            };
+            tab.editor
+                .replace_all_selecting(&plan.edits, plan.selection)
+                .is_ok()
+        };
+        if applied {
+            self.resync_saved_flag();
+        }
+        applied
+    }
+
     /// Puente EditSink (§8.6): borra el rango `[from, to]`. Un
     /// [`minmark_document::EditError`] improbable se ignora documentadamente:
     /// sin panics en la UI.
@@ -954,5 +985,492 @@ mod tests {
             tabs.active().editor.document().content(),
             "cZuatro\ncinco\n"
         );
+    }
+
+    #[test]
+    fn apply_format_active_es_una_transaccion_con_seleccion_8_5_8_6() {
+        use minmark_document::format::FormatAction;
+
+        // Fase 7 #29: Bold sobre la selección = UNA transacción (§8.5) con
+        // selección posterior al texto interior (§8.6); undo restaura la
+        // selección previa y redo la posterior.
+        let mut tabs = TabManager::new();
+        tabs.insert_active(Position::new(0, 0), "hola mundo");
+        let original = Selection {
+            anchor: Position::new(0, 5),
+            head: Position::new(0, 10),
+        };
+        tabs.set_selection_active(original);
+
+        assert!(tabs.apply_format_active(&FormatAction::Strong));
+        assert_eq!(
+            tabs.active().editor.document().content(),
+            "hola **mundo**"
+        );
+        let interior = Selection {
+            anchor: Position::new(0, 7),
+            head: Position::new(0, 12),
+        };
+        assert_eq!(tabs.active().editor.selection(), interior);
+
+        assert!(tabs.undo_active());
+        assert_eq!(tabs.active().editor.document().content(), "hola mundo");
+        assert_eq!(
+            tabs.active().editor.selection(),
+            original,
+            "undo restaura la selección previa (§8.6)"
+        );
+
+        assert!(tabs.redo_active());
+        assert_eq!(
+            tabs.active().editor.document().content(),
+            "hola **mundo**"
+        );
+        assert_eq!(tabs.active().editor.selection(), interior);
+
+        // La acción fue UN solo paso: el siguiente undo es el insert inicial.
+        assert!(tabs.undo_active());
+        assert!(tabs.undo_active());
+        assert_eq!(tabs.active().editor.document().content(), "");
+        assert!(!tabs.undo_active());
+    }
+
+    #[test]
+    fn apply_format_active_no_aplicable_no_toca_el_documento() {
+        use minmark_document::format::FormatAction;
+
+        // §8.4: `plan` devuelve `None` para un no-op (mismo nivel de
+        // heading) y la acción no gana transacción ni cambia un byte.
+        let mut tabs = TabManager::new();
+        tabs.insert_active(Position::new(0, 0), "# Título\n\ncuerpo\n");
+        tabs.set_selection_active(Selection::collapsed(Position::new(0, 3)));
+
+        assert!(!tabs.apply_format_active(&FormatAction::Heading(1)));
+        assert_eq!(
+            tabs.active().editor.document().content(),
+            "# Título\n\ncuerpo\n"
+        );
+        assert!(tabs.undo_active());
+        assert_eq!(tabs.active().editor.document().content(), "");
+        assert!(
+            !tabs.undo_active(),
+            "la acción no aplicable no añade transacción"
+        );
+    }
+
+    /// Fase 7 #30: `win.insert-table` llega a `apply_format_active` y genera
+    /// el esqueleto GFM §35 — cabecera vacía, fila de alineación y `rows`
+    /// filas — con la selección posterior en la primera celda de cabecera
+    /// (§8.6); UNA transacción y fuera de rango (§35) sin cambios.
+    #[test]
+    fn apply_format_active_inserta_tabla_esqueleto_30() {
+        use minmark_document::format::FormatAction;
+
+        let mut tabs = TabManager::new();
+        tabs.insert_active(Position::new(0, 0), "");
+        assert!(tabs.apply_format_active(&FormatAction::TableInsert { rows: 2, cols: 3 }));
+        assert_eq!(
+            tabs.active().editor.document().content(),
+            "|     |     |     |\n\
+             | --- | --- | --- |\n\
+             |     |     |     |\n\
+             |     |     |     |"
+        );
+        assert_eq!(
+            tabs.active().editor.selection(),
+            Selection::collapsed(Position::new(0, 2)),
+            "§8.6: la selección posterior es la primera celda de cabecera"
+        );
+
+        // UNA transacción (§8.5): undo la revierte entera, redo la repone.
+        assert!(tabs.undo_active());
+        assert_eq!(tabs.active().editor.document().content(), "");
+        assert!(tabs.redo_active());
+        assert_eq!(
+            tabs.active().editor.document().content(),
+            "|     |     |     |\n\
+             | --- | --- | --- |\n\
+             |     |     |     |\n\
+             |     |     |     |"
+        );
+
+        // Límites §35: fuera de rango `plan` no aplica y no se toca nada.
+        for (rows, cols) in [(0, 3), (51, 3), (2, 0), (2, 9)] {
+            assert!(
+                !tabs.apply_format_active(&FormatAction::TableInsert { rows, cols }),
+                "filas={rows} columnas={cols} fuera de §35"
+            );
+        }
+    }
+
+    /// Fase 7 #30: `win.edit-image` llega a `apply_format_active` — editar
+    /// SOLO un campo (el ancho) deja byte a byte intactos los demás (ruta,
+    /// alt, título `"..."`, id y caption), el no-op devuelve `false` sin
+    /// transacción y undo revierte la edición en UN paso (§8.5).
+    #[test]
+    fn apply_format_active_edit_imagen_conserva_bytes_ajenos_30() {
+        use minmark_document::format::FormatAction;
+
+        let mut tabs = TabManager::new();
+        let fuente = "Ver ![Diagrama](diagram.png \"Título\") {#fig:d \"La caption\" width=40%} fin.\n";
+        tabs.insert_active(Position::new(0, 0), fuente);
+        tabs.set_selection_active(Selection::collapsed(Position::new(0, 6)));
+
+        assert!(tabs.apply_format_active(&FormatAction::ImageEdit {
+            destination: "diagram.png".to_owned(),
+            alt: "Diagrama".to_owned(),
+            id: Some("fig:d".to_owned()),
+            width_percent: Some(50),
+        }));
+        assert_eq!(
+            tabs.active().editor.document().content(),
+            "Ver ![Diagrama](diagram.png \"Título\") {#fig:d \"La caption\" width=50%} fin.\n",
+            "solo cambia width: título, caption y resto intactos"
+        );
+
+        // No-op (mismos valores que el estado detectado): false, sin cambios
+        // y sin transacción nueva (§8.4).
+        assert!(!tabs.apply_format_active(&FormatAction::ImageEdit {
+            destination: "diagram.png".to_owned(),
+            alt: "Diagrama".to_owned(),
+            id: Some("fig:d".to_owned()),
+            width_percent: Some(50),
+        }));
+        assert!(tabs.undo_active());
+        assert_eq!(
+            tabs.active().editor.document().content(),
+            fuente,
+            "undo revierte SOLO la edición (UNA transacción §8.5)"
+        );
+        assert!(tabs.undo_active(), "el undo siguiente es el insert inicial");
+        assert_eq!(tabs.active().editor.document().content(), "");
+        assert!(
+            !tabs.undo_active(),
+            "el no-op no añadió transacción: nada queda tras el insert"
+        );
+    }
+
+    /// Fase 7 #30: `win.edit-table-attrs` llega a `apply_format_active` —
+    /// crea la línea de atributos §26.3 sin tocar la tabla, reemplaza SOLO
+    /// esa línea al cambiar el caption, la elimina al vaciar ambos campos y
+    /// no aplica fuera del constructo (§8.4, cero cambios).
+    #[test]
+    fn apply_format_active_atributos_de_tabla_solo_la_linea_30() {
+        use minmark_document::format::FormatAction;
+
+        let mut tabs = TabManager::new();
+        let tabla = "Intro\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n";
+        tabs.insert_active(Position::new(0, 0), tabla);
+        tabs.set_selection_active(Selection::collapsed(Position::new(4, 2)));
+
+        // Crear: la línea aparece tras el bloque, la tabla es idéntica.
+        assert!(tabs.apply_format_active(&FormatAction::TableAttrs {
+            id: Some("tbl:x".to_owned()),
+            caption: Some("Resultados".to_owned()),
+        }));
+        assert_eq!(
+            tabs.active().editor.document().content(),
+            "Intro\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n{#tbl:x \"Resultados\"}\n"
+        );
+
+        // Reemplazar SOLO el caption: id y tabla intactos byte a byte.
+        assert!(tabs.apply_format_active(&FormatAction::TableAttrs {
+            id: Some("tbl:x".to_owned()),
+            caption: Some("Nueva caption".to_owned()),
+        }));
+        let reemplazado =
+            "Intro\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n{#tbl:x \"Nueva caption\"}\n";
+        assert_eq!(tabs.active().editor.document().content(), reemplazado);
+
+        // Vaciar ambos campos ⇒ la línea de atributos desaparece entera
+        // (§26.3) y la fuente vuelve a ser byte a byte la original.
+        assert!(tabs.apply_format_active(&FormatAction::TableAttrs {
+            id: None,
+            caption: None,
+        }));
+        assert_eq!(tabs.active().editor.document().content(), tabla);
+
+        // Fuera del constructo tabla ⇒ `None` (§8.4): sin cambios.
+        tabs.set_selection_active(Selection::collapsed(Position::new(0, 0)));
+        assert!(!tabs.apply_format_active(&FormatAction::TableAttrs {
+            id: Some("tbl:z".to_owned()),
+            caption: None,
+        }));
+        assert_eq!(tabs.active().editor.document().content(), tabla);
+    }
+
+    /// Fase 7 #30 (hallazgo 7): el caption precargado con espacios
+    /// (`{#tbl:x " Caption "}`) se entrega VERBATIM al `TableAttrs`, así
+    /// que aceptar sin cambios es no-op — cero ediciones y SIN transacción
+    /// — y al editar SOLO el id los bytes del caption (espacios incluidos)
+    /// quedan intactos.
+    #[test]
+    fn apply_format_active_caption_precargado_es_no_op_verbatim_30() {
+        use minmark_document::format::FormatAction;
+
+        let mut tabs = TabManager::new();
+        let fuente = "| A | B |\n| --- | --- |\n| 1 | 2 |\n{#tbl:x \" Caption \"}\n";
+        tabs.insert_active(Position::new(0, 0), fuente);
+        tabs.set_selection_active(Selection::collapsed(Position::new(2, 2)));
+
+        // Precarga intacta (caption VERBATIM, con sus espacios): false,
+        // byte a byte idéntico y sin transacción nueva (§8.4).
+        assert!(!tabs.apply_format_active(&FormatAction::TableAttrs {
+            id: Some("tbl:x".to_owned()),
+            caption: Some(" Caption ".to_owned()),
+        }));
+        assert_eq!(tabs.active().editor.document().content(), fuente);
+
+        // Solo cambia el id: el caption con espacios queda intacto byte a
+        // byte (UNA transacción, §8.5).
+        assert!(tabs.apply_format_active(&FormatAction::TableAttrs {
+            id: Some("tbl:y".to_owned()),
+            caption: Some(" Caption ".to_owned()),
+        }));
+        assert_eq!(
+            tabs.active().editor.document().content(),
+            "| A | B |\n| --- | --- |\n| 1 | 2 |\n{#tbl:y \" Caption \"}\n",
+            "solo cambia el id; el caption conserva sus espacios"
+        );
+
+        // Dos transacciones en total: el no-op no añadió ninguna.
+        assert!(tabs.undo_active());
+        assert_eq!(tabs.active().editor.document().content(), fuente);
+        assert!(tabs.undo_active());
+        assert_eq!(tabs.active().editor.document().content(), "");
+        assert!(!tabs.undo_active(), "el no-op del caption no dejó transacción");
+    }
+
+    /// Fase 7 #31: los cinco comandos de ecuaciones/citas llegan a
+    /// `apply_format_active` — destino único de todos los `win.*` — con UNA
+    /// transacción por acción (§8.5): `MathInsert` con selección (el texto
+    /// seleccionado es el LaTeX, §24) y desde cursor, `MathEdit` que solo
+    /// sustituye el contenido LaTeX, `MathAttrs` creando/reemplazando/
+    /// quitando la línea de atributos del bloque (§26.4),
+    /// `CitationInsert`/`CitationEdit` con items múltiples y localizador
+    /// (§25.2), no-op y fuera de constructo ⇒ `false` sin tocar nada.
+    #[test]
+    fn apply_format_active_ecuaciones_y_citas_31() {
+        use minmark_document::format::FormatAction;
+        use minmark_document::CitationItem;
+
+        let mut tabs = TabManager::new();
+
+        // ── Ecuaciones (§24) ────────────────────────────────────────────
+        // Base con texto FUERA de todo constructo (para «fuera ⇒ false»).
+        tabs.insert_active(Position::new(0, 0), "Intro\n");
+
+        // `win.insert-equation` SIN selección: el diálogo entrega el LaTeX.
+        tabs.set_selection_active(Selection::collapsed(Position::new(1, 0)));
+        assert!(tabs.apply_format_active(&FormatAction::MathInsert {
+            block: false,
+            latex: "E=mc^2".to_owned(),
+        }));
+        assert_eq!(
+            tabs.active().editor.document().content(),
+            "Intro\n$E=mc^2$"
+        );
+        assert_eq!(
+            tabs.active().editor.selection(),
+            Selection {
+                anchor: Position::new(1, 1),
+                head: Position::new(1, 7),
+            },
+            "§8.6: la selección posterior es el contenido LaTeX"
+        );
+
+        // `MathEdit` sustituye SOLO el contenido LaTeX (marcadores intactos)
+        // y la selección posterior es el contenido nuevo (§8.6).
+        tabs.set_selection_active(Selection::collapsed(Position::new(1, 3)));
+        assert!(tabs.apply_format_active(&FormatAction::MathEdit {
+            latex: "x".to_owned(),
+        }));
+        assert_eq!(tabs.active().editor.document().content(), "Intro\n$x$");
+        assert_eq!(
+            tabs.active().editor.selection(),
+            Selection {
+                anchor: Position::new(1, 1),
+                head: Position::new(1, 2),
+            },
+            "§8.6: el contenido editado queda seleccionado"
+        );
+
+        // No-op (mismo LaTeX), LaTeX vacío y cursor FUERA del constructo:
+        // `false`, sin cambios y sin transacción nueva (§8.4).
+        assert!(!tabs.apply_format_active(&FormatAction::MathEdit {
+            latex: "x".to_owned(),
+        }));
+        assert!(!tabs.apply_format_active(&FormatAction::MathEdit {
+            latex: String::new(),
+        }));
+        tabs.set_selection_active(Selection::collapsed(Position::new(0, 1)));
+        assert!(
+            !tabs.apply_format_active(&FormatAction::MathEdit {
+                latex: "y".to_owned(),
+            }),
+            "cursor en «Intro», fuera de la ecuación"
+        );
+        assert_eq!(tabs.active().editor.document().content(), "Intro\n$x$");
+
+        // `win.insert-equation` CON selección: el texto seleccionado es el
+        // LaTeX (§24) — el plan lo usa aunque la acción traiga otro — y la
+        // selección posterior es el contenido envuelto.
+        tabs.set_selection_active(Selection {
+            anchor: Position::new(0, 0),
+            head: Position::new(0, 5),
+        });
+        assert!(tabs.apply_format_active(&FormatAction::MathInsert {
+            block: false,
+            latex: "ignorado".to_owned(),
+        }));
+        assert_eq!(
+            tabs.active().editor.document().content(),
+            "$Intro$\n$x$",
+            "la selección «Intro» es el LaTeX; el resto de bytes intacto"
+        );
+        assert_eq!(
+            tabs.active().editor.selection(),
+            Selection {
+                anchor: Position::new(0, 1),
+                head: Position::new(0, 6),
+            }
+        );
+
+        // ── Atributos de bloque (§26.4) ────────────────────────────────
+        let mut tabs = TabManager::new();
+        let bloque = "Ver\n\n$$\nE=mc^2\n$$\n";
+        tabs.insert_active(Position::new(0, 0), bloque);
+        tabs.set_selection_active(Selection::collapsed(Position::new(3, 2)));
+        // Crear la línea de atributos sin tocar el bloque.
+        assert!(tabs.apply_format_active(&FormatAction::MathAttrs {
+            id: Some("eq:energy".to_owned()),
+            caption: Some("Equivalencia".to_owned()),
+        }));
+        let con_atributos = "Ver\n\n$$\nE=mc^2\n$$\n{#eq:energy \"Equivalencia\"}\n";
+        assert_eq!(tabs.active().editor.document().content(), con_atributos);
+        // Reemplazar SOLO la línea.
+        assert!(tabs.apply_format_active(&FormatAction::MathAttrs {
+            id: Some("eq:energy".to_owned()),
+            caption: Some("Nueva caption".to_owned()),
+        }));
+        assert_eq!(
+            tabs.active().editor.document().content(),
+            "Ver\n\n$$\nE=mc^2\n$$\n{#eq:energy \"Nueva caption\"}\n"
+        );
+        // Vaciar ambos campos ⇒ la línea desaparece; el bloque es byte a
+        // byte el original.
+        assert!(tabs.apply_format_active(&FormatAction::MathAttrs {
+            id: None,
+            caption: None,
+        }));
+        assert_eq!(tabs.active().editor.document().content(), bloque);
+        // Cada aplicación es UNA transacción (§8.5): tres edits ⇒ tres undos.
+        assert!(tabs.undo_active());
+        assert_eq!(
+            tabs.active().editor.document().content(),
+            "Ver\n\n$$\nE=mc^2\n$$\n{#eq:energy \"Nueva caption\"}\n"
+        );
+        assert!(tabs.undo_active());
+        assert_eq!(tabs.active().editor.document().content(), con_atributos);
+        assert!(tabs.undo_active());
+        assert_eq!(tabs.active().editor.document().content(), bloque);
+
+        // En ECUACIÓN INLINE los atributos no aplican (§26.4): `false`,
+        // sin cambios y sin transacción (§8.4).
+        let mut tabs = TabManager::new();
+        tabs.insert_active(Position::new(0, 0), "Ajá $x$\n");
+        tabs.set_selection_active(Selection::collapsed(Position::new(0, 5)));
+        assert!(!tabs.apply_format_active(&FormatAction::MathAttrs {
+            id: Some("eq:z".to_owned()),
+            caption: None,
+        }));
+        assert_eq!(tabs.active().editor.document().content(), "Ajá $x$\n");
+        // El ÚNICO undo es el insert inicial: el rechazo en inline no dejó
+        // transacción (§8.5).
+        assert!(tabs.undo_active());
+        assert_eq!(tabs.active().editor.document().content(), "");
+        assert!(!tabs.undo_active());
+
+        // ── Citas (§25.2) ───────────────────────────────────────────────
+        let mut tabs = TabManager::new();
+        let cita = "ver [@a] ya\n";
+        tabs.insert_active(Position::new(0, 0), cita);
+
+        // `CitationInsert` (cursor): items múltiples con localizador en
+        // forma canónica `[@k1, loc; @k2]`.
+        tabs.set_selection_active(Selection::collapsed(Position::new(0, 11)));
+        assert!(tabs.apply_format_active(&FormatAction::CitationInsert {
+            items: vec![
+                CitationItem {
+                    key: "smith2025".to_owned(),
+                    locator: Some("p. 42".to_owned()),
+                },
+                CitationItem {
+                    key: "jones2024".to_owned(),
+                    locator: None,
+                },
+            ],
+        }));
+        assert_eq!(
+            tabs.active().editor.document().content(),
+            "ver [@a] ya[@smith2025, p. 42; @jones2024]\n",
+            "forma canónica §25.2: [@k1, loc; @k2]"
+        );
+        assert!(tabs.undo_active(), "UNA transacción (§8.5)");
+        assert_eq!(tabs.active().editor.document().content(), cita);
+
+        // `CitationEdit` (cursor dentro de la cita) reemplaza la cita
+        // entera; no-op y fuera de la cita ⇒ `false` sin cambios.
+        tabs.set_selection_active(Selection::collapsed(Position::new(0, 5)));
+        assert!(tabs.apply_format_active(&FormatAction::CitationEdit {
+            items: vec![
+                CitationItem {
+                    key: "a".to_owned(),
+                    locator: Some("p. 7".to_owned()),
+                },
+                CitationItem {
+                    key: "b".to_owned(),
+                    locator: None,
+                },
+            ],
+        }));
+        assert_eq!(
+            tabs.active().editor.document().content(),
+            "ver [@a, p. 7; @b] ya\n"
+        );
+        assert!(!tabs.apply_format_active(&FormatAction::CitationEdit {
+            items: vec![
+                CitationItem {
+                    key: "a".to_owned(),
+                    locator: Some("p. 7".to_owned()),
+                },
+                CitationItem {
+                    key: "b".to_owned(),
+                    locator: None,
+                },
+            ],
+        }), "mismos items: no-op §8.4");
+        tabs.set_selection_active(Selection::collapsed(Position::new(0, 1)));
+        assert!(!tabs.apply_format_active(&FormatAction::CitationEdit {
+            items: vec![CitationItem {
+                key: "c".to_owned(),
+                locator: None,
+            }],
+        }), "fuera de la cita: cero cambios");
+        assert_eq!(
+            tabs.active().editor.document().content(),
+            "ver [@a, p. 7; @b] ya\n"
+        );
+        // Items vacíos: nunca aplican (§25.2).
+        assert!(!tabs.apply_format_active(&FormatAction::CitationInsert {
+            items: Vec::new(),
+        }));
+        // Cada edición es UNA transacción (§8.5): undo restaura la cita
+        // anterior; los no-op no dejaron ninguna.
+        assert!(tabs.undo_active());
+        assert_eq!(tabs.active().editor.document().content(), cita);
+        assert!(tabs.undo_active(), "el insert inicial de la fuente");
+        assert_eq!(tabs.active().editor.document().content(), "");
+        assert!(!tabs.undo_active(), "los no-op no dejaron transacción");
     }
 }

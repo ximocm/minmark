@@ -43,7 +43,9 @@ El job Linux prueba y compila en modo release, comprueba las bibliotecas
 compartidas y empaqueta el mismo binario. El artefacto `linux-x86_64` se conserva
 14 días y permite revisar el paquete desde la PR sin publicar una release.
 
-En Windows, la matriz instala GTK 4 con `gvsbuild` (los proyectos de
+En Windows, la matriz instala GTK 4 con `gvsbuild 2026.8.0`, fijado a la
+toolchain ya validada para evitar cambiar GTK durante una corrección de release
+(los proyectos de
 `GVSBUILD_PROJECTS` se construyen una vez y su árbol `C:\gtk-build\gtk` se
 cachea con una clave que combina la versión de gvsbuild y la lista de
 proyectos), instala WiX v6 como herramienta `dotnet` (v5 dejó de tener

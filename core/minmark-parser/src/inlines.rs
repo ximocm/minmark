@@ -459,12 +459,13 @@ fn try_math(s: &str) -> Option<(String, usize)> {
     let mut chars = s.char_indices();
     let (first_pos, _) = chars.next()?;
     debug_assert_eq!(first_pos, 0);
-    let (_, second) = chars.next()?;
+    let (body_start, second) = chars.next()?;
     // `$$` no abre math inline (el bloque es `$$ ... $$`, §24).
     if second == '$' || second.is_whitespace() {
         return None;
     }
-    let body_start = second.len_utf8();
+    // char_indices devuelve el inicio del cuerpo, después del `$` ASCII.
+    // La longitud del segundo carácter partiría una letra Unicode por la mitad.
     let rest = &s[body_start..];
     let close = rest.find('$')?;
     let body = &rest[..close];

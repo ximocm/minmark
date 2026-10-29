@@ -369,7 +369,32 @@ La aplicación soportará adicionalmente:
 - tabla de contenidos;
 - saltos de página;
 - atributos controlados de imágenes;
-- wiki links opcionales.
+- wiki links opcionales;
+- diagramas DOT.
+
+### 7.3.1 Diagramas DOT
+
+Sintaxis: bloque cercado con info `dot` (Graphviz):
+
+````md
+```dot
+digraph { a -> b }
+```
+````
+
+Preview y PDF renderizan el MISMO diagrama (paridad obligatoria). El fuente
+Markdown sigue siendo el bloque de código (§6.1): nunca se sustituye ni se
+normaliza.
+
+DOT inválido no silencia ni deforma nada (ADR-002): se muestra el marcador
+visible `⚠ [diagrama no válido: …]` en Preview y PDF y el bloque de código
+permanece visible y editable (§8.4). Lo que el motor no soporta sin
+deformar (clusters, atributos y valores fuera del subconjunto de ADR-007)
+produce el mismo marcador.
+
+El render es 100% local: sin red, sin binarios externos y sin motor de
+JavaScript. Los glifos se dibujan con las fuentes empaquetadas del producto
+(tipografía idéntica en Preview y PDF).
 
 ## 7.4 Gramática de extensiones y escaping
 
@@ -809,13 +834,14 @@ El explorador mostrará por defecto archivos relevantes para documentación:
 - `.toml`;
 - recursos documentales reconocidos.
 
-Existirá `Show All Files`.
+Existirá `Show All Files`, activable desde el menú **View** (no dentro del
+panel del explorador, que debe poder estrecharse libremente).
 
 ## 14.5 Hidden files
 
 Los archivos ocultos estarán ocultos por defecto.
 
-Existirá `Show Hidden Files`.
+Existirá `Show Hidden Files`, activable desde el menú **View**.
 
 ## 14.6 `.gitignore`
 
@@ -2237,6 +2263,7 @@ Cualquier feature futura deberá demostrar que mejora directamente la escritura,
 | FR-086 | Detener creación de snapshots al alcanzar límite + aviso persistente |
 | FR-087 | Vista de gestión de snapshots (ver, seleccionar, eliminar) |
 | FR-088 | Eliminación manual de snapshots individuales o múltiples |
+| FR-089 | Diagramas DOT renderizados en Preview y PDF (§7.3.1) |
 
 ---
 

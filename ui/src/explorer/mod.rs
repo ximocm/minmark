@@ -2,7 +2,10 @@
 //!
 //! - §14.3: panel lateral ocultable (`Ctrl+B`), ancho redimensionable y
 //!   estado restaurable (la persistencia vive en [`state`]).
-//! - §14.4/§14.5: `Show All Files` y `Show Hidden Files` por ventana.
+//! - §14.4/§14.5: `Show All Files` y `Show Hidden Files` por ventana; los
+//!   toggles viven en el menú **View** como acciones stateful `win.*` (#70)
+//!   y entran al panel con [`ExplorerPane::set_show_all`] /
+//!   [`ExplorerPane::set_show_hidden`].
 //! - §14.7: los symlinks se listan; las carpetas enlazadas no se expanden.
 //! - §14.8: menú contextual con New Markdown, New Folder, `Rename`, Move,
 //!   Duplicate, Delete y Copy Relative Path; el nodo del click es el
@@ -17,20 +20,26 @@
 mod model;
 mod state;
 
-pub use state::{load as load_state, save as save_state, ExplorerState};
+pub use state::{load as load_state, save as save_state, ExplorerState, MIN_WIDTH};
 
 use gtk4 as gtk;
 use gtk4::glib;
 use gtk4::prelude::*;
 use minmark_fs::{read_dir_entries, TreeEntry};
 use model::{ExplorerFilters, Row, TreeModel};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 /// Indento por nivel de profundidad en el árbol.
 const INDENT_PX: i32 = 16;
+
+/// Notificador de cambio de un filtro por ventana (§14.4/§14.5, #70):
+/// consumidor enlazado por el integrador —Quick Open y el estado de las
+/// acciones `win.*` se enteran de cada cambio, también de los programáticos—;
+/// sin consumidor, sin-op.
+type FilterNotifier = Rc<RefCell<Option<Rc<dyn Fn(bool)>>>>;
 
 /// Operaciones del menú contextual §14.8 (ISSUE-023).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,16 +83,26 @@ fn action_name(action: ExplorerAction) -> &'static str {
     }
 }
 
-/// Panel lateral del explorador (§14.3): cabecera con los toggles §14.4/§14.5
-/// y una lista de filas planas indentadas ([`Row`]) sobre el modelo puro.
+/// Panel lateral del explorador (§14.3): una lista de filas planas
+/// indentadas ([`Row`]) sobre el modelo puro, sin cabecera propia — los
+/// toggles §14.4/§14.5 (#70) residen en el menú View y el ancho mínimo del
+/// panel queda libre para que la barra lateral se estreche.
 pub struct ExplorerPane {
     widget: gtk::Box,
     model: Arc<Mutex<TreeModel>>,
     store: gtk::gio::ListStore,
     root: PathBuf,
-    /// Notificador del toggle `Show All Files` §14.4 (ISSUE-029: la paleta
-    /// Quick Open consulta con `show_all_files`).
-    on_show_all_changed: Rc<RefCell<Option<Rc<dyn Fn(bool)>>>>,
+    /// `Show All Files` §14.4 por ventana (estado espejo del filtro).
+    show_all: Cell<bool>,
+    /// `Show Hidden Files` §14.5 por ventana (estado espejo del filtro).
+    show_hidden: Cell<bool>,
+    /// Notificador del filtro `Show All Files` §14.4 (ISSUE-029: la paleta
+    /// Quick Open consulta con `show_all_files`; #70: el integrador también
+    /// refleja el valor en la acción `win.show-all-files`).
+    on_show_all_changed: FilterNotifier,
+    /// Notificador del filtro `Show Hidden Files` §14.5 (#70: el integrador
+    /// refleja el valor en la acción `win.show-hidden-files`).
+    on_show_hidden_changed: FilterNotifier,
 }
 
 impl ExplorerPane {
@@ -103,17 +122,8 @@ impl ExplorerPane {
         let widget = gtk::Box::new(gtk::Orientation::Vertical, 0);
         widget.add_css_class("mm-explorer");
 
-        // Cabecera §14.4/§14.5: toggles por ventana.
-        let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        header.set_margin_top(4);
-        header.set_margin_bottom(4);
-        header.set_margin_start(6);
-        header.set_margin_end(6);
-        let show_all = gtk::CheckButton::with_label("Show All Files");
-        let show_hidden = gtk::CheckButton::with_label("Show Hidden Files");
-        header.append(&show_all);
-        header.append(&show_hidden);
-        widget.append(&header);
+        // Sin cabecera propia (#70): los toggles §14.4/§14.5 residen en el
+        // menú View y el ancho mínimo del panel no secuestra la barra.
 
         // Menú contextual §14.8 sobre el nodo del click (None = raíz).
         let context_target: Rc<RefCell<Option<PathBuf>>> = Rc::new(RefCell::new(None));
@@ -132,9 +142,7 @@ impl ExplorerPane {
                 let list_item = object
                     .downcast_ref::<gtk::ListItem>()
                     .expect("el factory de lista recibe gtk::ListItem");
-                let label = gtk::Label::new(None);
-                label.set_xalign(0.0);
-                label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+                let label = row_label();
                 let button = gtk::Button::new();
                 button.set_child(Some(&label));
                 button.set_has_frame(false);
@@ -236,26 +244,11 @@ impl ExplorerPane {
         scroll.add_controller(gesture);
         widget.append(&scroll);
 
-        // §14.4/§14.5: cambios de filtro re-renderizan sin releer (§47.5).
-        wire_filter(&show_all, &model, &store, |filters, active| {
-            filters.show_all = active
-        });
-        wire_filter(&show_hidden, &model, &store, |filters, active| {
-            filters.show_hidden = active
-        });
-
-        // §14.4 (ISSUE-029): el toggle `Show All Files` se enlaza con su
-        // consumidor (Quick Open); sin consumidor, sin-op.
-        let on_show_all_changed: Rc<RefCell<Option<Rc<dyn Fn(bool)>>>> =
-            Rc::new(RefCell::new(None));
-        show_all.connect_toggled({
-            let on_show_all_changed = on_show_all_changed.clone();
-            move |check| {
-                if let Some(notify) = on_show_all_changed.borrow().as_ref() {
-                    notify(check.is_active());
-                }
-            }
-        });
+        // §14.4/§14.5 (#70): los toggles viven en el menú View y entran por
+        // `set_show_all`/`set_show_hidden`; aquí solo se crean los
+        // notificadores (Quick Open y el estado de las acciones `win.*`).
+        let on_show_all_changed: FilterNotifier = Rc::new(RefCell::new(None));
+        let on_show_hidden_changed: FilterNotifier = Rc::new(RefCell::new(None));
 
         // Raíz del proyecto: primera lectura a demanda (§47.5).
         request_load(&model, &store, root.clone());
@@ -265,7 +258,10 @@ impl ExplorerPane {
             model,
             store,
             root,
+            show_all: Cell::new(false),
+            show_hidden: Cell::new(false),
             on_show_all_changed,
+            on_show_hidden_changed,
         }
     }
 
@@ -274,10 +270,74 @@ impl ExplorerPane {
         self.widget.clone().upcast()
     }
 
-    /// Enlaza el toggle `Show All Files` §14.4 con su consumidor (ISSUE-029:
-    /// Quick Open consulta con `show_all_files`); se notifica cada cambio.
+    /// Enlaza el filtro `Show All Files` §14.4 con sus consumidores
+    /// (ISSUE-029: Quick Open consulta con `show_all_files`; #70: el estado
+    /// de la acción `win.show-all-files`); se notifica cada cambio, también
+    /// los programáticos.
     pub fn set_on_show_all_changed(&self, on_changed: Rc<dyn Fn(bool)>) {
         *self.on_show_all_changed.borrow_mut() = Some(on_changed);
+    }
+
+    /// Enlaza el filtro `Show Hidden Files` §14.5 con su consumidor (#70:
+    /// el estado de la acción `win.show-hidden-files`); se notifica cada
+    /// cambio, también los programáticos.
+    pub fn set_on_show_hidden_changed(&self, on_changed: Rc<dyn Fn(bool)>) {
+        *self.on_show_hidden_changed.borrow_mut() = Some(on_changed);
+    }
+
+    /// `Show All Files` §14.4 (#70): estado vigente del filtro por ventana.
+    pub fn show_all(&self) -> bool {
+        self.show_all.get()
+    }
+
+    /// Aplica `Show All Files` §14.4 (#70): vuelca el filtro al modelo,
+    /// re-renderiza sin releer (§47.5) y notifica a sus consumidores (Quick
+    /// Open ISSUE-029 y la acción `win.*`, sea la activación del menú o un
+    /// set programático — los dos caminos convergen en la misma notificación).
+    pub fn set_show_all(&self, show_all: bool) {
+        self.show_all.set(show_all);
+        self.apply_filters();
+        if let Some(notify) = self.on_show_all_changed.borrow().as_ref() {
+            notify(show_all);
+        }
+    }
+
+    /// `Show Hidden Files` §14.5 (#70): estado vigente del filtro por ventana.
+    pub fn show_hidden(&self) -> bool {
+        self.show_hidden.get()
+    }
+
+    /// Aplica `Show Hidden Files` §14.5 (#70): filtro + re-render sin releer
+    /// (§47.5) y notificación a sus consumidores (la acción `win.*`, tanto
+    /// vía menú como programáticamente).
+    pub fn set_show_hidden(&self, show_hidden: bool) {
+        self.show_hidden.set(show_hidden);
+        self.apply_filters();
+        if let Some(notify) = self.on_show_hidden_changed.borrow().as_ref() {
+            notify(show_hidden);
+        }
+    }
+
+    /// Vuelca los toggles por ventana a los [`ExplorerFilters`] del modelo y
+    /// re-renderiza la lista (§47.5: sin releer directorios).
+    fn apply_filters(&self) {
+        let mut model = lock(&self.model);
+        let mut filters: ExplorerFilters = model.filters();
+        filters.show_all = self.show_all.get();
+        filters.show_hidden = self.show_hidden.get();
+        model.set_filters(filters);
+        rebuild(&self.store, &model);
+    }
+
+    /// Nombres de las filas renderizadas (solo tests #70): lo observable del
+    /// filtrado §14.4/§14.5 sin alcanzar el modelo por dentro.
+    #[cfg(test)]
+    pub fn row_names(&self) -> Vec<String> {
+        (0..self.store.n_items())
+            .filter_map(|index| self.store.item(index))
+            .filter_map(|item| item.downcast::<glib::BoxedAnyObject>().ok())
+            .map(|item| item.borrow::<Row>().name.clone())
+            .collect()
     }
 
     /// Recarga el árbol tras operaciones §14.8 (ISSUE-026 sustituirá esto por
@@ -346,22 +406,14 @@ fn current_row(list_item: &gtk::ListItem) -> Option<Row> {
     Some(row)
 }
 
-/// Conecta un toggle §14.4/§14.5: actualiza el filtro y re-renderiza.
-fn wire_filter(
-    check: &gtk::CheckButton,
-    model: &Arc<Mutex<TreeModel>>,
-    store: &gtk::gio::ListStore,
-    apply: fn(&mut ExplorerFilters, bool),
-) {
-    let model = model.clone();
-    let store = store.clone();
-    check.connect_toggled(move |button| {
-        let mut model = lock(&model);
-        let mut filters = model.filters();
-        apply(&mut filters, button.is_active());
-        model.set_filters(filters);
-        rebuild(&store, &model);
-    });
+/// Etiqueta de fila (#70): nombre alineado a la izquierda con elipsis al
+/// final, para que una fila larga se acomode a cualquier ancho de la barra
+/// lateral en lugar de impedir estrecharla.
+fn row_label() -> gtk::Label {
+    let label = gtk::Label::new(None);
+    label.set_xalign(0.0);
+    label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    label
 }
 
 /// Expande/colapsa `dir` y pide su lectura si hace falta (§47.5).
@@ -444,5 +496,34 @@ mod tests {
         for (action, _) in CONTEXT_MENU_SPEC {
             assert!(nombres.insert(action_name(*action)), "acción duplicada");
         }
+    }
+
+    /// #70: sin la cabecera de toggles el ancho mínimo del panel deja de
+    /// secuestrar la barra lateral (regresión del hostage de 268px) y las
+    /// filas elipsan su nombre para acomodarse a anchos estrechos.
+    #[test]
+    #[ignore = "requiere sesión gráfica GTK"]
+    fn explorador_70_ancho_minimo_estrecho_y_filas_ellipsizadas() {
+        gtk4::init().expect("GTK display");
+        let root = std::env::temp_dir().join(format!("minmark-geo70-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("documento.md"), "# x\n").unwrap();
+        let pane = ExplorerPane::new(&root, Rc::new(|_| {}), Rc::new(|_, _| {}));
+
+        let (min, natural, _, _) = pane.widget().measure(gtk::Orientation::Horizontal, -1);
+        println!("explorador #70: ancho mínimo {min}px, natural {natural}px");
+        assert!(
+            min <= 60,
+            "ancho mínimo del explorador: {min}px (la cabecera de toggles lo fijaba en 268px, #70)"
+        );
+
+        // La fila creada por el factory elipsa al final: un nombre largo se
+        // recorta en vez de ensanchar la barra.
+        assert_eq!(
+            row_label().ellipsize(),
+            gtk::pango::EllipsizeMode::End,
+            "las filas del explorador elipsan (#70)"
+        );
     }
 }

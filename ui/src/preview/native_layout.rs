@@ -7,10 +7,10 @@ pub(super) fn physical_bounds(
     client: (i32, i32, i32, i32),
 ) -> (i32, i32, i32, i32) {
     let (x, y, width, height) = widget;
-    let left = ((x - transform.0) * scale).round() as i32;
-    let top = ((y - transform.1) * scale).round() as i32;
-    let right = ((x - transform.0 + width) * scale).round() as i32;
-    let bottom = ((y - transform.1 + height) * scale).round() as i32;
+    let left = ((x + transform.0) * scale).round() as i32;
+    let top = ((y + transform.1) * scale).round() as i32;
+    let right = ((x + transform.0 + width) * scale).round() as i32;
+    let bottom = ((y + transform.1 + height) * scale).round() as i32;
     let clipped = (
         left.max(client.0),
         top.max(client.1),
@@ -50,7 +50,7 @@ mod tests {
     }
 
     #[test]
-    fn resta_transform_y_recorta_fuera_del_cliente() {
+    fn suma_margen_de_decoracion_y_recorta_fuera_del_cliente() {
         assert_eq!(
             physical_bounds(
                 (10.0, 20.0, 200.0, 100.0),
@@ -58,7 +58,7 @@ mod tests {
                 2.0,
                 (0, 0, 300, 160)
             ),
-            (0, 0, 300, 160)
+            (50, 90, 300, 160)
         );
         assert_eq!(
             physical_bounds(
@@ -68,6 +68,22 @@ mod tests {
                 (0, 0, 800, 600)
             ),
             (0, 0, 0, 0)
+        );
+    }
+
+    #[test]
+    fn ventana_restaurada_alinea_preview_con_panel_y_borde_inferior() {
+        // Medidas reales de GTK/Win32: raíz 1280x800, cliente 1308x829.
+        // Restar (14,12) dejaba 28 px vacíos a la derecha y solapaba 24 px
+        // de las pestañas. Maximizada, el margen desaparece y lo ocultaba.
+        assert_eq!(
+            physical_bounds(
+                (644.0, 99.0, 636.0, 701.0),
+                (14.0, 12.0),
+                1.0,
+                (0, 0, 1308, 829),
+            ),
+            (658, 111, 1294, 812)
         );
     }
 }

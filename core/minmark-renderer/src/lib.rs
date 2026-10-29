@@ -16,11 +16,13 @@
 
 mod academic;
 mod citations;
+mod diagram;
 mod math;
 mod references;
 pub mod world;
 pub use academic::resolve_footnotes;
 pub use citations::Bibliography;
+pub use diagram::diagram_svg;
 pub use math::{math_svg, namespace_svg, validated_math};
 mod scroll;
 pub use references::{reference_ids, resolve_cross_references};
@@ -141,6 +143,9 @@ const BASE_CSS: &str = r#"body { margin: 0; background: var(--mm-bg); color: var
 .mm-math svg path, .mm-math svg use, .mm-math-block svg path, .mm-math-block svg use { fill: currentColor; }
 .mm-math svg [stroke='#000000'], .mm-math-block svg [stroke='#000000'] { stroke: currentColor; }
 .mm-math-block { text-align: center; margin: 1em 0; font-family: serif; }
+.mm-diagram { background: #ffffff; color: #000000; border-radius: 4px; padding: 8px; margin: 1em 0; text-align: center; overflow-x: auto; }
+.mm-diagram svg { max-width: 100%; height: auto; }
+.mm-diagram-error { font-weight: bold; margin: 1em 0; }
 .mm-ref, .mm-citation { color: var(--mm-color-accent); }
 .mm-pagebreak { border-top: 1px dashed var(--mm-rule); margin: 2em 0; }
 .mm-toc { border: 1px dashed var(--mm-rule); padding: 0.5em 1em; border-radius: 4px; }
@@ -246,19 +251,26 @@ fn render_block(block: &Block, ids: &HeadingIds, settings: &Settings, out: &mut 
             out.push_str(if *ordered { "</ol>\n" } else { "</ul>\n" });
         }
         BlockKind::CodeBlock { language, code } => {
-            out.push_str("<pre");
-            push_span(out, block.span);
-            out.push('>');
-            match language {
-                Some(lang) => {
-                    out.push_str("<code class=\"language-");
-                    push_escaped(out, lang);
-                    out.push_str("\">");
+            if language.as_deref() == Some("dot") {
+                // §7.3.1 (ADR-007): el bloque `dot` se renderiza como
+                // diagrama; el fuente Markdown sigue siendo el bloque de
+                // código (§6.1) y vive en el editor.
+                push_diagram(out, block.span, code);
+            } else {
+                out.push_str("<pre");
+                push_span(out, block.span);
+                out.push('>');
+                match language {
+                    Some(lang) => {
+                        out.push_str("<code class=\"language-");
+                        push_escaped(out, lang);
+                        out.push_str("\">");
+                    }
+                    None => out.push_str("<code>"),
                 }
-                None => out.push_str("<code>"),
+                push_escaped(out, code);
+                out.push_str("</code></pre>\n");
             }
-            push_escaped(out, code);
-            out.push_str("</code></pre>\n");
         }
         BlockKind::Table {
             aligns,
@@ -715,6 +727,34 @@ fn plain_text(inlines: &[Inline]) -> String {
     out
 }
 
+/// Muestra el diagrama DOT o el marcador de error visible (§7.3.1, ADR-007;
+/// patrón ADR-002: nunca silenciar ni deformar). El SVG es el mismo que
+/// embebe el PDF y conserva el ancla `data-mm-span` para el scroll desde el
+/// editor (§9.1).
+fn push_diagram(out: &mut String, span: Span, dot: &str) {
+    static NEXT_SVG: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    match diagram_svg(dot) {
+        Ok(svg) => {
+            out.push_str("<figure class=\"mm-diagram\" role=\"img\" aria-label=\"Diagrama DOT\"");
+            push_span(out, span);
+            out.push('>');
+            let prefix = format!(
+                "mm-diagram-{}-",
+                NEXT_SVG.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            );
+            out.push_str(&namespace_svg(&svg, &prefix));
+            out.push_str("</figure>\n");
+        }
+        Err(marker) => {
+            out.push_str("<p class=\"mm-diagram-error\" role=\"status\"");
+            push_span(out, span);
+            out.push('>');
+            push_escaped(out, &marker);
+            out.push_str("</p>\n");
+        }
+    }
+}
+
 /// Muestra la math o el marcador de sintaxis no soportada (ADR-002, NFR-026:
 /// nunca silenciar, omitir ni deformar).
 fn push_math(out: &mut String, latex: &str) {
@@ -836,6 +876,40 @@ mod tests {
         let out = html("<script>alert(1)</script>\n");
         assert!(!out.contains("<script>"));
         assert!(out.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
+    }
+
+    #[test]
+    fn diagrama_dot_renderiza_svg_en_preview() {
+        // §7.3.1: el bloque `dot` se muestra como diagrama, no como código.
+        let out = html("```dot\ndigraph { a -> b; }\n```\n");
+        assert!(out.contains("class=\"mm-diagram\""), "sin figura de diagrama");
+        assert!(out.contains("<svg"), "sin SVG embebido");
+        assert!(!out.contains("language-dot"), "el bloque no debe quedar como código");
+    }
+
+    #[test]
+    fn diagrama_invalido_muestra_marcador_visible() {
+        // §7.3.1 (ADR-002): nunca silenciar ni deformar.
+        let out = html("```dot\ndigraph { a = ; }\n```\n");
+        assert!(out.contains("mm-diagram-error"), "sin marcador de error");
+        assert!(out.contains("⚠ [diagrama no válido:"), "marcador mal formado");
+        assert!(!out.contains("<svg"));
+    }
+
+    #[test]
+    fn diagrama_conserva_el_ancla_de_span() {
+        // §9.1: el scroll editor ↔ Preview se rutea por `data-mm-span`.
+        let out = html("```dot\ndigraph { a -> b; }\n```\n");
+        let figure = out.split("<figure").nth(1).expect("figura");
+        assert!(figure.contains("data-mm-span="), "sin ancla de span: {figure}");
+        let out = html("```dot\nx\n```\n");
+        assert!(
+            out.split("<p class=\"mm-diagram-error\"")
+                .nth(1)
+                .expect("marcador")
+                .contains("data-mm-span="),
+            "el error también debe llevar ancla"
+        );
     }
 
     #[test]

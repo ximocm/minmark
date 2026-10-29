@@ -14,7 +14,7 @@
 //! (QA manual en Windows, ADR-005):
 //!
 //! - La posición del widget en la surface se obtiene con `compute_bounds`
-//!   sobre la `gtk::Window` raíz menos `Native::surface_transform` (márgenes
+//!   sobre la `gtk::Window` raíz más `Native::surface_transform` (márgenes
 //!   CSD de la ventana); si GTK4-Win32 altera ese convenio, el HWND hijo se
 //!   desalineará del todo.
 //! - `size_allocate` cubre también el scroll del `ScrolledWindow` (§10.2):
@@ -398,7 +398,9 @@ impl Shared {
             );
             return;
         };
-        // widget (raíz) → surface: el transform es surface→widget, se resta.
+        // En Win32 el HWND incluye los márgenes CSD fuera de la raíz GTK.
+        // Su origen cliente precede al widget: sumar los márgenes sitúa el
+        // Preview debajo de las pestañas y hasta el borde derecho del panel.
         let (tx, ty) = host
             .native()
             .map(|native| native.surface_transform())
