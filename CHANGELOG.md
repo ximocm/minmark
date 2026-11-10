@@ -9,6 +9,8 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 
 ## [Unreleased]
 
+## [0.6.1] — 2026-11-10
+
 ### Añadido
 
 - `Open With…` (issue #72, §14.8): el menú contextual del explorador
