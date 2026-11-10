@@ -3,6 +3,8 @@
 //! - [`open_file`] / [`save_file_as`]: `gtk::FileDialog` con filtros Markdown
 //!   (*.md / *.markdown); el de guardar sugiere nombre (§12.4 Save As).
 //! - [`open_image`]: selector de imagen con los formatos §18.1 (fase 7 #30).
+//! - [`open_with`]: #72 (§14.8) selector de aplicaciones del sistema para
+//!   un archivo; devuelve la app elegida o `None` al cancelar/cerrar.
 //! - [`form_dialog`]: formulario multi-campo modal (fase 7 #30) en el patrón
 //!   de [`prompt_text`]: Escape/Cancelar/cierre ⇒ `None` (cero cambios).
 //! - [`equation_dialog`]: diálogo multilinea de LaTeX (fase 7 #31, §24) con
@@ -145,6 +147,42 @@ pub async fn open_image(parent: &impl IsA<gtk::Window>) -> Option<PathBuf> {
     let parent = parent.upcast_ref::<gtk::Window>();
     let file = dialog.open_future(Some(parent)).await.ok()?;
     file.path()
+}
+
+/// #72 «Open With…» (§14.8): selector de aplicaciones del sistema sobre
+/// `path`. Devuelve la app elegida; Cancelar, Escape o cerrar el diálogo ⇒
+/// `None` (cero efectos, §3.7). El diálogo es modal sobre `parent` y se
+/// destruye en todos los caminos.
+///
+/// `GtkAppChooserDialog` está marcado como obsoleto desde GTK 4.10, pero es
+/// el selector de aplicaciones del sistema que pide #72: los portales cubren
+/// abrir/guardar archivos, no «abrir con…». El futuro mantiene vivo el
+/// diálogo mientras espera su respuesta y lo destruye al recibir una.
+#[allow(deprecated)]
+pub async fn open_with(parent: &impl IsA<gtk::Window>, path: &Path) -> Option<gio::AppInfo> {
+    let file = gio::File::for_path(path);
+    let dialog = gtk::AppChooserDialog::new(Some(parent), gtk::DialogFlags::MODAL, &file);
+    dialog.set_title(Some("Open With…"));
+    let respuesta = {
+        let dialog = dialog.clone();
+        gio::GioFuture::new(&dialog, |dialog, _cancellable, send| {
+            // `resolve` consume el emisor: solo el primer response cuenta.
+            let send = std::cell::RefCell::new(Some(send));
+            dialog.connect_response(move |_, response| {
+                if let Some(send) = send.borrow_mut().take() {
+                    send.resolve(response);
+                }
+            });
+        })
+    };
+    dialog.present();
+    let response: gtk::ResponseType = respuesta.await;
+    // Solo el botón de aceptar entrega app; el resto, cero lanzamientos.
+    let app = (response == gtk::ResponseType::Accept)
+        .then(|| dialog.app_info())
+        .flatten();
+    dialog.destroy();
+    app
 }
 
 /// Diálogo «Guardar como» (§12.4): sugiere `suggested` como nombre inicial.

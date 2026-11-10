@@ -869,7 +869,9 @@ El explorador permitirá:
 - mover;
 - duplicar;
 - eliminar;
-- copiar ruta relativa.
+- copiar ruta relativa;
+- abrir un archivo con la aplicación del sistema (`Open With…`, solo
+  archivos).
 
 Click derecho deberá incluir `Rename`.
 
