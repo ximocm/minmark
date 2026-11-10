@@ -41,7 +41,21 @@ fn outline_text(svg: &str) -> Result<String, String> {
     let tree = usvg::Tree::from_str(svg, &options).map_err(|error| marker(&error.to_string()))?;
     // `WriteOptions::preserve_text = false` (por defecto): el writer emite el
     // texto ya convertido en trayectorias.
-    Ok(tree.to_string(&usvg::WriteOptions::default()))
+    let mut svg = tree.to_string(&usvg::WriteOptions::default());
+    // El writer de usvg emite solo `width`/`height` en la raíz. Sin `viewBox`
+    // el CSS de Preview (`.mm-diagram svg { max-width: 100% }`) reduce la caja
+    // pero no el dibujo y el diagrama se sale del área visible (§7.3.1,
+    // ADR-007: paridad Preview/PDF — el PDF sí escala por width/height). El
+    // viewBox va a origen 0 con el tamaño del árbol: usvg ya hornea en los
+    // nodos la transformación del viewBox original. Si la raíz ya lo trae, no
+    // se inyecta: un atributo duplicado daría XML mal formado para el PDF.
+    let root_end = svg.find('>').map_or(svg.len(), |end| end + 1);
+    if !svg[..root_end].contains("viewBox=") {
+        let size = tree.size();
+        let view_box = format!("viewBox=\"0 0 {} {}\" ", size.width(), size.height());
+        svg = svg.replacen("<svg ", &format!("<svg {view_box}"), 1);
+    }
+    Ok(svg)
 }
 
 fn marker(detail: &str) -> String {
@@ -59,7 +73,10 @@ mod tests {
         // Preview que en el PDF.
         let svg = diagram_svg("digraph { a -> \"niño\"; }").expect("render");
         assert!(svg.contains("<svg"));
-        assert!(!svg.contains("<text"), "el texto debe salir aplanado: {svg}");
+        assert!(
+            !svg.contains("<text"),
+            "el texto debe salir aplanado: {svg}"
+        );
         assert!(
             !svg.contains("font-family"),
             "sin familias de fuente externas: {svg}"
@@ -71,6 +88,50 @@ mod tests {
         let a = diagram_svg("digraph { a -> b; }").expect("render");
         let b = diagram_svg("digraph { a -> b; }").expect("render");
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn el_svg_conserva_el_viewbox_para_poder_escalar() {
+        // Sin viewBox en la raíz, el CSS de Preview (`.mm-diagram svg {
+        // max-width: 100%; height: auto }`) reduce la caja del SVG pero no el
+        // dibujo y el diagrama se sale del área visible, mientras que el PDF
+        // sí lo escala: se rompe la paridad de ADR-007 (§7.3.1).
+        let svg = diagram_svg("digraph { rankdir=LR; a [shape=box]; a -> b; }").expect("render");
+        let root = svg.split('>').next().expect("raíz del svg");
+        let attr = |name: &str| -> Option<f64> {
+            root.split(&format!("{name}=\""))
+                .nth(1)
+                .and_then(|rest| rest.split('"').next())
+                .and_then(|value| value.parse().ok())
+        };
+        let (Some(w), Some(h)) = (attr("width"), attr("height")) else {
+            panic!("raíz sin width/height: {root}");
+        };
+        let nums: Vec<f64> = root
+            .split("viewBox=\"")
+            .nth(1)
+            .and_then(|rest| rest.split('"').next())
+            .map(|vb| {
+                vb.split_whitespace()
+                    .filter_map(|n| n.parse().ok())
+                    .collect()
+            })
+            .unwrap_or_default();
+        assert_eq!(nums.len(), 4, "sin viewBox válido en la raíz: {root}");
+        assert_eq!(
+            root.matches("viewBox=\"").count(),
+            1,
+            "viewBox duplicado en la raíz: {root}"
+        );
+        assert_eq!(
+            (nums[0], nums[1]),
+            (0.0, 0.0),
+            "viewBox sin origen 0: {root}"
+        );
+        assert!(
+            (nums[2] - w).abs() < 0.01 && (nums[3] - h).abs() < 0.01,
+            "viewBox desalineado con el tamaño del SVG: {root}"
+        );
     }
 
     #[test]

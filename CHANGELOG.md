@@ -23,6 +23,14 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
   abre la carpeta canonizada como ventana de proyecto, igual que con una
   ruta absoluta; los archivos de la línea de comandos conservan su grafía.
 
+### Corregido
+
+- Diagramas DOT (§7.3.1, ADR-007): el SVG perdía el `viewBox` al convertir
+  los glifos a contornos y el Preview solo reducía la caja, no el dibujo —
+  un diagrama más ancho que el panel se salía del área visible mientras el
+  PDF lo escalaba bien (paridad rota). El `viewBox` se restaura con el
+  tamaño del SVG y ambas superficies dibujan de nuevo lo mismo.
+
 ## [0.6.0] — 2026-10-28
 
 ### Corregido
