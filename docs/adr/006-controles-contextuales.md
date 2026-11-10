@@ -18,9 +18,12 @@ las acciones y los atajos de formato (§39 fija `Ctrl+B` para Toggle explorer).
 
 1. **Superficie: popover flotante anclado a la selección/cursor** (patrón del
    popup de autocompletado), no barra transitoria ni solo menú contextual.
-   Aparece solo con utilidad: selección no vacía → panel de texto; cursor en
-   enlace → editar enlace; cursor en callout → cambiar tipo; cursor en heading
-   → cambiar nivel; cursor plano → no se muestra.
+   Se abre explícitamente con `Ctrl+.` y solo con utilidad: selección no
+   vacía → panel de texto; cursor en enlace → editar enlace; cursor en callout
+   → cambiar tipo; cursor en heading
+   → cambiar nivel; cursor plano → no se muestra. Mover el cursor,
+   seleccionar con doble clic o ampliar una selección no abre el popover:
+   su captura modal de eventos interrumpiría la selección del `TextView`.
 2. **Una sola capa de comandos** (`win.*` GAction) para popover, menús,
    atajos y Command Palette: la acción es la misma y su dispatch edita el
    buffer Markdown de la pestaña activa con `Editor::replace_all_selecting`
@@ -62,5 +65,5 @@ las acciones y los atajos de formato (§39 fija `Ctrl+B` para Toggle explorer).
 - `win.insert-callout` es una acción GAction sin parámetros que lleva el tono
   en su estado: los botones del popover fijan el estado y activan el mismo
   `win.*`, de modo que todos los caminos convergen en `apply_format_active`.
-- Navegación por teclado de los controles: `Ctrl+.` enfoca el primer control
-  cuando el popover está visible (Escape devuelve el foco al editor).
+- Navegación por teclado de los controles: `Ctrl+.` abre el popover y enfoca
+  el primer control disponible (Escape devuelve el foco al editor).

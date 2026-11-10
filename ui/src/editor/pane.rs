@@ -207,8 +207,8 @@ impl EditorPane {
     }
 
     /// Actualiza los controles contextuales §44 (fase 7 #29) con el estado
-    /// vigente `(tab, mode, source, selection)` leído del modelo: muestra el
-    /// popover solo si aporta utilidad, lo actualiza o lo cierra.
+    /// vigente `(tab, mode, source, selection)` leído del modelo: prepara el
+    /// popover para `Ctrl+.`, lo actualiza o lo cierra.
     pub fn update_context(
         &self,
         source: &str,

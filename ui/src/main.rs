@@ -698,6 +698,7 @@ impl AppCmds {
         self.refresh_now();
         self.sync_quickopen_context();
         self.refresh_navigation();
+        self.refresh_context_controls();
     }
 
     /// Acción editorial contextual §44 (fase 7 #29/#30): ÚNICO dispatch de
@@ -5829,13 +5830,65 @@ mod gtk_integration_tests {
         cmds.window.destroy();
     }
 
-    /// #29: el popover solo aparece si aporta utilidad — oculto con cursor
-    /// plano sin selección, panel de texto visible con selección no vacía,
-    /// H1–H6 bajo el cursor en un heading — y Escape lo cierra con cero
-    /// cambios en el documento (§UI).
+    fn open_context_controls(cmds: &AppCmds) {
+        assert!(
+            cmds.editor_pane.emit_test_key(
+                gtk4::gdk::Key::period,
+                gtk4::gdk::ModifierType::CONTROL_MASK,
+            ),
+            "Ctrl+. abre los controles contextuales"
+        );
+        pump_until(|| cmds.editor_pane.test_context_visible());
+    }
+
     #[test]
     #[ignore = "requiere sesión gráfica GTK/WebKit"]
-    fn gtk_controles_contextuales_oculto_cursor_plano_y_visible_con_seleccion() {
+    fn gtk_seleccionar_texto_no_abre_controles_contextuales() {
+        gtk4::init().expect("GTK display");
+        ensure_sandbox_usable();
+        let app = Application::builder()
+            .application_id("app.minmark.test.seleccion-sin-popover")
+            .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk4::gio::Cancellable>).unwrap();
+        let cmds = build_window(&app, WindowScope::Standalone, &[]);
+        let source = "hola mundo\n\n# Título\n";
+        cmds.tabs
+            .borrow_mut()
+            .insert_active(Position::new(0, 0), source);
+        cmds.reload_active();
+
+        for mode in [editor::EditMode::Markdown, editor::EditMode::Visual] {
+            assert_eq!(cmds.tabs.borrow().active().mode, mode);
+            for end in [4, 10] {
+                let range = Range::new(Position::new(0, 0), Position::new(0, end));
+                cmds.editor_pane.focus_find_match(range);
+                assert_eq!(cmds.tabs.borrow().active().editor.selection().range(), range);
+                assert!(
+                    !cmds.editor_pane.test_context_visible(),
+                    "seleccionar o ampliar la selección no debe abrir el popover en {mode:?}"
+                );
+            }
+            cmds.editor_pane
+                .focus_find_match(Range::new(Position::new(2, 2), Position::new(2, 2)));
+            assert!(
+                !cmds.editor_pane.test_context_visible(),
+                "mover el cursor tampoco abre el popover"
+            );
+            assert_eq!(
+                cmds.tabs.borrow().active().editor.document().content(),
+                source
+            );
+            cmds.toggle_mode();
+        }
+        cmds.window.destroy();
+    }
+
+    /// Ctrl+. abre y enfoca los controles según el contexto; Escape cierra
+    /// sin cambiar el documento ni la selección y permite volver a abrir.
+    #[test]
+    #[ignore = "requiere sesión gráfica GTK/WebKit"]
+    fn gtk_controles_contextuales_atajo_y_escape() {
         gtk4::init().expect("GTK display");
         ensure_sandbox_usable();
         let app = Application::builder()
@@ -5853,11 +5906,18 @@ mod gtk_integration_tests {
         cmds.editor_pane
             .focus_find_match(Range::new(Position::new(0, 2), Position::new(0, 2)));
         assert!(!cmds.editor_pane.test_context_visible());
+        assert!(!cmds.editor_pane.emit_test_key(
+            gtk4::gdk::Key::period,
+            gtk4::gdk::ModifierType::CONTROL_MASK,
+        ));
 
         // Selección no vacía: panel de texto con los labels de Command §36.
         cmds.editor_pane
             .focus_find_match(Range::new(Position::new(0, 0), Position::new(0, 4)));
-        pump_until(|| cmds.editor_pane.test_context_visible());
+        assert!(!cmds.editor_pane.test_context_visible());
+        let selection = cmds.tabs.borrow().active().editor.selection();
+        open_context_controls(&cmds);
+        assert_eq!(cmds.tabs.borrow().active().editor.selection(), selection);
         for label in [
             "Heading 1",
             "Heading 6",
@@ -5887,17 +5947,6 @@ mod gtk_integration_tests {
             .expect("botón Bold");
         assert!(bold.can_focus(), "Bold debe ser operable con teclado");
         assert!(
-            !cmds.editor_pane.test_context_focus_inside(),
-            "al abrir, el foco inicial se queda en el editor"
-        );
-        assert!(
-            cmds.editor_pane.emit_test_key(
-                gtk4::gdk::Key::period,
-                gtk4::gdk::ModifierType::CONTROL_MASK
-            ),
-            "Ctrl+. lo maneja el controller de la vista"
-        );
-        assert!(
             cmds.editor_pane.test_context_focus_inside(),
             "Ctrl+. mueve el foco a los controles"
         );
@@ -5919,11 +5968,21 @@ mod gtk_integration_tests {
             cmds.tabs.borrow().active().editor.document().content(),
             contenido
         );
+        assert_eq!(cmds.tabs.borrow().active().editor.selection(), selection);
+        cmds.reload_active();
+        assert!(!cmds.editor_pane.test_context_visible());
+        open_context_controls(&cmds);
+        assert!(cmds.editor_pane.emit_test_key(
+            gtk4::gdk::Key::Escape,
+            gtk4::gdk::ModifierType::empty(),
+        ));
+        assert_eq!(cmds.tabs.borrow().active().editor.selection(), selection);
 
         // Cursor en un heading (selección vacía): solo H1–H6.
         cmds.editor_pane
             .focus_find_match(Range::new(Position::new(2, 1), Position::new(2, 1)));
-        pump_until(|| cmds.editor_pane.test_context_visible());
+        assert!(!cmds.editor_pane.test_context_visible());
+        open_context_controls(&cmds);
         assert!(cmds.editor_pane.test_context_has_button("Heading 3"));
 
         // Volver al cursor plano cierra el popover.
@@ -5963,7 +6022,7 @@ mod gtk_integration_tests {
         cmds.select_tab(0);
         cmds.editor_pane
             .focus_find_match(Range::new(Position::new(0, 0), Position::new(0, 3)));
-        pump_until(|| cmds.editor_pane.test_context_visible());
+        open_context_controls(&cmds);
         assert!(cmds.editor_pane.test_context_has_button("Bold"));
 
         // Cambiar de pestaña cierra el popover (load → hide, §UI).
@@ -5988,7 +6047,7 @@ mod gtk_integration_tests {
         // Abierto de nuevo y cambio de MODO: también se cierra y no aplica.
         cmds.editor_pane
             .focus_find_match(Range::new(Position::new(0, 0), Position::new(0, 3)));
-        pump_until(|| cmds.editor_pane.test_context_visible());
+        open_context_controls(&cmds);
         cmds.toggle_mode();
         assert!(!cmds.editor_pane.test_context_visible(), "cambio de modo cierra");
         assert!(cmds.editor_pane.test_context_click("Heading 1"));
@@ -6041,7 +6100,7 @@ mod gtk_integration_tests {
         // Cursor dentro del callout: fila de tonos con «note» activo.
         cmds.editor_pane
             .focus_find_match(Range::new(Position::new(1, 3), Position::new(1, 3)));
-        pump_until(|| cmds.editor_pane.test_context_visible());
+        open_context_controls(&cmds);
         assert_eq!(
             cmds.editor_pane.test_context_tone().as_deref(),
             Some("note"),
@@ -6615,7 +6674,7 @@ mod gtk_integration_tests {
         // panel de texto, que exige selección no vacía, igual que #29).
         cmds.editor_pane
             .focus_find_match(Range::new(Position::new(2, 2), Position::new(2, 2)));
-        pump_until(|| cmds.editor_pane.test_context_visible());
+        open_context_controls(&cmds);
         let boton = cmds
             .editor_pane
             .test_context_button("Table Attributes")
@@ -6874,7 +6933,7 @@ mod gtk_integration_tests {
         // Cursor dentro de la imagen (selección vacía): solo «Edit Image».
         cmds.editor_pane
             .focus_find_match(Range::new(Position::new(0, 8), Position::new(0, 8)));
-        pump_until(|| cmds.editor_pane.test_context_visible());
+        open_context_controls(&cmds);
         let boton = cmds
             .editor_pane
             .test_context_button("Edit Image")
@@ -6907,7 +6966,7 @@ mod gtk_integration_tests {
         // ni diálogo ni cambios en la activa ni en la abandonada.
         cmds.editor_pane
             .focus_find_match(Range::new(Position::new(0, 8), Position::new(0, 8)));
-        pump_until(|| cmds.editor_pane.test_context_visible());
+        open_context_controls(&cmds);
         cmds.select_tab(1);
         assert!(!cmds.editor_pane.test_context_visible());
         assert!(cmds.editor_pane.test_context_click("Edit Image"));
@@ -6930,7 +6989,7 @@ mod gtk_integration_tests {
         cmds.select_tab(0);
         cmds.editor_pane
             .focus_find_match(Range::new(Position::new(0, 8), Position::new(0, 8)));
-        pump_until(|| cmds.editor_pane.test_context_visible());
+        open_context_controls(&cmds);
         cmds.toggle_mode();
         assert!(!cmds.editor_pane.test_context_visible(), "cambio de modo cierra");
         assert!(cmds.editor_pane.test_context_click("Edit Image"));
@@ -6971,7 +7030,7 @@ mod gtk_integration_tests {
         // Cursor dentro de la ecuación INLINE con selección vacía.
         cmds.editor_pane
             .focus_find_match(Range::new(Position::new(0, 16), Position::new(0, 16)));
-        pump_until(|| cmds.editor_pane.test_context_visible());
+        open_context_controls(&cmds);
         let boton = cmds
             .editor_pane
             .test_context_button("Edit Equation")
@@ -7000,7 +7059,7 @@ mod gtk_integration_tests {
         // selección dentro del constructo».
         cmds.editor_pane
             .focus_find_match(Range::new(Position::new(0, 15), Position::new(0, 22)));
-        pump_until(|| cmds.editor_pane.test_context_visible());
+        open_context_controls(&cmds);
         assert!(
             cmds.editor_pane
                 .test_context_button("Edit Equation")
@@ -7116,7 +7175,7 @@ mod gtk_integration_tests {
         // ADR-002 visible (el aviso NO bloquea el diálogo).
         cmds.editor_pane
             .focus_find_match(Range::new(Position::new(0, 7), Position::new(0, 7)));
-        pump_until(|| cmds.editor_pane.test_context_visible());
+        open_context_controls(&cmds);
         assert!(cmds.editor_pane.test_context_click("Edit Equation"));
         pump_until(|| dialog_titled("Edit Equation").is_some());
         let dialog = dialog_titled("Edit Equation").expect("diálogo de ecuación");
@@ -7209,7 +7268,7 @@ mod gtk_integration_tests {
         // Cursor dentro del BLOQUE: popover con ambas filas #31.
         cmds.editor_pane
             .focus_find_match(Range::new(Position::new(3, 2), Position::new(3, 2)));
-        pump_until(|| cmds.editor_pane.test_context_visible());
+        open_context_controls(&cmds);
         assert!(
             cmds.editor_pane
                 .test_context_button("Edit Equation")
@@ -7297,7 +7356,7 @@ mod gtk_integration_tests {
         // En ECUACIÓN INLINE el popover NO ofrece Equation Attributes.
         cmds.editor_pane
             .focus_find_match(Range::new(Position::new(6, 8), Position::new(6, 8)));
-        pump_until(|| cmds.editor_pane.test_context_visible());
+        open_context_controls(&cmds);
         assert!(
             cmds.editor_pane
                 .test_context_button("Edit Equation")
@@ -7456,7 +7515,7 @@ mod gtk_integration_tests {
         cmds.reload_active();
         cmds.editor_pane
             .focus_find_match(Range::new(Position::new(0, 7), Position::new(0, 7)));
-        pump_until(|| cmds.editor_pane.test_context_visible());
+        open_context_controls(&cmds);
         assert!(
             cmds.editor_pane
                 .test_context_button("Edit Citation")
@@ -7664,7 +7723,7 @@ mod gtk_integration_tests {
         // Cursor dentro de la ecuación (selección vacía): solo la fila #31.
         cmds.editor_pane
             .focus_find_match(Range::new(Position::new(0, 10), Position::new(0, 10)));
-        pump_until(|| cmds.editor_pane.test_context_visible());
+        open_context_controls(&cmds);
         assert!(
             cmds.editor_pane
                 .test_context_button("Edit Equation")
@@ -7703,7 +7762,7 @@ mod gtk_integration_tests {
         cmds.select_tab(0);
         cmds.editor_pane
             .focus_find_match(Range::new(Position::new(0, 21), Position::new(0, 21)));
-        pump_until(|| cmds.editor_pane.test_context_visible());
+        open_context_controls(&cmds);
         assert!(
             cmds.editor_pane
                 .test_context_button("Edit Citation")

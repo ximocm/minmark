@@ -9,6 +9,12 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 
 ## [Unreleased]
 
+### Corregido
+
+- Editor: los controles de formato se abren explícitamente con `Ctrl+.`.
+  Seleccionar texto con doble clic o arrastrando ya no abre un popover que
+  capture los clics e interrumpa la selección, en Markdown y Visual.
+
 ## [0.6.0] — 2026-10-28
 
 ### Corregido

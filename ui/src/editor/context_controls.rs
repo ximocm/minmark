@@ -1,8 +1,8 @@
 //! Popover de controles contextuales §44 (fase 7 #29/#30).
 //!
 //! `gtk::Popover` anclado al `TextView` con el patrón de [`super::completion`]
-//! (`set_parent(view)`, `has_arrow(false)`), que se muestra SOLO si aporta
-//! utilidad según [`minmark_document::format::context`]:
+//! (`set_parent(view)`, `has_arrow(false)`), que se abre con `Ctrl+.` solo si
+//! aporta utilidad según [`minmark_document::format::context`]:
 //!
 //! - selección no vacía → panel de texto (Heading 1–6, Bold, Italic,
 //!   Strikethrough, Code, Link, Callout);
@@ -94,6 +94,9 @@ pub struct ContextControls {
     /// `(tab, modo)` con los que se abrió; `None` = cerrado. Compartido con
     /// los handlers, que no aplican nada si no está abierto.
     opened: Rc<Cell<Option<(usize, EditMode)>>>,
+    /// Contexto vigente disponible para abrir con `Ctrl+.` sin interceptar
+    /// los gestos de selección del TextView.
+    available: Rc<Cell<Option<(usize, EditMode)>>>,
     /// Fija el estado de tono de `win.insert-callout` antes de activarla
     /// (enlazado por main.rs; ver [`Self::set_tone_setter`]).
     set_tone: ToneSetter,
@@ -103,7 +106,7 @@ pub struct ContextControls {
 }
 
 impl ContextControls {
-    /// Crea el popover anclado a `view` (oculto hasta [`Self::update`]).
+    /// Crea el popover anclado a `view` (oculto hasta pulsar `Ctrl+.`).
     pub fn new(view: &gtk::TextView) -> Self {
         let popover = gtk::Popover::new();
         popover.set_parent(view);
@@ -111,11 +114,11 @@ impl ContextControls {
         popover.set_has_arrow(false);
         // Teclado §29/#29: el popover y sus botones deben poder recibir
         // foco (Tab los recorre, Enter/Space los activa, Escape cierra y
-        // devuelve el foco al editor); el foco inicial se queda en la vista
-        // y `Ctrl+.` entra en los controles.
+        // devuelve el foco al editor); `Ctrl+.` abre y enfoca los controles.
         popover.set_can_focus(true);
 
         let opened: Rc<Cell<Option<(usize, EditMode)>>> = Rc::new(Cell::new(None));
+        let available = Rc::new(Cell::new(None));
         // Setter del tono (main.rs → grupo «win»): el popover solo activa
         // `win.insert-callout`; fijar el estado de la acción es del
         // integrador, que conserva el grupo (B1, referencia débil).
@@ -351,10 +354,8 @@ impl ContextControls {
             });
             popover.add_controller(key);
         }
-        // Escape desde la vista cierra; `Ctrl+.` (§29, revisión #29) lleva
-        // el foco del editor al primer control visible cuando el popover
-        // está abierto — la única puerta de teclado a los controles, ya que
-        // son una superficie aparte.
+        // La apertura es explícita: seleccionar texto no debe crear un
+        // popover modal en mitad de un doble clic o un arrastre.
         {
             let rows = [
                 heading_row.clone(),
@@ -369,6 +370,7 @@ impl ContextControls {
             ];
             let popover = popover.clone();
             let opened = Rc::clone(&opened);
+            let available = Rc::clone(&available);
             let key = gtk::EventControllerKey::new();
             key.set_propagation_phase(gtk::PropagationPhase::Capture);
             key.connect_key_pressed(move |_, key, _, modifiers| {
@@ -380,7 +382,9 @@ impl ContextControls {
                 if key == gtk::gdk::Key::period
                     && modifiers.contains(gtk::gdk::ModifierType::CONTROL_MASK)
                 {
-                    if popover.is_visible() {
+                    if let Some(context) = available.get() {
+                        opened.set(Some(context));
+                        popover.popup();
                         focus_first_control(&rows);
                         return glib::Propagation::Stop;
                     }
@@ -461,6 +465,7 @@ impl ContextControls {
             code,
             tones,
             opened,
+            available,
             set_tone,
             #[cfg(test)]
             buttons,
@@ -474,10 +479,10 @@ impl ContextControls {
         *self.set_tone.borrow_mut() = Some(setter);
     }
 
-    /// Recalcula [`format::context`] y muestra/actualiza/cierra el popover
+    /// Recalcula [`format::context`] y actualiza/cierra el popover
     /// para `(tab, mode, source, selection)` — el estado vigente que el
-    /// integrador (main.rs) leyó del modelo. Solo muestra si aporta
-    /// utilidad; un `(tab, mode)` distinto al registrado cierra sin reabrir.
+    /// integrador (main.rs) leyó del modelo. Prepara los controles para
+    /// `Ctrl+.`; un `(tab, mode)` distinto al registrado cierra sin reabrir.
     pub fn update(
         &self,
         view: &gtk::TextView,
@@ -526,18 +531,14 @@ impl ContextControls {
             return;
         };
         self.render(&ctx, panel);
-        if !self.popover.is_visible() {
-            self.opened.set(Some((tab, mode)));
-            self.point(view);
-            self.popover.popup();
-            // El foco vuelve al editor: escribir tras seleccionar sigue
-            // escribiendo en el documento (patrón del completion).
-            view.grab_focus();
-        }
+        self.available.set(Some((tab, mode)));
+        self.point(view);
     }
 
     /// Cierra el popover (Escape, clic fuera o recarga de pestaña/modo).
     pub fn hide(&self) {
+        self.available.set(None);
+        self.opened.set(None);
         self.popover.popdown();
     }
 
