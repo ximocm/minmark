@@ -9,7 +9,7 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 
 ## [Unreleased]
 
-## [0.6.1] — 2026-11-10
+## [0.6.1] — 2026-11-12
 
 ### Añadido
 
