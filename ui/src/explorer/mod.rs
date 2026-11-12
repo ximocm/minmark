@@ -8,8 +8,10 @@
 //!   [`ExplorerPane::set_show_hidden`].
 //! - §14.7: los symlinks se listan; las carpetas enlazadas no se expanden.
 //! - §14.8: menú contextual con New Markdown, New Folder, `Rename`, Move,
-//!   Duplicate, Delete y Copy Relative Path; el nodo del click es el
-//!   destinatario (con click en vacío → raíz del proyecto).
+//!   Duplicate, Delete, Copy Relative Path y `Open With…` (#72, solo
+//!   archivos: ni la raíz ni las carpetas ofrecen selector de apps); el
+//!   nodo del click es el destinatario (con click en vacío → raíz del
+//!   proyecto).
 //! - §47.1/§47.5: los directorios se leen en una tarea aparte (un hilo por
 //!   lectura, [`minmark_fs::read_dir_entries`]) y el resultado se integra en
 //!   el bucle principal con `glib::idle_add_once`: la UI jamás hace E/S y el
@@ -54,6 +56,10 @@ pub enum ExplorerAction {
     /// Import Markdown (§15, ISSUE-024): el nodo del click es la carpeta
     /// destino dentro del proyecto.
     ImportMarkdown,
+    /// `Open With…` (#72, §14.8): selector de aplicaciones del sistema
+    /// sobre un **archivo**; la acción queda insensible en la raíz y en las
+    /// carpetas (la sensibilidad vive en [`set_context_target`]).
+    OpenWith,
 }
 
 /// Menú contextual §14.8 en datos puros: `(acción, etiqueta)`; `Rename`
@@ -67,6 +73,7 @@ const CONTEXT_MENU_SPEC: &[(ExplorerAction, &str)] = &[
     (ExplorerAction::Duplicate, "Duplicate"),
     (ExplorerAction::Delete, "Delete"),
     (ExplorerAction::CopyRelativePath, "Copy Relative Path"),
+    (ExplorerAction::OpenWith, "Open With…"),
 ];
 
 /// Nombre de la acción en el grupo `explorer.*`.
@@ -80,6 +87,7 @@ fn action_name(action: ExplorerAction) -> &'static str {
         ExplorerAction::Delete => "delete",
         ExplorerAction::CopyRelativePath => "copy-relative-path",
         ExplorerAction::ImportMarkdown => "import-markdown",
+        ExplorerAction::OpenWith => "open-with",
     }
 }
 
@@ -103,6 +111,12 @@ pub struct ExplorerPane {
     /// Notificador del filtro `Show Hidden Files` §14.5 (#70: el integrador
     /// refleja el valor en la acción `win.show-hidden-files`).
     on_show_hidden_changed: FilterNotifier,
+    /// Solo tests (#72): destino y acción vigentes del menú contextual, los
+    /// mismos que usa el click derecho.
+    #[cfg(test)]
+    context_target: Rc<RefCell<Option<PathBuf>>>,
+    #[cfg(test)]
+    open_with: gtk::gio::SimpleAction,
 }
 
 impl ExplorerPane {
@@ -127,7 +141,7 @@ impl ExplorerPane {
 
         // Menú contextual §14.8 sobre el nodo del click (None = raíz).
         let context_target: Rc<RefCell<Option<PathBuf>>> = Rc::new(RefCell::new(None));
-        let popover = build_context_menu(&widget, &context_target, &on_action);
+        let (popover, open_with) = build_context_menu(&widget, &context_target, &on_action);
 
         // Lista de filas: un botón plano por fila, indentado por profundidad.
         let factory = gtk::SignalListItemFactory::new();
@@ -137,6 +151,7 @@ impl ExplorerPane {
             let on_open = Rc::clone(&on_open);
             let host = widget.clone();
             let popover = popover.clone();
+            let open_with = open_with.clone();
             let context_target = Rc::clone(&context_target);
             move |_, object| {
                 let list_item = object
@@ -177,13 +192,14 @@ impl ExplorerPane {
                     let weak_item = list_item.downgrade();
                     let host = host.clone();
                     let popover = popover.clone();
+                    let open_with = open_with.clone();
                     let context_target = Rc::clone(&context_target);
                     gesture.connect_pressed(move |gesture, _, x, y| {
                         let target = weak_item
                             .upgrade()
                             .and_then(|list_item| current_row(&list_item))
                             .map(|row| row.path.clone());
-                        *context_target.borrow_mut() = target;
+                        set_context_target(&open_with, &context_target, target);
                         popup_at(&popover, &host, &gesture, x, y);
                         gesture.set_state(gtk::EventSequenceState::Claimed);
                     });
@@ -234,9 +250,10 @@ impl ExplorerPane {
         {
             let host = widget.clone();
             let popover = popover.clone();
+            let open_with = open_with.clone();
             let context_target = Rc::clone(&context_target);
             gesture.connect_pressed(move |gesture, _, x, y| {
-                *context_target.borrow_mut() = None;
+                set_context_target(&open_with, &context_target, None);
                 popup_at(&popover, &host, &gesture, x, y);
                 gesture.set_state(gtk::EventSequenceState::Claimed);
             });
@@ -262,6 +279,10 @@ impl ExplorerPane {
             show_hidden: Cell::new(false),
             on_show_all_changed,
             on_show_hidden_changed,
+            #[cfg(test)]
+            context_target,
+            #[cfg(test)]
+            open_with,
         }
     }
 
@@ -347,18 +368,57 @@ impl ExplorerPane {
         rebuild(&self.store, &lock(&self.model));
         request_load(&self.model, &self.store, self.root.clone());
     }
+
+    /// Solo tests (#72): fija el destino del menú contextual como haría el
+    /// click derecho y devuelve si `Open With…` queda activo sobre él.
+    #[cfg(test)]
+    pub fn test_context_open_with(&self, target: Option<PathBuf>) -> bool {
+        set_context_target(&self.open_with, &self.context_target, target);
+        self.open_with.is_enabled()
+    }
+
+    /// Solo tests (#72): activa `explorer.open-with` sobre el destino
+    /// vigente, el mismo camino que pulsar el ítem en el menú.
+    #[cfg(test)]
+    pub fn test_activate_open_with(&self) {
+        self.open_with.activate(None);
+    }
 }
 
-/// Construye el `PopoverMenu` §14.8 con las acciones `explorer.*`.
+/// Construye el `PopoverMenu` §14.8 con las acciones `explorer.*` y
+/// devuelve también la acción `Open With…` (#72), que el click derecho
+/// habilita o deshabilita con [`set_context_target`] antes de cada apertura.
 fn build_context_menu(
     host: &gtk::Box,
     target: &Rc<RefCell<Option<PathBuf>>>,
     on_action: &Rc<dyn Fn(ExplorerAction, Option<PathBuf>)>,
-) -> gtk::PopoverMenu {
+) -> (gtk::PopoverMenu, gtk::gio::SimpleAction) {
+    let (menu, group, open_with) = context_menu_model(target, on_action);
+    host.insert_action_group("explorer", Some(&group));
+    let popover = gtk::PopoverMenu::from_model(Some(&menu));
+    popover.set_parent(host);
+    (popover, open_with)
+}
+
+/// Menú §14.8 en datos GIO puros: el modelo, el grupo `explorer.*` (una
+/// acción por ítem, activada contra el nodo `target`) y la acción
+/// `Open With…` (#72) en la mano para su sensibilidad por destino. GMenu y
+/// GSimpleAction no necesitan display, así que este cableado se prueba en
+/// modo headless.
+fn context_menu_model(
+    target: &Rc<RefCell<Option<PathBuf>>>,
+    on_action: &Rc<dyn Fn(ExplorerAction, Option<PathBuf>)>,
+) -> (
+    gtk::gio::Menu,
+    gtk::gio::SimpleActionGroup,
+    gtk::gio::SimpleAction,
+) {
     let menu = gtk::gio::Menu::new();
     let group = gtk::gio::SimpleActionGroup::new();
-    // Secciones §14.8: crear/importar / gestionar / eliminar / copiar ruta.
-    const SECTIONS: &[&[usize]] = &[&[0, 1, 2], &[3, 4, 5], &[6], &[7]];
+    // Secciones §14.8: crear/importar / gestionar / eliminar / usar el
+    // archivo fuera (#72: copiar su ruta y abrirlo con otra app).
+    const SECTIONS: &[&[usize]] = &[&[0, 1, 2], &[3, 4, 5], &[6], &[7, 8]];
+    let mut open_with = None;
     for section in SECTIONS {
         let submenu = gtk::gio::Menu::new();
         for &entry in *section {
@@ -373,14 +433,29 @@ fn build_context_menu(
             simple.connect_activate(move |_, _| {
                 on_action(action, target.borrow().clone());
             });
+            if action == ExplorerAction::OpenWith {
+                open_with = Some(simple.clone());
+            }
             group.add_action(&simple);
         }
         menu.append_section(None::<&str>, &submenu);
     }
-    host.insert_action_group("explorer", Some(&group));
-    let popover = gtk::PopoverMenu::from_model(Some(&menu));
-    popover.set_parent(host);
-    popover
+    // #72: hasta que el click derecho fije el destino no hay nada que abrir.
+    let open_with = open_with.expect("CONTEXT_MENU_SPEC incluye Open With… (#72)");
+    open_with.set_enabled(false);
+    (menu, group, open_with)
+}
+
+/// Fija el destino del menú §14.8 y aplica su sensibilidad por destino
+/// (#72): `Open With…` solo tiene sentido sobre un **archivo** — ni la raíz
+/// del proyecto ni las carpetas ofrecen selector de aplicaciones.
+fn set_context_target(
+    open_with: &gtk::gio::SimpleAction,
+    target: &Rc<RefCell<Option<PathBuf>>>,
+    next: Option<PathBuf>,
+) {
+    open_with.set_enabled(next.as_deref().is_some_and(|path| !path.is_dir()));
+    *target.borrow_mut() = next;
 }
 
 /// Muestra el menú en las coordenadas del gesto (relativas a `host`).
@@ -474,7 +549,8 @@ mod tests {
 
     /// §14.8/§15: el menú contextual cubre todas las operaciones exigidas,
     /// `Rename` conserva el nombre de la SRS e `Import Markdown` (§15) usa su
-    /// etiqueta literal.
+    /// etiqueta literal; `Open With…` (#72) añade su etiqueta literal al
+    /// final, junto a Copy Relative Path.
     #[test]
     fn menu_contextual_14_8_completo() {
         let etiquetas: Vec<&str> = CONTEXT_MENU_SPEC.iter().map(|(_, l)| *l).collect();
@@ -489,6 +565,7 @@ mod tests {
                 "Duplicate",
                 "Delete",
                 "Copy Relative Path",
+                "Open With…",
             ]
         );
         // Una acción registrada por ítem, sin duplicados.
@@ -496,6 +573,66 @@ mod tests {
         for (action, _) in CONTEXT_MENU_SPEC {
             assert!(nombres.insert(action_name(*action)), "acción duplicada");
         }
+    }
+
+    /// #72: `Open With…` cableado de punta a punta sin display — ítem con su
+    /// etiqueta literal, acción `explorer.open-with` que entrega el nodo
+    /// vigente al despachante y sensibilidad por destino (solo archivos:
+    /// ni la raíz del proyecto ni las carpetas ofrecen selector de apps).
+    #[test]
+    fn open_with_72_cableado_y_solo_sobre_archivos() {
+        let raiz = std::env::temp_dir().join(format!("minmark-openwith72-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&raiz);
+        let carpeta = raiz.join("carpeta");
+        std::fs::create_dir_all(&carpeta).unwrap();
+        let archivo = raiz.join("documento.md");
+        std::fs::write(&archivo, "# doc\n").unwrap();
+
+        /// Etiquetas del modelo §14.8, sección a sección (GMenu no necesita
+        /// display; la introspección de `gio::MenuModel` tampoco).
+        fn etiquetas(menu: &gtk::gio::Menu) -> Vec<String> {
+            let mut out = Vec::new();
+            for i in 0..menu.n_items() {
+                let Some(section) = menu.item_link(i, "section") else {
+                    continue;
+                };
+                for j in 0..section.n_items() {
+                    let label = section.item_attribute_value(j, "label", None);
+                    out.push(label.unwrap().str().unwrap_or_default().into());
+                }
+            }
+            out
+        }
+
+        assert_eq!(action_name(ExplorerAction::OpenWith), "open-with");
+        let target: Rc<RefCell<Option<PathBuf>>> = Rc::new(RefCell::new(None));
+        /// Registro de activaciones entregadas al despachante.
+        type Activaciones = Rc<RefCell<Vec<(ExplorerAction, Option<PathBuf>)>>>;
+        let activaciones: Activaciones = Rc::new(RefCell::new(Vec::new()));
+        let despachante: Rc<dyn Fn(ExplorerAction, Option<PathBuf>)> = {
+            let activaciones = Rc::clone(&activaciones);
+            Rc::new(move |action, nodo| activaciones.borrow_mut().push((action, nodo)))
+        };
+        let (menu, group, open_with) = context_menu_model(&target, &despachante);
+
+        assert!(etiquetas(&menu).contains(&"Open With…".to_owned()));
+        assert!(group.lookup_action("open-with").is_some());
+
+        // Sin destino aún no hay nada que abrir; luego decide el nodo.
+        assert!(!open_with.is_enabled(), "arranca insensible (#72)");
+        set_context_target(&open_with, &target, None);
+        assert!(!open_with.is_enabled(), "la raíz no ofrece Open With…");
+        set_context_target(&open_with, &target, Some(carpeta));
+        assert!(!open_with.is_enabled(), "una carpeta no lo ofrece");
+        set_context_target(&open_with, &target, Some(archivo.clone()));
+        assert!(open_with.is_enabled(), "un archivo sí");
+
+        // Activar entrega (OpenWith, nodo) al despachante, como el menú.
+        open_with.activate(None);
+        assert_eq!(
+            *activaciones.borrow(),
+            [(ExplorerAction::OpenWith, Some(archivo))]
+        );
     }
 
     /// #70: sin la cabecera de toggles el ancho mínimo del panel deja de

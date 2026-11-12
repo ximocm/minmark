@@ -9,6 +9,33 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 
 ## [Unreleased]
 
+## [0.6.1] — 2026-11-12
+
+### Añadido
+
+- `Open With…` (issue #72, §14.8): el menú contextual del explorador
+  ofrece «abrir con» sobre archivos (la acción queda insensible en las
+  carpetas y en la raíz del proyecto) con el selector de aplicaciones del
+  sistema; elegir una app la lanza con el archivo elegido y cancelar,
+  Escape o cerrar el diálogo no tiene efectos.
+
+### Cambiado
+
+- CLI (issue #72, ISSUE-021): `minmark .` —cualquier carpeta relativa—
+  abre la carpeta canonizada como ventana de proyecto, igual que con una
+  ruta absoluta; los archivos de la línea de comandos conservan su grafía.
+
+### Corregido
+
+- Editor: los controles de formato se abren explícitamente con `Ctrl+.`.
+  Seleccionar texto con doble clic o arrastrando ya no abre un popover que
+  capture los clics e interrumpa la selección, en Markdown y Visual.
+- Diagramas DOT (§7.3.1, ADR-007): el SVG perdía el `viewBox` al convertir
+  los glifos a contornos y el Preview solo reducía la caja, no el dibujo —
+  un diagrama más ancho que el panel se salía del área visible mientras el
+  PDF lo escalaba bien (paridad rota). El `viewBox` se restaura con el
+  tamaño del SVG y ambas superficies dibujan de nuevo lo mismo.
+
 ## [0.6.0] — 2026-10-28
 
 ### Corregido
