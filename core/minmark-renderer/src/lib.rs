@@ -125,7 +125,7 @@ const BASE_CSS: &str = r#"body { margin: 0; background: var(--mm-bg); color: var
 .minmark-preview th, .minmark-preview td { border: 1px solid var(--mm-rule); padding: 0.35em 0.75em; }
 .minmark-preview hr { border: none; border-top: 1px solid var(--mm-rule); }
 .minmark-preview img { max-width: 100%; height: auto; }
-.mm-callout { border-left: 4px solid var(--mm-rule); padding: 0.5em 1em; border-radius: 4px;
+.mm-callout { border-left: 4px solid var(--mm-rule); margin: 1.2em 0; padding: 0.5em 1em; border-radius: 4px;
   background: var(--mm-code-bg); }
 .mm-callout-title { font-weight: 600; margin: 0 0 0.25em; }
 .mm-callout-note { border-left-color: var(--mm-color-note); }

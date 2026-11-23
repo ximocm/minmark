@@ -1,0 +1,30 @@
+{
+  "version": "1.1",
+  "project_name": "minmark",
+  "output_dir": "docs/codebase/",
+  "generated_at": "2026-11-23T11:52:32Z",
+  "last_updated": "2026-11-23T12:19:17Z",
+  "last_global_sha": "50ee33a592ee69d6cbbcd32940c1454d3237a9a7",
+  "working_tree_changes": true,
+  "update_count": 1,
+  "output_files": {
+    "index": "INDEX.md"
+  },
+  "scope": "Sincronización y desplazamiento del editor; sin análisis global del repositorio",
+  "modules": [
+    {
+      "name": "editor",
+      "source_path": "ui/src/editor/pane.rs",
+      "related_source_paths": [
+        "ui/src/main.rs",
+        "ui/src/tabs/manager.rs",
+        "ui/src/preview/mod.rs"
+      ],
+      "doc_path": "modules/editor.md",
+      "description": "Sincronización GTK/modelo, desplazamiento por pestaña y seguimiento Editor → Preview en Split",
+      "last_sha": "50ee33a592ee69d6cbbcd32940c1454d3237a9a7",
+      "last_updated": "2026-11-23T12:19:17Z",
+      "primary_language": "Rust"
+    }
+  ]
+}

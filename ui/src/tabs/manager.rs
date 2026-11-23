@@ -10,7 +10,9 @@ use super::scope::WindowScope;
 use crate::editor::EditMode;
 use minmark_document::{Editor, Position, Range, Selection};
 use minmark_fs::{FileStore, FsError, LocalFs};
+use std::cell::Cell;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 /// Una pestaña: un documento y su estado de UI (§37).
 ///
@@ -22,6 +24,8 @@ pub struct Tab {
     pub editor: Editor,
     /// Modo de edición activo de esta pestaña (Markdown/Visual).
     pub mode: EditMode,
+    /// Desplazamiento vertical del editor, conservado al alternar pestañas.
+    pub scroll_position: Rc<Cell<f64>>,
     /// Archivo asignado; `None` = «Sin título N» (§12.1).
     pub path: Option<PathBuf>,
     /// N de «Sin título N» cuando `path == None` (§37).
@@ -105,6 +109,7 @@ impl TabManager {
         let tab = Tab {
             editor: Editor::new(document),
             mode: EditMode::Markdown,
+            scroll_position: Rc::new(Cell::new(0.0)),
             path: Some(path.to_path_buf()),
             untitled_number: 0,
             external_change: false,
@@ -460,6 +465,7 @@ impl TabManager {
         Tab {
             editor: Editor::new(self.fs.create_new()),
             mode: EditMode::Markdown,
+            scroll_position: Rc::new(Cell::new(0.0)),
             path: None,
             untitled_number,
             external_change: false,

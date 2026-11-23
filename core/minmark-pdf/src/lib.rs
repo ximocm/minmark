@@ -419,6 +419,89 @@ mod tests {
 }
 
 #[cfg(test)]
+mod callout_layout_tests {
+    use super::*;
+    use typst::layout::{Frame, FrameItem};
+
+    fn borders(frame: &Frame, y: f64, tables: &mut Vec<f64>, callouts: &mut Vec<(f64, f64)>) {
+        for (position, item) in frame.items() {
+            let y = y + position.y.to_pt();
+            match item {
+                FrameItem::Group(group) => borders(&group.frame, y, tables, callouts),
+                FrameItem::Shape(shape, _) => {
+                    let size = shape.geometry.bbox_size();
+                    if shape.fill.is_some()
+                        && (size.x.to_pt() - 3.0).abs() < 0.01
+                        && size.y.to_pt() > 1.0
+                    {
+                        callouts.push((y, y + size.y.to_pt()));
+                    } else if shape.stroke.is_some()
+                        && size.x.to_pt() > 1.0
+                        && size.y.to_pt().abs() < 0.01
+                    {
+                        tables.push(y);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    #[test]
+    fn table_callout_spacing_in_both_orders() {
+        let source = include_str!("../../../docs/qa/fixtures/table-callout-spacing.md");
+        let ast = minmark_parser::parse(source);
+        for font_size_pt in [12.0, 10.0, 18.0] {
+            let settings = Settings {
+                font_size_pt,
+                ..Default::default()
+            };
+            let document = compile_document(
+                &ast,
+                &settings,
+                Default::default(),
+                &DocumentMeta::default(),
+            )
+            .unwrap();
+            assert_eq!(document.pages.len(), 1);
+            if font_size_pt == 12.0 {
+                if let Some(directory) = std::env::var_os("MINMARK_QA_OUTPUT_DIR") {
+                    std::fs::create_dir_all(&directory).unwrap();
+                    let pdf = typst_pdf::pdf(&document, &typst_pdf::PdfOptions::default()).unwrap();
+                    std::fs::write(
+                        std::path::PathBuf::from(directory).join("table-callout-spacing.pdf"),
+                        pdf,
+                    )
+                    .unwrap();
+                }
+            }
+            let (mut tables, mut callouts) = (Vec::new(), Vec::new());
+            borders(&document.pages[0].frame, 0.0, &mut tables, &mut callouts);
+            callouts.sort_by(|a, b| a.0.total_cmp(&b.0));
+            assert_eq!(callouts.len(), 2, "dos barras de callout: {callouts:?}");
+            let before = tables
+                .iter()
+                .copied()
+                .filter(|y| *y <= callouts[0].0)
+                .fold(f64::NEG_INFINITY, f64::max);
+            let after = tables
+                .iter()
+                .copied()
+                .filter(|y| *y >= callouts[1].1)
+                .fold(f64::INFINITY, f64::min);
+            let gaps = [callouts[0].0 - before, after - callouts[1].1];
+            eprintln!("Separación PDF ({font_size_pt}pt): {gaps:?}");
+            for gap in gaps {
+                assert!(
+                    gap.is_finite() && gap >= f64::from(font_size_pt) - 0.1,
+                    "separación insuficiente: {gap}pt a {font_size_pt}pt"
+                );
+            }
+        }
+    }
+}
+
+#[cfg(test)]
 mod footnote_layout_tests {
     use super::*;
     #[test]

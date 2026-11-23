@@ -341,6 +341,8 @@ struct AppCmds {
     academic_monitors: RefCell<Vec<gtk4::gio::FileMonitor>>,
     academic_paths: RefCell<Vec<String>>,
     view: Rc<Cell<ViewMode>>,
+    /// Seguimiento pendiente tras renderizar: cursor (`true`) o vista (`false`).
+    preview_follow: Cell<Option<bool>>,
     refresh_scheduled: Rc<Cell<bool>>,
     slot: Rc<CmdSlot>,
 }
@@ -475,6 +477,7 @@ impl AppCmds {
                 });
                 me.preview
                     .update_html(&html, base_uri.as_deref(), document_key);
+                me.flush_preview_sync();
                 me.editor_pane.set_link_diagnostics(&source, &links);
                 me.preview.set_link_diagnostics(&links);
                 if same_cursor && !completions.is_empty() {
@@ -679,8 +682,6 @@ impl AppCmds {
         if let Ok(byte) = self.tabs.borrow().active().editor.offset_of(at) {
             self.preview.scroll_to_byte(byte as u32);
         }
-        let pane = self.editor_pane.clone();
-        glib::idle_add_local_once(move || pane.scroll_to_cursor());
     }
 
     fn slot(&self) -> Option<Rc<AppCmds>> {
@@ -693,9 +694,11 @@ impl AppCmds {
         {
             let tabs = self.tabs.borrow();
             let tab = tabs.active();
-            self.editor_pane.load(&tab.editor, tab.mode);
+            self.editor_pane
+                .load(&tab.editor, tab.mode, &tab.scroll_position);
         }
         self.refresh_now();
+        self.request_preview_sync(false);
         self.sync_quickopen_context();
         self.refresh_navigation();
         self.refresh_context_controls();
@@ -1616,25 +1619,55 @@ impl AppCmds {
 
     /// Refresco diferido tras cada edición real (§47.1).
     fn schedule_refresh(self: &Rc<Self>) {
-        if self.refresh_scheduled.get() {
+        let scheduled = self.refresh_scheduled.replace(true);
+        self.request_preview_sync(true);
+        if scheduled {
             return;
         }
-        self.refresh_scheduled.set(true);
         let me = self.clone();
         glib::timeout_add_local_once(Duration::from_millis(REFRESH_DEBOUNCE_MS), move || {
             me.refresh_scheduled.set(false);
             me.refresh_now();
-            let byte = {
-                let tabs = me.tabs.borrow();
-                let editor = &tabs.active().editor;
-                editor.offset_of(editor.selection().head).ok()
-            };
-            if let Some(byte) = byte {
-                me.preview.follow_edit(byte as u32);
-            }
             me.refresh_intelligence(true);
             me.refresh_navigation();
         });
+    }
+
+    fn request_preview_sync(&self, follow_cursor: bool) {
+        if self.view.get() != ViewMode::Split {
+            return;
+        }
+        self.preview_follow.set(Some(
+            self.preview_follow.get().unwrap_or(false) || follow_cursor,
+        ));
+        self.flush_preview_sync();
+    }
+
+    fn flush_preview_sync(&self) {
+        if self.intelligence_busy.get() || self.refresh_scheduled.get() {
+            return;
+        }
+        let Some(follow_cursor) = self.preview_follow.take() else {
+            return;
+        };
+        if self.view.get() != ViewMode::Split {
+            return;
+        }
+        let byte_at = |prefer_cursor| {
+            self.editor_pane
+                .preview_position(prefer_cursor)
+                .and_then(|position| self.tabs.borrow().active().editor.offset_of(position).ok())
+                .map(|byte| byte as u32)
+        };
+        if !follow_cursor {
+            if let Some(byte) = byte_at(false) {
+                self.preview.scroll_to_byte(byte);
+            }
+        }
+        // Las alturas difieren: centrar la vista no debe ocultar el cursor visible.
+        if let Some(byte) = byte_at(true) {
+            self.preview.follow_edit(byte);
+        }
     }
 
     fn select_tab(&self, index: usize) {
@@ -2155,6 +2188,11 @@ impl Commands for AppCmds {
     fn set_view(&self, mode: ViewMode) {
         self.view.set(mode);
         self.apply_view();
+        if mode == ViewMode::Split {
+            self.request_preview_sync(false);
+        } else {
+            self.preview_follow.set(None);
+        }
     }
 
     /// #70 (§14.4): `win.show-all-files` desde el menú View.
@@ -3045,6 +3083,8 @@ fn build_window(app: &Application, scope: WindowScope, open_paths: &[PathBuf]) -
                     tabs.active_index(),
                     tab.mode,
                 );
+                drop(tabs);
+                me.request_preview_sync(true);
             }),
         })
     };
@@ -3060,6 +3100,14 @@ fn build_window(app: &Application, scope: WindowScope, open_paths: &[PathBuf]) -
     // §8.3 (ISSUE-030): visibilidad de la sintaxis en Visual según ajuste.
     editor_pane.set_visual_syntax(settings.visual_syntax);
     let preview = Rc::new(PreviewPane::new());
+    editor_pane.connect_scroll_changed({
+        let slot = slot.clone();
+        Rc::new(move || {
+            if let Some(me) = slot.borrow().as_ref().and_then(Weak::upgrade) {
+                me.request_preview_sync(false);
+            }
+        })
+    });
     editor_pane.connect_link_activation({
         let slot = slot.clone();
         Rc::new(move |at| {
@@ -3277,6 +3325,7 @@ fn build_window(app: &Application, scope: WindowScope, open_paths: &[PathBuf]) -
                         .borrow_mut()
                         .set_selection_active(Selection::collapsed(position));
                     me.reload_active();
+                    me.editor_pane.scroll_to_cursor();
                 }
             });
 
@@ -3513,6 +3562,7 @@ fn build_window(app: &Application, scope: WindowScope, open_paths: &[PathBuf]) -
         academic_monitors: RefCell::new(Vec::new()),
         academic_paths: RefCell::new(Vec::new()),
         view: Rc::new(Cell::new(ViewMode::Split)),
+        preview_follow: Cell::new(None),
         refresh_scheduled: Rc::new(Cell::new(false)),
         slot: slot.clone(),
     });
@@ -4657,6 +4707,24 @@ pub fn qa_preview_smoke() {
 #[cfg(test)]
 mod gtk_integration_tests {
     use super::*;
+
+    fn settle_editor(cmds: &AppCmds) {
+        settle_preview(cmds);
+        let ready = Rc::new(Cell::new(false));
+        let done = ready.clone();
+        let frames = Cell::new(0);
+        cmds.window.add_tick_callback(move |_, _| {
+            frames.set(frames.get() + 1);
+            if frames.get() >= 3 {
+                done.set(true);
+                glib::ControlFlow::Break
+            } else {
+                glib::ControlFlow::Continue
+            }
+        });
+        pump_until(|| ready.get());
+    }
+
     /// Captura `window` en el PNG `dest` para la evidencia visual. Espera al
     /// primer frame pintado: según el timing del compositor, `to_node` da
     /// `None` mientras la ventana está mapeada pero aún sin pintar.
@@ -4791,6 +4859,9 @@ mod gtk_integration_tests {
     #[ignore = "requiere sesión gráfica GTK/WebKit"]
     fn gtk_navigation_outline_completion_and_dirty_buffers() {
         gtk4::init().expect("GTK display");
+        gtk4::Settings::default()
+            .unwrap()
+            .set_gtk_enable_animations(false);
         ensure_sandbox_usable();
         let root = std::env::temp_dir().join(format!("minmark-gtk-phase4-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
@@ -4951,6 +5022,8 @@ mod gtk_integration_tests {
         cmds.tabs
             .borrow_mut()
             .set_selection_active(Selection::collapsed(Position::new(160, 9)));
+        cmds.reload_active();
+        cmds.editor_pane.scroll_to_cursor();
         cmds.schedule_refresh();
         settle_preview(&cmds);
         scroll.set(None);
@@ -4971,6 +5044,8 @@ mod gtk_integration_tests {
         cmds.tabs
             .borrow_mut()
             .set_selection_active(Selection::collapsed(Position::new(160, 10)));
+        cmds.reload_active();
+        cmds.editor_pane.scroll_to_cursor();
         cmds.schedule_refresh();
         settle_preview(&cmds);
         scroll.set(None);
@@ -5681,6 +5756,302 @@ mod gtk_integration_tests {
     }
 
     // ── Fase 7 #29: controles editoriales contextuales (§44) ─────────────
+
+    #[test]
+    #[ignore = "requiere sesión gráfica GTK/WebKit"]
+    fn gtk_preview_table_callout_spacing_in_both_orders() {
+        gtk4::init().expect("GTK display");
+        ensure_sandbox_usable();
+        let app = Application::builder()
+            .application_id("app.minmark.test.callout-spacing")
+            .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk4::gio::Cancellable>).unwrap();
+        let cmds = build_window(&app, WindowScope::Standalone, &[]);
+        let source = include_str!("../../docs/qa/fixtures/table-callout-spacing.md");
+        cmds.tabs
+            .borrow_mut()
+            .insert_active(Position::new(0, 0), source);
+        cmds.reload_active();
+        cmds.set_view(ViewMode::Preview);
+        cmds.window.set_default_size(900, 900);
+        pump_until(|| cmds.window.is_mapped());
+        settle_editor(&cmds);
+        if let Some(directory) = std::env::var_os("MINMARK_QA_OUTPUT_DIR") {
+            std::fs::create_dir_all(&directory).unwrap();
+            capture_window(
+                cmds.window.upcast_ref(),
+                &PathBuf::from(directory).join("table-callout-preview.png"),
+            );
+        }
+        let gap = preview_number(&cmds, "(() => { const pairs = [...document.querySelectorAll('.minmark-preview > table + .mm-callout, .minmark-preview > .mm-callout + table')]; if (pairs.length !== 2) return -1; return Math.min(...pairs.map(e => e.getBoundingClientRect().top - e.previousElementSibling.getBoundingClientRect().bottom)); })()");
+        assert!(
+            gap >= 16.0,
+            "tabla y callout deben separarse en ambos órdenes: {gap}px"
+        );
+        cmds.window.destroy();
+    }
+
+    #[test]
+    #[ignore = "requiere sesión gráfica GTK/WebKit"]
+    fn gtk_split_preview_follows_editor_viewport_and_new_text() {
+        gtk4::init().expect("GTK display");
+        gtk4::Settings::default()
+            .unwrap()
+            .set_gtk_enable_animations(false);
+        ensure_sandbox_usable();
+        let app = Application::builder()
+            .application_id("app.minmark.test.split-scroll")
+            .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk4::gio::Cancellable>).unwrap();
+        let cmds = build_window(&app, WindowScope::Standalone, &[]);
+        let source: String = (0..200)
+            .map(|n| format!("Párrafo {n:03}: texto con ñ y acentos.\n\n"))
+            .collect();
+        cmds.tabs
+            .borrow_mut()
+            .insert_active(Position::new(0, 0), &source);
+        cmds.reload_active();
+        cmds.window.set_default_size(900, 600);
+        pump_until(|| cmds.window.is_mapped());
+        settle_preview(&cmds);
+        let scroll = cmds
+            .editor_pane
+            .widget()
+            .first_child()
+            .unwrap()
+            .downcast::<gtk4::ScrolledWindow>()
+            .unwrap();
+        let view = scroll
+            .child()
+            .unwrap()
+            .downcast::<gtk4::TextView>()
+            .unwrap();
+        pump_until(|| view.height() > 0 && scroll.vadjustment().upper() > 1000.0);
+
+        let at = view.buffer().iter_at_line(260).unwrap();
+        let y = view.iter_location(&at).y();
+        scroll
+            .vadjustment()
+            .set_value(f64::from(y - view.height() / 2));
+        // Solo se desplaza la vista: ni cursor ni documento cambian.
+        assert_eq!(
+            cmds.tabs.borrow().active().editor.selection().head,
+            Position::new(400, 0)
+        );
+        let script = "(() => { const e = [...document.querySelectorAll('p')].find(e => e.textContent.startsWith('Párrafo 130:')); if (!e) return 0; const r = e.getBoundingClientRect(); return Number(r.top >= 0 && r.bottom <= innerHeight); })()";
+        pump_until(|| preview_number(&cmds, script) == 1.0);
+
+        cmds.toggle_mode();
+        settle_editor(&cmds);
+        let at = view.buffer().iter_at_line(90).unwrap();
+        let y = view.iter_location(&at).y();
+        scroll
+            .vadjustment()
+            .set_value(f64::from(y - view.height() / 2));
+        let script = "(() => { const e = [...document.querySelectorAll('p')].find(e => e.textContent.startsWith('Párrafo 045:')); if (!e) return 0; const r = e.getBoundingClientRect(); return Number(r.top >= 0 && r.bottom <= innerHeight); })()";
+        pump_until(|| preview_number(&cmds, script) == 1.0);
+
+        // Una inserción cuyo destino todavía no existe en el DOM anterior.
+        let buffer = view.buffer();
+        buffer.place_cursor(&buffer.end_iter());
+        let appended: String = (0..30)
+            .map(|n| format!("Nuevo final {n:02}.\n\n"))
+            .collect();
+        buffer.insert_at_cursor(&appended);
+        view.scroll_mark_onscreen(&buffer.get_insert());
+        settle_preview(&cmds);
+        let script = "(() => { const e = [...document.querySelectorAll('p')].find(e => e.textContent === 'Nuevo final 29.'); if (!e) return 0; const r = e.getBoundingClientRect(); return Number(r.top >= 0 && r.bottom <= innerHeight); })()";
+        pump_until(|| preview_number(&cmds, script) == 1.0);
+
+        // En Editor el Preview conserva su lectura; volver a Split sincroniza.
+        cmds.set_view(ViewMode::Editor);
+        settle_editor(&cmds);
+        let previous = preview_number(&cmds, "window.scrollY");
+        let at = buffer.iter_at_line(60).unwrap();
+        let y = view.iter_location(&at).y();
+        scroll
+            .vadjustment()
+            .set_value(f64::from(y - view.height() / 2));
+        settle_editor(&cmds);
+        assert!((preview_number(&cmds, "window.scrollY") - previous).abs() < 2.0);
+        cmds.set_view(ViewMode::Split);
+        let script = "(() => { const e = [...document.querySelectorAll('p')].find(e => e.textContent.startsWith('Párrafo 030:')); if (!e) return 0; const r = e.getBoundingClientRect(); return Number(r.top >= 0 && r.bottom <= innerHeight); })()";
+        pump_until(|| preview_number(&cmds, script) == 1.0);
+
+        // Dentro de un bloque más alto que la ventana se sigue su línea interna.
+        let code: String = (0..300)
+            .map(|n| format!("Línea {n:03} del bloque.\n"))
+            .collect();
+        cmds.tabs.borrow_mut().new_tab();
+        cmds.tabs.borrow_mut().insert_active(
+            Position::new(0, 0),
+            &format!("# Código\n\n```text\n{code}```\n"),
+        );
+        cmds.reload_active();
+        settle_editor(&cmds);
+        for line in [240, 70] {
+            let at = buffer.iter_at_line(line).unwrap();
+            let y = view.iter_location(&at).y();
+            scroll
+                .vadjustment()
+                .set_value(f64::from(y - view.height() / 2));
+            let script = format!("(() => {{ const e = document.querySelector('pre code'); if (!e) return 0; const start = e.textContent.indexOf('Línea {:03}'); const range = document.createRange(); range.setStart(e.firstChild, start); range.setEnd(e.firstChild, start + 9); const r = range.getBoundingClientRect(); return Number(r.top >= 0 && r.bottom <= innerHeight); }})()", line - 3);
+            pump_until(|| preview_number(&cmds, &script) == 1.0);
+        }
+        cmds.window.destroy();
+    }
+
+    #[test]
+    #[ignore = "requiere sesión gráfica GTK/WebKit"]
+    fn gtk_editor_operations_preserve_scroll() {
+        gtk4::init().expect("GTK display");
+        gtk4::Settings::default()
+            .unwrap()
+            .set_gtk_enable_animations(false);
+        ensure_sandbox_usable();
+        let root =
+            std::env::temp_dir().join(format!("minmark-editor-scroll-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("long.md");
+        let source: String = (0..300)
+            .map(|i| format!("Línea {i}: texto del documento.\n"))
+            .collect();
+        std::fs::write(&path, &source).unwrap();
+        let app = Application::builder()
+            .application_id("app.minmark.test.editor-scroll")
+            .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk4::gio::Cancellable>).unwrap();
+        let cmds = build_window(&app, WindowScope::Standalone, std::slice::from_ref(&path));
+        cmds.window.set_default_size(900, 600);
+        pump_until(|| cmds.window.is_mapped());
+        settle_editor(&cmds);
+        let scroll = cmds
+            .editor_pane
+            .widget()
+            .first_child()
+            .unwrap()
+            .downcast::<gtk4::ScrolledWindow>()
+            .unwrap();
+        let adjustment = scroll.vadjustment();
+
+        // El cursor queda fuera de pantalla: guardar no debe llevarnos a él.
+        adjustment.set_value(1200.0);
+        settle_editor(&cmds);
+        let before = adjustment.value();
+        assert!(before > 1000.0);
+        for action in ["win.save", "win.undo", "win.redo"] {
+            gtk4::prelude::WidgetExt::activate_action(&cmds.window, action, None).unwrap();
+            settle_editor(&cmds);
+            assert!(
+                (adjustment.value() - before).abs() < 2.0,
+                "{action}: scroll {before} → {}",
+                adjustment.value()
+            );
+        }
+
+        for _ in 0..2 {
+            cmds.editor_pane
+                .focus_find_match(Range::new(Position::new(100, 0), Position::new(100, 5)));
+            settle_editor(&cmds);
+            let before = adjustment.value();
+            for action in ["win.format-strong", "win.undo", "win.redo", "win.save"] {
+                gtk4::prelude::WidgetExt::activate_action(&cmds.window, action, None).unwrap();
+                settle_editor(&cmds);
+                assert!(
+                    (adjustment.value() - before).abs() < 2.0,
+                    "{action}: scroll {before} → {}",
+                    adjustment.value()
+                );
+            }
+            cmds.toggle_mode();
+            settle_editor(&cmds);
+            assert!(
+                adjustment.value() > 1000.0,
+                "cambiar de modo no vuelve al inicio"
+            );
+            cmds.toggle_visual_syntax();
+            cmds.refresh_now();
+            settle_editor(&cmds);
+            assert!(adjustment.value() > 1000.0, "repintar no vuelve al inicio");
+        }
+        let before = adjustment.value();
+        // Varias recargas antes de que GTK procese la restauración pendiente.
+        cmds.undo();
+        cmds.redo();
+        cmds.save();
+        settle_editor(&cmds);
+        assert!((adjustment.value() - before).abs() < 2.0);
+
+        cmds.select_tab(0);
+        settle_editor(&cmds);
+        assert!(adjustment.value() < 2.0, "la pestaña vacía empieza arriba");
+        cmds.select_tab(1);
+        settle_editor(&cmds);
+        assert!(
+            (adjustment.value() - before).abs() < 2.0,
+            "volver restaura la vista"
+        );
+        let other = root.join("other.md");
+        std::fs::write(&other, &source).unwrap();
+        cmds.activate_or_open(&other);
+        settle_editor(&cmds);
+        assert!(
+            adjustment.value() < 2.0,
+            "un archivo nuevo no hereda el scroll"
+        );
+        adjustment.set_value(700.0);
+        settle_editor(&cmds);
+        cmds.select_tab(1);
+        settle_editor(&cmds);
+        assert!((adjustment.value() - before).abs() < 2.0);
+        cmds.select_tab(2);
+        settle_editor(&cmds);
+        assert!(
+            (adjustment.value() - 700.0).abs() < 2.0,
+            "cada pestaña tiene su vista"
+        );
+        cmds.close_tab_at(2);
+        settle_editor(&cmds);
+        assert!(
+            (adjustment.value() - before).abs() < 2.0,
+            "cerrar restaura la vista anterior"
+        );
+        cmds.close_tab_at(0);
+        settle_editor(&cmds);
+        assert!(
+            (adjustment.value() - before).abs() < 2.0,
+            "cerrar otra pestaña conserva la vista"
+        );
+
+        // Recarga externa y Save As usan el mismo estado aunque cambie la ruta.
+        std::fs::write(&path, source.replace("documento", "contenido")).unwrap();
+        cmds.tabs.borrow_mut().reload_active_from_disk().unwrap();
+        cmds.reload_active();
+        settle_editor(&cmds);
+        assert!((adjustment.value() - before).abs() < 2.0);
+        cmds.tabs
+            .borrow_mut()
+            .save_active_as(&root.join("renamed.md"))
+            .unwrap();
+        cmds.reload_active();
+        settle_editor(&cmds);
+        assert!((adjustment.value() - before).abs() < 2.0);
+
+        // Una navegación explícita prevalece sobre una restauración pendiente.
+        cmds.reload_active();
+        cmds.focus_line(1);
+        settle_editor(&cmds);
+        assert!(adjustment.value() < 2.0);
+        cmds.reload_active();
+        cmds.focus_line(200);
+        settle_editor(&cmds);
+        assert!(adjustment.value() > 2000.0);
+        cmds.window.destroy();
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     /// #29: `win.format-strong` — el MISMO camino de menú, atajos, paleta y
     /// popover — aplica Bold como UNA transacción (§8.5) y registra la

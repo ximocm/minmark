@@ -388,15 +388,15 @@ fn scroll_script(byte: u32, follow: bool) -> String {
         }});
         if (best) {{
             const rect = best.getBoundingClientRect();
-            if (!{follow}) best.scrollIntoView({{block: 'center'}});
-            else if (rect.height <= window.innerHeight - 48) {{
-                if (rect.top < 24 || rect.bottom > window.innerHeight - 24)
+            if (rect.height <= window.innerHeight - 48) {{
+                if (!{follow} || rect.top < 24 || rect.bottom > window.innerHeight - 24)
                     best.scrollIntoView({{block: 'center'}});
             }} else {{
                 const [a,b] = best.dataset.mmSpan.split(',').map(Number);
+                // shortcut: posición aproximada dentro del bloque; usar anclas por línea si se requiere precisión.
                 const ratio = Math.max(0, Math.min(1, ({byte}-a) / Math.max(1,b-a)));
                 const y = rect.top + ratio * rect.height;
-                if (y < 24 || y > window.innerHeight - 24)
+                if (!{follow} || y < 24 || y > window.innerHeight - 24)
                     window.scrollBy(0, y - window.innerHeight / 2);
             }}
         }}

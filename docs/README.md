@@ -26,6 +26,8 @@ GitHub Issues, con milestones para las fases del desarrollo.
 - [Composiciones](COMPOSITIONS.md): documentos multiarchivo y salida PDF combinada.
 - [QA de fase 5](qa/README.md): fixtures, casos y registro de ejecución.
 - [Arquitectura del core](../core/README.md): crates, interfaces y dependencias.
+- [Índice del código documentado](codebase/INDEX.md): sincronización y
+  desplazamiento del editor; cobertura parcial de la UI.
 - [ADR-001: tecnología de UI](adr/001-tecnologia-ui.md).
 - [ADR-002: LaTeX a Typst](adr/002-latex-a-typst.md).
 - [ADR-003: motor bibliográfico](adr/003-motor-bibliografico.md).

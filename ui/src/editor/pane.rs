@@ -144,6 +144,9 @@ pub struct EditorPane {
     root: gtk::Box,
     buffer: TextBuffer,
     text_view: TextView,
+    scroll: ScrolledWindow,
+    scroll_position: RefCell<Option<Rc<Cell<f64>>>>,
+    pending_scroll: Rc<Cell<Option<f64>>>,
     /// Un `gtk::TextTag` por [`minmark_parser::HighlightKind`] ya estilizado
     /// (Markdown Mode).
     tags: Vec<TextTag>,
@@ -168,7 +171,63 @@ pub struct EditorPane {
 }
 
 impl EditorPane {
+    /// Agrupa los cambios de geometría antes de notificar la posición visible.
+    pub fn connect_scroll_changed(&self, on_scroll: Rc<dyn Fn()>) {
+        let queued = Rc::new(Cell::new(false));
+        let guard = self.guard.clone();
+        let restoring = self.pending_scroll.clone();
+        let notify = Rc::new(move || {
+            if queued.replace(true) {
+                return;
+            }
+            let (queued, guard, restoring, on_scroll) = (
+                queued.clone(),
+                guard.clone(),
+                restoring.clone(),
+                on_scroll.clone(),
+            );
+            gtk::glib::idle_add_local_once(move || {
+                queued.set(false);
+                if !guard.get() && restoring.get().is_none() {
+                    on_scroll();
+                }
+            });
+        });
+        let changed = notify.clone();
+        self.scroll
+            .vadjustment()
+            .connect_value_changed(move |_| changed());
+        let changed = notify.clone();
+        self.scroll
+            .vadjustment()
+            .connect_changed(move |_| changed());
+        self.text_view.connect_map(move |_| notify());
+    }
+
+    /// Cursor visible al editar; al desplazar, centro de la vista (incluye wrap).
+    pub fn preview_position(&self, prefer_cursor: bool) -> Option<Position> {
+        if !self.text_view.is_mapped() {
+            return None;
+        }
+        let rect = self.text_view.visible_rect();
+        let cursor = self.buffer.iter_at_mark(&self.buffer.get_insert());
+        let cursor_rect = self.text_view.iter_location(&cursor);
+        let iter = if prefer_cursor
+            && cursor_rect.y() >= rect.y()
+            && cursor_rect.y() < rect.y() + rect.height()
+        {
+            cursor
+        } else {
+            let y = rect.y() + rect.height() / 2;
+            self.text_view
+                .iter_at_location(rect.x() + self.text_view.left_margin(), y)
+                .unwrap_or_else(|| self.text_view.line_at_y(y).0)
+        };
+        Some(Position::new(iter.line() as u32, iter.line_offset() as u32))
+    }
+
     pub fn scroll_to_cursor(&self) {
+        self.pending_scroll.set(None);
         self.text_view
             .scroll_to_mark(&self.buffer.get_insert(), 0.15, false, 0.0, 0.0);
     }
@@ -490,6 +549,9 @@ impl EditorPane {
             root,
             buffer,
             text_view,
+            scroll,
+            scroll_position: RefCell::new(None),
+            pending_scroll: Rc::new(Cell::new(None)),
             tags: tag_handles,
             vis_tags,
             vis_syntax,
@@ -516,8 +578,10 @@ impl EditorPane {
     /// Carga programática: no invoca al [`EditSink`] ni a `on_edited`. El
     /// historial Undo/Redo vive en el modelo y no se toca (§8.5); el cursor se
     /// restaura como posición semántica (§8.6), idéntica en ambos modos
-    /// porque ambos son el mismo buffer.
-    pub fn load(&self, editor: &Editor, mode: EditMode) {
+    /// porque ambos son el mismo buffer. El desplazamiento se conserva por
+    /// pestaña y se restaura después de que GTK recalcule el texto; una
+    /// navegación explícita cancela esa restauración.
+    pub fn load(&self, editor: &Editor, mode: EditMode, scroll_position: &Rc<Cell<f64>>) {
         if let Some(popup) = self.completion.borrow().as_ref() {
             popup.hide();
         }
@@ -525,12 +589,31 @@ impl EditorPane {
         // se cierra y su registro de pestaña queda invalidado (§UI #29).
         self.hide_context();
         let text = editor.document().content();
+        let y = self
+            .pending_scroll
+            .get()
+            .unwrap_or_else(|| self.scroll.vadjustment().value());
+        if let Some(previous) = self.scroll_position.replace(Some(scroll_position.clone())) {
+            previous.set(y);
+        }
+        self.pending_scroll.set(Some(scroll_position.get()));
         self.guard.set(true);
-        self.buffer.set_text(text);
+        let (start, end) = self.buffer.bounds();
+        if self.buffer.text(&start, &end, true).as_str() != text {
+            self.buffer.set_text(text);
+        }
         self.restore_cursor(editor.selection());
         self.reveal.mode.set(mode);
         self.guard.set(false);
         self.refresh(text);
+        let adjustment = self.scroll.vadjustment();
+        let pending = self.pending_scroll.clone();
+        // GTK recalcula las alturas tras set_text; restaurar antes se pierde.
+        gtk::glib::idle_add_local_once(move || {
+            if let Some(y) = pending.take() {
+                adjustment.set_value(y);
+            }
+        });
     }
 
     /// Modo de edición activo del panel (§8).
@@ -689,10 +772,12 @@ impl EditorPane {
     ///
     /// No roba el foco de teclado: el usuario sigue tecleando en la barra.
     pub fn focus_find_match(&self, range: Range) {
+        self.pending_scroll.set(None);
         let from = self.iter_at(range.start);
-        let mut to = self.iter_at(range.end);
+        let to = self.iter_at(range.end);
         self.buffer.select_range(&to, &from);
-        self.text_view.scroll_to_iter(&mut to, 0.2, false, 0.0, 0.0);
+        self.text_view
+            .scroll_to_mark(&self.buffer.get_insert(), 0.2, false, 0.0, 0.0);
     }
 
     /// Reubica las marcas `insert` y `selection_bound` a la selección del

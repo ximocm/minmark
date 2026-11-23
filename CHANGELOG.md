@@ -9,6 +9,18 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 
 ## [Unreleased]
 
+### Corregido
+
+- Preview: separación vertical entre tablas y callouts en ambos órdenes,
+  con el mismo espaciado relativo que ya tiene el PDF.
+- Split: el Preview sigue el desplazamiento y el cursor visible del editor,
+  también al volver desde Editor y al escribir contenido nuevo al final. El
+  seguimiento espera al render actualizado y usa las anclas del documento.
+- Editor: guardar, deshacer, rehacer, aplicar formato y recargar el documento
+  conservan el desplazamiento en Markdown y Visual. Cada pestaña recupera su
+  posición al volver a ella y cerrar otra pestaña no lleva al inicio. Las
+  búsquedas y los enlaces siguen desplazándose a su destino explícito.
+
 ## [0.6.1] — 2026-11-12
 
 ### Añadido
