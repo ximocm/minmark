@@ -9,6 +9,8 @@ El estado del trabajo pendiente se mantiene en GitHub Issues.
 
 ## [Unreleased]
 
+## [0.6.2] — 2026-11-24
+
 ### Corregido
 
 - Preview: separación vertical entre tablas y callouts en ambos órdenes,
